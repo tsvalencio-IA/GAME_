@@ -1,1256 +1,383 @@
-// =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V17 - THE REAL AR EXPERIENCE)
-// AR WAYPOINTS 3D, CAMERA SWITCH INSTANTÂNEO, UI LIMPA E TOUCH FALLBACK
-// =============================================================================
-
-(function() {
-    "use strict";
-
-    // =========================================================================
-    // 1) CAMERA MANAGER OBRIGATÓRIO (FIX DE PERMISSÃO)
-    // =========================================================================
-    const CameraManager = {
-        isSwitching: false,
-        timeoutMs: 5000,
-
-        stopCurrentStream: function() {
-            const video = window.System?.video;
-            if (video && video.srcObject) {
-                const tracks = video.srcObject.getTracks();
-                tracks.forEach(track => {
-                    track.stop();
-                });
-                video.srcObject = null;
-            }
-        },
-
-        safeSwitch: async function(mode) {
-            if (this.isSwitching) return false;
-            this.isSwitching = true;
-            this.stopCurrentStream();
-
-            try {
-                const constraints = {
-                    video: { facingMode: { ideal: mode }, width: { ideal: 1280 }, height: { ideal: 720 } },
-                    audio: false
-                };
-
-                const streamPromise = navigator.mediaDevices.getUserMedia(constraints);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Camera Timeout")), this.timeoutMs));
-                
-                const stream = await Promise.race([streamPromise, timeoutPromise]);
-                
-                const video = window.System?.video;
-                if (!video) {
-                    this.isSwitching = false;
-                    return false;
-                }
-
-                video.srcObject = stream;
-                
-                if (mode === 'environment') {
-                    video.style.transform = "none";
-                } else {
-                    video.style.transform = "scaleX(-1)";
-                }
-
-                const metadataPromise = new Promise((resolve) => {
-                    video.onloadedmetadata = () => resolve();
-                });
-                const metaTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Metadata Timeout")), 3000));
-                
-                await Promise.race([metadataPromise, metaTimeout]);
-
-                try {
-                    await video.play();
-                } catch(playErr) {}
-
-                this.isSwitching = false;
-                window.System.currentCameraMode = mode;
-                return true;
-            } catch (err) {
-                this.isSwitching = false;
-                return false; 
-            }
-        },
-
-        startRearCamera: async function() {
-            return await this.safeSwitch('environment');
-        },
-
-        startFrontCamera: async function() {
-            return await this.safeSwitch('user');
-        }
-    };
-
-    // =========================================================================
-    // 2) FRONT_AR_OFFICE (GESTURE MODULE)
-    // =========================================================================
-    const GestureOffice = {
-        hands: null,
-        isActive: false,
-        cursor: { x: 0, y: 0, active: false },
-        hoverTime: 0,
-        hoveredBtn: null,
-        lastProcessTime: 0,
-        eventCallback: null,
-        
-        buttons: [
-            { id: 'REFUEL', label: 'ABASTECER', x: 0, y: 0, w: 160, h: 60, color: '#f39c12' },
-            { id: 'REPAIR', label: 'REPARAR', x: 0, y: 0, w: 160, h: 60, color: '#e74c3c' },
-            { id: 'UPG_ENGINE', label: 'UPG MOTOR', x: 0, y: 0, w: 160, h: 60, color: '#3498db' },
-            { id: 'UPG_TANK', label: 'UPG TANQUE', x: 0, y: 0, w: 160, h: 60, color: '#9b59b6' },
-            { id: 'UPG_RADAR', label: 'UPG RADAR', x: 0, y: 0, w: 160, h: 60, color: '#00ffff' },
-            { id: 'UPG_TRUCK', label: 'UPG CHASSI', x: 0, y: 0, w: 160, h: 60, color: '#f1c40f' },
-            { id: 'EXIT', label: 'SAIR DA BASE', x: 0, y: 0, w: 260, h: 60, color: '#00ff66' }
-        ],
-
-        init: async function(callback) {
-            this.eventCallback = callback;
-            this.isActive = true;
-            this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false };
-            this.hoverTime = 0;
-            this.hoveredBtn = null;
-
-            if (typeof window.Hands === 'undefined') {
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js");
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js");
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js");
-            }
-
-            if (!this.hands && window.Hands) {
-                this.hands = new window.Hands({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-                });
-                this.hands.setOptions({
-                    maxNumHands: 1,
-                    modelComplexity: 1,
-                    minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
-                });
-                this.hands.onResults(this.onResults.bind(this));
-            }
-        },
-
-        loadScript: function(src) {
-            return new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = src;
-                s.onload = resolve;
-                s.onerror = reject;
-                document.head.appendChild(s);
-            });
-        },
-
-        onResults: function(results) {
-            if (!this.isActive) return;
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const indexFinger = results.multiHandLandmarks[0][8]; 
-                this.cursor.x = (1 - indexFinger.x) * window.innerWidth;
-                this.cursor.y = indexFinger.y * window.innerHeight;
-                this.cursor.active = true;
-            } else {
-                this.cursor.active = false;
-                this.hoverTime = 0;
-            }
-        },
-
-        update: async function(ctx, w, h, dt, gameState) {
-            if (!this.isActive) return;
-
-            const now = Date.now();
-            if (now - this.lastProcessTime > 100 && window.System?.video && window.System.video.readyState === 4) {
-                this.lastProcessTime = now;
-                try { await this.hands.send({image: window.System.video}); } catch(e) {}
-            }
-
-            const cx = w / 2; const cy = h / 2;
-            
-            // Layout responsivo Oficina
-            const gap = 10;
-            const btnW = Math.min(160, (w/2) - 20);
-            this.buttons[0].x = cx - btnW - gap; this.buttons[0].y = cy - 80;  this.buttons[0].w = btnW;
-            this.buttons[1].x = cx + gap;        this.buttons[1].y = cy - 80;  this.buttons[1].w = btnW;
-            this.buttons[2].x = cx - btnW - gap; this.buttons[2].y = cy - 10;  this.buttons[2].w = btnW;
-            this.buttons[3].x = cx + gap;        this.buttons[3].y = cy - 10;  this.buttons[3].w = btnW;
-            this.buttons[4].x = cx - btnW - gap; this.buttons[4].y = cy + 60;  this.buttons[4].w = btnW;
-            this.buttons[5].x = cx + gap;        this.buttons[5].y = cy + 60;  this.buttons[5].w = btnW;
-            this.buttons[6].x = cx - 130;        this.buttons[6].y = cy + 140; this.buttons[6].w = 260;
-
-            ctx.fillStyle = "rgba(0, 15, 30, 0.9)"; ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center";
-            ctx.font = "bold clamp(24px, 6vw, 40px) 'Russo One'";
-            ctx.fillText("OFICINA HOLOGRÁFICA", cx, Math.max(40, cy - 140));
-            
-            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'";
-            ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(70, cy - 110));
-
-            let currentlyHovering = null;
-
-            this.buttons.forEach(btn => {
-                let isHover = false;
-                if (this.cursor.active) {
-                    if (this.cursor.x > btn.x && this.cursor.x < btn.x + btn.w &&
-                        this.cursor.y > btn.y && this.cursor.y < btn.y + btn.h) {
-                        isHover = true;
-                        currentlyHovering = btn.id;
-                    }
-                }
-
-                ctx.fillStyle = isHover ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.6)";
-                ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-                ctx.strokeStyle = btn.color; ctx.lineWidth = isHover ? 4 : 2;
-                ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
-                
-                ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Chakra Petch'"; ctx.textAlign = "center";
-                ctx.fillText(btn.label, btn.x + btn.w/2, btn.y + btn.h/2 + 2);
-                
-                ctx.font = "12px Arial"; ctx.fillStyle = btn.color;
-                let costTxt = "";
-                if(btn.id==='REFUEL') costTxt = `R$ ${Math.floor((gameState.stats.maxFuel - gameState.fuel)*2)}`;
-                if(btn.id==='REPAIR') costTxt = `R$ ${Math.floor((100 - gameState.health)*5)}`;
-                if(btn.id==='UPG_ENGINE') costTxt = gameState.upgrades.engine.lvl < gameState.upgrades.engine.max ? `R$ ${gameState.upgrades.engine.cost}` : 'MÁX';
-                if(btn.id==='UPG_TANK') costTxt = gameState.upgrades.tank.lvl < gameState.upgrades.tank.max ? `R$ ${gameState.upgrades.tank.cost}` : 'MÁX';
-                if(btn.id==='UPG_RADAR') costTxt = gameState.upgrades.radar.lvl < gameState.upgrades.radar.max ? `R$ ${gameState.upgrades.radar.cost}` : 'MÁX';
-                if(btn.id==='UPG_TRUCK') costTxt = gameState.upgrades.truck.lvl < gameState.upgrades.truck.max ? `R$ ${gameState.upgrades.truck.cost}` : 'MÁX';
-                if(costTxt) ctx.fillText(costTxt, btn.x + btn.w/2, btn.y + btn.h - 8);
-            });
-
-            if (currentlyHovering) {
-                if (this.hoveredBtn === currentlyHovering) {
-                    this.hoverTime += dt;
-                    if (this.hoverTime >= 1.0) { // Reduzido para 1 segundo
-                        if (this.eventCallback) this.eventCallback(this.hoveredBtn);
-                        this.hoverTime = 0; 
-                    }
-                } else {
-                    this.hoveredBtn = currentlyHovering;
-                    this.hoverTime = 0;
-                }
-            } else {
-                this.hoveredBtn = null;
-                this.hoverTime = 0;
-            }
-
-            if (this.cursor.active) {
-                ctx.fillStyle = "rgba(0, 255, 255, 0.8)";
-                ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 10, 0, Math.PI*2); ctx.fill();
-                if (this.hoverTime > 0) {
-                    ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    ctx.arc(this.cursor.x, this.cursor.y, 25, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.0)*(Math.PI*2));
-                    ctx.stroke();
-                }
-            } else {
-                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.textAlign = "center";
-                ctx.fillText("MOSTRE A MÃO PARA A CÂMERA OU TOQUE NOS BOTÕES", cx, h - 20);
-            }
-        },
-
-        destroy: function() {
-            this.isActive = false;
-            if (this.hands) {
-                this.hands.onResults(() => {});
-                if (typeof this.hands.close === 'function') {
-                    this.hands.close();
-                }
-            }
-            this.cursor = { x: 0, y: 0, active: false };
-        }
-    };
-
-    // =========================================================================
-    // 3) ARQUITETURA GLOBAL (MÁQUINA DE ESTADOS)
-    // =========================================================================
-    let particles = [];
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ThIAguinho Wii: Console OS</title>
     
-    const Game = {
-        state: 'UNINITIALIZED', 
-        lastTime: 0,
-        timeTotal: 0,
-        score: 0,
-        
-        transitionAlpha: 0,
-        transitionPhase: 0,
-        pendingCamPromise: null, // Novo: Guarda a promessa da câmera
-        
-        vPos: { x: 0, y: 0 },
-        baseHeading: 0,
-        currentHeading: 0,
-        virtualSpeed: 0,
-        targetSpeed: 0,
-        manualAccelerate: false,
-        deviceForce: 0,
-        _deviceOrientationHandler: null,
-        _deviceMotionHandler: null,
-        
-        objectModel: null,
-        detectedItems: [],
-        lastAiTime: 0,
-        aiIntervalMs: 500,
-        aiIntervalId: null,
-        aiProcessing: false,
-        floorColor: { r: 0, g: 0, b: 0 },
-        targetColor: { r: 0, g: 0, b: 0 },
-        activeAnomaly: null,
-        anomalies: [],
-        spawnTimer: 0,
-        
-        isExtracting: false,
-        extractProgress: 0,
-        cooldown: 0,
-        currentEvent: null,
-        eventTimer: 0,
-        _sensorsReady: false,
-        
-        displayMoney: 0,
-        displayFuel: 100,
-        collectGlow: 0,
-        collectZoom: 0,
-        baseFlash: 0,
-
-        currentMission: { type: 'NORMAL', goal: 3, progress: 0, timer: 0, active: false },
-        
-        health: 100,
-        fuel: 100,
-        wear: { motor: 0, wheels: 0 },
-        money: 0,
-        cargo: [],
-        level: 1,
-        xp: 0,
-        
-        stats: { maxFuel: 100, maxCargo: 3, baseSpeed: 20, scanPower: 1.0, radarRange: 150, wearRate: 0.3 },
-        
-        upgrades: {
-            engine: { lvl: 1, max: 5, cost: 1000 },
-            tank:   { lvl: 1, max: 5, cost: 800 },
-            radar:  { lvl: 1, max: 5, cost: 1200 },
-            truck:  { lvl: 1, max: 5, cost: 1500 }
-        },
-
-        colors: { 
-            main: '#00ffff', 
-            danger: '#ff003c', 
-            success: '#00ff66', 
-            warn: '#f1c40f', 
-            panel: 'rgba(0,15,30,0.85)', 
-            rare: '#ff00ff' 
-        },
-
-        init: function() {
-            this.state = 'INIT'; 
-            this.lastTime = performance.now();
-            this.timeTotal = 0;
-            this.score = 0;
-            this.health = 100;
-            this.fuel = this.stats.maxFuel;
-            this.wear = { motor: 0, wheels: 0 };
-            this.displayFuel = this.fuel;
-            this.money = 0;
-            this.displayMoney = 0;
-            this.xp = 0;
-            this.level = 1;
-            this.cargo = [];
-            this.anomalies = [];
-            this.isExtracting = false;
-            this.collectGlow = 0;
-            this.collectZoom = 0;
-            this.baseFlash = 0;
-            particles = [];
-            
-            this.generateMission();
-            this.setupSensors();
-            this.setupInput();
-            this.changeState('BOOT');
-        },
-
-        generateMission: function() {
-            const types = ['COMBO', 'HEAVY LOAD', 'TIMED'];
-            let t = types[Math.floor(Math.random() * types.length)];
-            this.currentMission = {
-                type: t,
-                goal: 3 + Math.floor(Math.random() * 3),
-                progress: 0,
-                timer: t === 'TIMED' ? 90 : 0,
-                active: true
-            };
-        },
-
-        completeMission: function() {
-            this.currentMission.active = false;
-            let bonus = this.currentMission.goal * 1000;
-            this.money += bonus;
-            window.System.msg("OBJETIVO CUMPRIDO! BÔNUS: R$" + bonus);
-            this.baseFlash = 1.0;
-            if (window.Sfx && typeof window.Sfx.epic === 'function') window.Sfx.epic();
-        },
-
-        changeState: function(newState) {
-            if (this.state === newState) return;
-            
-            if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
-            
-            this.state = newState;
-            
-            switch(newState) {
-                case 'BOOT':
-                    this.loadAIModel();
-                    break;
-                case 'CALIBRATION':
-                    window.System.msg("SISTEMAS ONLINE.");
-                    break;
-                case 'PLAY_REAR_AR':
-                    this.startAILoop();
-                    if (!this.currentMission.active) this.generateMission();
-                    break;
-                case 'ENTER_BASE_TRANSITION':
-                    this.stopAILoop();
-                    this.transitionAlpha = 0;
-                    this.transitionPhase = 'FADE_OUT';
-                    this.virtualSpeed = 0;
-                    this.isExtracting = false;
-                    this.manualAccelerate = false;
-                    break;
-                case 'FRONT_AR_OFFICE':
-                    this.virtualSpeed = 0;
-                    this.deliverCargo();
-                    this.baseFlash = 1.0;
-                    GestureOffice.init(this.handleOfficeAction.bind(this));
-                    break;
-                case 'EXIT_BASE_TRANSITION':
-                    this.transitionAlpha = 0;
-                    this.transitionPhase = 'FADE_OUT';
-                    this.manualAccelerate = false;
-                    break;
-                case 'TOW_MODE':
-                    this.isExtracting = false;
-                    window.System.msg("SISTEMAS CRÍTICOS! VOLTANDO À BASE.");
-                    break;
-                case 'GAME_OVER':
-                    if(window.System && typeof window.System.gameOver === 'function') {
-                        window.System.gameOver(this.score, true, this.money);
-                    }
-                    break;
-            }
-        },
-
-        setupSensors: function() {
-            if (!this._deviceOrientationHandler) {
-                this._deviceOrientationHandler = (e) => {
-                    this.currentHeading = e.alpha || 0;
-                };
-            }
-            if (!this._deviceMotionHandler) {
-                this._deviceMotionHandler = (e) => {
-                    if (this.state === 'ENTER_BASE_TRANSITION' || this.state === 'EXIT_BASE_TRANSITION') return;
-                    
-                    let acc = e.acceleration || e.accelerationIncludingGravity;
-                    if (!acc) return;
-                    let mag = Math.sqrt((acc.x||0)*(acc.x||0) + (acc.y||0)*(acc.y||0) + (acc.z||0)*(acc.z||0));
-                    let force = Math.abs(mag - (e.acceleration ? 0 : 9.81));
-                    
-                    if (force > 0.3) {
-                        this.deviceForce = force;
-                        if (force > 15 && this.state === 'PLAY_REAR_AR') {
-                            let impactDmg = force * 0.5;
-                            this.health -= impactDmg;
-                            if(navigator.vibrate) navigator.vibrate(200);
-                            this.spawnParticles(window.innerWidth/2, window.innerHeight/2, 20, this.colors.danger);
-                            window.System.msg("IMPACTO DETECTADO!");
-                            
-                            if (this.health <= 0 && this.state !== 'TOW_MODE') {
-                                this.changeState('TOW_MODE');
-                            }
-                        }
-                    } else {
-                        this.deviceForce = 0;
-                    }
-                };
-            }
-
-            window.removeEventListener('deviceorientation', this._deviceOrientationHandler);
-            window.removeEventListener('devicemotion', this._deviceMotionHandler);
-
-            window.addEventListener('deviceorientation', this._deviceOrientationHandler);
-            window.addEventListener('devicemotion', this._deviceMotionHandler);
-            this._sensorsReady = true;
-        },
-
-        setupInput: function() {
-            const canvas = window.System?.canvas;
-            if (!canvas) return;
-
-            canvas.onpointerdown = (e) => {
-                if (this.state === 'ENTER_BASE_TRANSITION' || this.state === 'EXIT_BASE_TRANSITION') return;
-                
-                const r = canvas.getBoundingClientRect();
-                const x = e.clientX - r.left; const y = e.clientY - r.top;
-                const w = r.width; const h = r.height;
-
-                if (this.state === 'CALIBRATION') {
-                    this.baseHeading = this.currentHeading;
-                    this.vPos = { x: 0, y: 0 }; 
-                    this.changeState('PLAY_REAR_AR');
-                }
-                else if (this.state === 'PLAY_REAR_AR' || this.state === 'TOW_MODE') {
-                    let distToBase = Math.hypot(this.vPos.x, this.vPos.y);
-                    
-                    // BOTÃO DA GARAGEM: Aciona imediatamente a troca de câmera
-                    if (y > 60 && y < 100 && x > w - 120 && x < w - 10) {
-                        if (distToBase < 30) {
-                            // A chamada OBRIGATORIAMENTE deve acontecer direto no evento de click para o browser aceitar
-                            this.pendingCamPromise = CameraManager.startFrontCamera();
-                            this.changeState('ENTER_BASE_TRANSITION');
-                        } else {
-                            window.System.msg("MUITO LONGE DA BASE!");
-                        }
-                        return;
-                    }
-                    
-                    // BOTÃO ACELERAR
-                    const accR = Math.min(45, w * 0.12);
-                    if (x < 30 + accR*2 && y > h - 80 - accR*2) {
-                        this.manualAccelerate = true;
-                    }
-                }
-                else if (this.state === 'FRONT_AR_OFFICE') {
-                    // TOUCH FALLBACK SE A IA DE MÃO FALHAR
-                    GestureOffice.buttons.forEach(btn => {
-                        if (x > btn.x && x < btn.x + btn.w && y > btn.y && y < btn.y + btn.h) {
-                            if (GestureOffice.eventCallback) GestureOffice.eventCallback(btn.id);
-                        }
-                    });
-                }
-            };
-            canvas.onpointerup = () => { this.manualAccelerate = false; };
-        },
-
-        loadAIModel: async function() {
-            const loadTask = new Promise((resolve) => {
-                try {
-                    if (typeof cocoSsd === 'undefined') {
-                        const script = document.createElement('script');
-                        script.src = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd";
-                        script.onload = async () => {
-                            if (typeof cocoSsd !== 'undefined') {
-                                this.objectModel = await cocoSsd.load().catch(() => null);
-                            }
-                            resolve();
-                        };
-                        script.onerror = () => {
-                            this.objectModel = null;
-                            resolve();
-                        };
-                        document.head.appendChild(script);
-                    } else {
-                        cocoSsd.load().then(model => {
-                            this.objectModel = model;
-                            resolve();
-                        }).catch(() => {
-                            this.objectModel = null;
-                            resolve();
-                        });
-                    }
-                } catch (e) {
-                    this.objectModel = null;
-                    resolve();
-                }
-            });
-
-            const timeoutTask = new Promise(resolve => setTimeout(resolve, 5000));
-            
-            await Promise.race([loadTask, timeoutTask]);
-            
-            this.changeState('CALIBRATION');
-        },
-
-        startAILoop: function() {
-            if (this.aiIntervalId !== null) {
-                clearInterval(this.aiIntervalId);
-                this.aiIntervalId = null;
-            }
-            this.aiIntervalId = setInterval(async () => {
-                if (this.aiProcessing) return;
-                if ((this.state === 'PLAY_REAR_AR') && this.objectModel && window.System?.video && window.System.video.readyState === 4) {
-                    this.aiProcessing = true;
-                    try {
-                        const preds = await this.objectModel.detect(window.System.video);
-                        this.detectedItems = preds || [];
-                    } catch(e) {
-                        this.detectedItems = [];
-                    } finally {
-                        this.aiProcessing = false;
-                    }
-                }
-            }, this.aiIntervalMs);
-        },
-        
-        stopAILoop: function() {
-            if (this.aiIntervalId !== null) { 
-                clearInterval(this.aiIntervalId); 
-                this.aiIntervalId = null; 
-            }
-            this.aiProcessing = false;
-        },
-
-        update: function(ctx, w, h, pose) {
-            const now = performance.now();
-            let dt = (now - this.lastTime) / 1000;
-            if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; 
-            this.lastTime = now;
-            this.timeTotal += dt;
-
-            if (isNaN(this.displayMoney)) this.displayMoney = 0;
-            if (isNaN(this.displayFuel)) this.displayFuel = 100;
-            this.displayMoney += (this.money - this.displayMoney) * 10 * dt;
-            this.displayFuel += (this.fuel - this.displayFuel) * 5 * dt;
-
-            let fps = 1 / dt;
-            let newInterval = (fps < 25) ? 1000 : 500;
-            if (this.aiIntervalMs !== newInterval) {
-                this.aiIntervalMs = newInterval;
-                if (this.state === 'PLAY_REAR_AR') {
-                    this.startAILoop();
-                }
-            }
-
-            if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
-                ctx.save();
-                
-                if (this.virtualSpeed > 0.1 && !this.isExtracting) {
-                    let susY = Math.sin(this.timeTotal * this.virtualSpeed * 1.5) * (this.virtualSpeed / this.stats.baseSpeed) * 3;
-                    ctx.translate(0, susY);
-                }
-
-                if (this.collectZoom > 0) {
-                    let z = 1 + (this.collectZoom * 0.03);
-                    ctx.translate(w/2, h/2);
-                    ctx.scale(z, z);
-                    ctx.translate(-w/2, -h/2);
-                    this.collectZoom -= dt * 2;
-                }
-
-                if (window.System?.video && window.System.video.readyState === 4) {
-                    const vW = window.System.video.videoWidth || w;
-                    const vH = window.System.video.videoHeight || h;
-                    const videoRatio = vW / vH;
-                    const canvasRatio = w / h;
-                    let drawW = w, drawH = h, drawX = 0, drawY = 0;
-                    if (videoRatio > canvasRatio) { drawW = h * videoRatio; drawX = (w - drawW) / 2; } 
-                    else { drawH = w / videoRatio; drawY = (h - drawH) / 2; }
-                    ctx.drawImage(window.System.video, drawX, drawY, drawW, drawH);
-                } else {
-                    ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
-                }
-                
-                if (this.baseFlash > 0) {
-                    ctx.fillStyle = `rgba(0, 255, 100, ${this.baseFlash * 0.5})`;
-                    ctx.fillRect(0, 0, w, h);
-                    this.baseFlash -= dt * 1.5;
-                }
-
-                ctx.fillStyle = `rgba(0, 50, 60, ${0.1 + Math.sin(this.timeTotal*2)*0.05})`;
-                ctx.fillRect(0, 0, w, h);
-                
-                ctx.restore();
-            }
-
-            switch (this.state) {
-                case 'BOOT':
-                    this.drawOverlay(ctx, w, h, "INICIALIZANDO", "Carregando Engine Premium...");
-                    break;
-                case 'CALIBRATION':
-                    this.drawOverlay(ctx, w, h, "PONTO ZERO", "Aponte o caminhão para a pista e TOQUE");
-                    break;
-                case 'PLAY_REAR_AR':
-                case 'TOW_MODE':
-                    this.updatePhysics(dt);
-                    this.updateEvents(dt);
-                    this.spawnAnomalies(dt);
-                    this.processAR(ctx, w, h, dt);
-                    this.drawHUD(ctx, w, h);
-                    break;
-                case 'ENTER_BASE_TRANSITION':
-                    this.processTransition(ctx, w, h, dt, 'FRONT_AR_OFFICE');
-                    break;
-                case 'FRONT_AR_OFFICE':
-                    if (window.System?.video && window.System.video.readyState === 4) {
-                        const vW = window.System.video.videoWidth || w;
-                        const vH = window.System.video.videoHeight || h;
-                        const vr = vW / vH;
-                        const cr = w / h;
-                        let dw = w, dh = h, dx = 0, dy = 0;
-                        if (vr > cr) { dw = h * vr; dx = (w - dw) / 2; } else { dh = w / vr; dy = (h - dh) / 2; }
-                        ctx.save();
-                        ctx.translate(w, 0); ctx.scale(-1, 1);
-                        ctx.drawImage(window.System.video, -dx, dy, dw, dh);
-                        ctx.restore();
-                    }
-                    GestureOffice.update(ctx, w, h, dt, this);
-                    break;
-                case 'EXIT_BASE_TRANSITION':
-                    this.processTransition(ctx, w, h, dt, 'PLAY_REAR_AR');
-                    break;
-                case 'GAME_OVER':
-                    this.drawOverlay(ctx, w, h, "FIM DE JOGO", "Calculando pontuação...");
-                    break;
-            }
-
-            this.updateParticles(ctx, dt, w, h);
-            return this.score || 0; 
-        },
-
-        processTransition: function(ctx, w, h, dt, nextState) {
-            if (this.transitionPhase === 'FADE_OUT') {
-                this.transitionAlpha += dt * 3.0; // Fade mais rápido
-                if (this.transitionAlpha >= 1) {
-                    this.transitionAlpha = 1;
-                    this.transitionPhase = 'SWITCH_CAM';
-                    
-                    // Aguarda a promessa que foi disparada no evento de clique!
-                    if (this.pendingCamPromise) {
-                        this.pendingCamPromise.then(() => {
-                            this.transitionPhase = 'FADE_IN';
-                            this.pendingCamPromise = null;
-                        }).catch(() => {
-                            this.transitionPhase = 'FADE_IN';
-                            this.pendingCamPromise = null;
-                        });
-                    } else {
-                        this.transitionPhase = 'FADE_IN';
-                    }
-                }
-            } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
-                ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center";
-                ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
-            } else if (this.transitionPhase === 'FADE_IN') {
-                this.transitionAlpha -= dt * 3.0;
-                if (this.transitionAlpha <= 0) {
-                    this.transitionAlpha = 0;
-                    this.changeState(nextState);
-                }
-            }
-            
-            if (this.transitionPhase !== 'SWITCH_CAM') {
-                ctx.fillStyle = `rgba(0,0,0,${this.transitionAlpha})`;
-                ctx.fillRect(0, 0, w, h);
-            }
-        },
-
-        updatePhysics: function(dt) {
-            if (this.cooldown > 0) this.cooldown -= dt;
-
-            let accelInput = (this.manualAccelerate || this.deviceForce > 0.5) ? (5.0 + this.upgrades.engine.lvl) : 0;
-            let drag = 0.05 * this.virtualSpeed * this.virtualSpeed; 
-            
-            if (accelInput > 0) {
-                let speedRatio = this.virtualSpeed / this.stats.baseSpeed;
-                this.virtualSpeed += accelInput * (1 - speedRatio * speedRatio) * dt * 8;
-            }
-            this.virtualSpeed -= drag * dt;
-            this.virtualSpeed = Math.max(0, Math.min(this.virtualSpeed, this.stats.baseSpeed));
-
-            if (this.state === 'TOW_MODE') {
-                this.virtualSpeed = Math.min(this.virtualSpeed, this.stats.baseSpeed * 0.4);
-                let distToBase = Math.hypot(this.vPos.x, this.vPos.y);
-                if (distToBase < 30) {
-                    this.pendingCamPromise = CameraManager.startFrontCamera();
-                    this.changeState('ENTER_BASE_TRANSITION');
-                    return;
-                }
-            }
-
-            let isMoving = this.virtualSpeed > 0.15;
-
-            if (isMoving) {
-                let speedMod = 1.0;
-                if (this.currentEvent === 'STORM') speedMod *= 0.5; 
-                
-                let currentSpeed = this.virtualSpeed * speedMod;
-                let rad = (this.currentHeading - this.baseHeading) * (Math.PI / 180);
-                this.vPos.x += Math.sin(rad) * currentSpeed * dt;
-                this.vPos.y -= Math.cos(rad) * currentSpeed * dt; 
-
-                let wearMod = 1.0 - ((this.upgrades.truck?.lvl || 1) * 0.05);
-                this.wear.motor = Math.min(100, this.wear.motor + (this.stats.wearRate * wearMod * dt));
-                this.wear.wheels = Math.min(100, this.wear.wheels + (this.stats.wearRate * wearMod * 1.5 * dt));
-
-                let isHeavyLoad = (this.currentMission && this.currentMission.active && this.currentMission.type === 'HEAVY LOAD');
-                let heavyMod = isHeavyLoad ? 2.0 : 1.0;
-
-                let cargoWeight = this.cargo.length;
-                let baseDrain = 0.8 / 60; 
-                let speedDrain = this.virtualSpeed * 0.015;
-                let cargoDrain = cargoWeight * 0.01 * heavyMod;
-                
-                let fuelLoss = (baseDrain + speedDrain + cargoDrain) * dt;
-                this.fuel = Math.max(0, Math.min(this.fuel - fuelLoss, this.stats.maxFuel));
-            } else {
-                this.fuel = Math.max(0, Math.min(this.fuel, this.stats.maxFuel));
-            }
-
-            if (this.fuel <= 0 && this.state !== 'TOW_MODE') {
-                this.fuel = 0; 
-                this.changeState('TOW_MODE');
-            }
-
-            if (this.currentMission && this.currentMission.active && this.currentMission.type === 'TIMED' && this.state !== 'TOW_MODE') {
-                this.currentMission.timer -= dt;
-                if (this.currentMission.timer <= 0) {
-                    this.currentMission.active = false;
-                    window.System.msg("TEMPO DA MISSÃO ESGOTADO!");
-                    if(window.Sfx && typeof window.Sfx.error === 'function') window.Sfx.error();
-                }
-            }
-        },
-
-        updateEvents: function(dt) {
-            if (this.currentEvent) {
-                this.eventTimer -= dt;
-                if (this.eventTimer <= 0) this.currentEvent = null;
-            } else if (Math.random() < (0.01 * dt)) { 
-                this.currentEvent = Math.random() > 0.5 ? 'STORM' : 'GLITCH';
-                this.eventTimer = 10;
-                window.System.msg("EVENTO: " + this.currentEvent);
-            }
-        },
-
-        spawnAnomalies: function(dt) {
-            if (this.state === 'TOW_MODE') return;
-            this.spawnTimer += dt;
-            if (this.anomalies.length < 5 && this.spawnTimer > 2.0) {
-                this.spawnTimer = 0;
-                let isRare = Math.random() < 0.15;
-                let dist = 40 + Math.random() * (100 + this.level * 20); 
-                let ang = Math.random() * Math.PI * 2;
-                
-                this.anomalies.push({
-                    id: Math.random().toString(36),
-                    x: this.vPos.x + Math.cos(ang) * dist,
-                    y: this.vPos.y + Math.sin(ang) * dist,
-                    type: isRare ? 'RARE' : 'NORMAL',
-                    val: isRare ? 5000 : (500 + Math.floor(Math.random()*500)), 
-                    life: isRare ? 25 : 999 
-                });
-            }
-            this.anomalies.forEach(a => { if (a.life < 999) a.life -= dt; });
-            this.anomalies = this.anomalies.filter(a => a.life > 0);
-        },
-
-        getAverageColor: function(ctx, x, y, w, h) {
-            try {
-                if (w <= 0 || h <= 0) return {r:0,g:0,b:0};
-                const data = ctx.getImageData(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h)).data;
-                let r=0, g=0, b=0;
-                for (let i=0; i<data.length; i+=4) { r+=data[i]; g+=data[i+1]; b+=data[i+2]; }
-                let c = data.length/4; 
-                if (c === 0) return {r:0, g:0, b:0};
-                return {r:r/c, g:g/c, b:b/c};
-            } catch(e) { return {r:0,g:0,b:0}; }
-        },
-
-        processAR: function(ctx, w, h, dt) {
-            if (this.state === 'TOW_MODE') {
-                this.isExtracting = false;
-                return; 
-            }
-
-            const cx = w / 2; const cy = h / 2;
-            let nearestDist = 9999;
-            this.activeAnomaly = null;
-            
-            this.anomalies.forEach(ano => {
-                let d = Math.hypot(ano.x - this.vPos.x, ano.y - this.vPos.y);
-                if (d < nearestDist) { nearestDist = d; this.activeAnomaly = ano; }
-            });
-
-            if (this.activeAnomaly && nearestDist < 20 && this.cargo.length < this.stats.maxCargo && this.cooldown <= 0) {
-                
-                this.floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 40);
-                this.targetColor = this.getAverageColor(ctx, cx - 40, cy - 40, 80, 80);
-                
-                let diff = Math.abs(this.floorColor.r - this.targetColor.r) + Math.abs(this.floorColor.g - this.targetColor.g) + Math.abs(this.floorColor.b - this.targetColor.b);
-                let visualFound = (diff > 60);
-
-                const vW = window.System?.video?.videoWidth || w;
-                const vH = window.System?.video?.videoHeight || h;
-                const sX = w / vW;
-                const sY = h / vH;
-                
-                let foundBox = null;
-
-                this.detectedItems.forEach(item => {
-                    if (['person', 'bed', 'sofa'].includes(item.class) || item.score < 0.2) return;
-                    const bW = item.bbox[2]*sX; const bH = item.bbox[3]*sY;
-                    if (bW > w * 0.8) return;
-                    const cX = (item.bbox[0]*sX) + bW/2; const cY = (item.bbox[1]*sY) + bH/2;
-                    if (Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4) {
-                        visualFound = true;
-                        foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: item.class };
-                    }
-                });
-
-                const targetR = Math.min(w, h) * 0.35;
-
-                if (!this.isExtracting) {
-                    ctx.strokeStyle = this.colors.warn; ctx.lineWidth = 3;
-                    ctx.beginPath(); ctx.arc(cx, cy, targetR, 0, Math.PI*2); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(cx - targetR - 20, cy); ctx.lineTo(cx + targetR + 20, cy); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(cx, cy - targetR - 20); ctx.lineTo(cx, cy + targetR + 20); ctx.stroke();
-
-                    if (foundBox) {
-                        ctx.strokeStyle = "rgba(0, 255, 255, 0.8)"; ctx.lineWidth = 3;
-                        ctx.strokeRect(foundBox.x, foundBox.y, foundBox.w, foundBox.h);
-                        ctx.fillStyle = "rgba(0,0,0,0.7)";
-                        ctx.fillRect(foundBox.x, foundBox.y - 25, 100, 25);
-                        ctx.fillStyle = "#0ff"; ctx.textAlign="left"; ctx.font="14px Arial";
-                        ctx.fillText(foundBox.label.toUpperCase(), foundBox.x + 5, foundBox.y - 8);
-                    }
-                }
-
-                if (visualFound && !this.isExtracting) {
-                    this.isExtracting = true;
-                    this.extractProgress = 0;
-                }
-            }
-
-            if (this.isExtracting && this.activeAnomaly) {
-                let actionForce = Math.max(this.virtualSpeed, this.manualAccelerate ? this.stats.baseSpeed : 0);
-                
-                if (actionForce > 1.0) {
-                    this.extractProgress += (actionForce * this.stats.scanPower * dt * 5);
-                    if(window.Gfx && typeof window.Gfx.addShake === 'function') window.Gfx.addShake(1);
-                } else {
-                    this.extractProgress = Math.max(0, this.extractProgress - (15 * dt));
-                }
-
-                ctx.fillStyle = `rgba(255, 0, 60, ${Math.abs(Math.sin(this.timeTotal*10))*0.3})`; ctx.fillRect(0, 0, w, h);
-                
-                const uiY = h - 140;
-                ctx.fillStyle = this.colors.danger; ctx.textAlign = "center";
-                ctx.font = "bold clamp(20px, 5vw, 40px) 'Russo One'";
-                ctx.fillText("TRAVANDO ALVO! ACELERE!", cx, uiY - 15);
-
-                ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY, w*0.8, 20);
-                ctx.fillStyle = this.colors.danger; ctx.fillRect(w*0.1, uiY, (this.extractProgress/100)*(w*0.8), 20);
-                ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY, w*0.8, 20);
-
-                const targetR = Math.min(w, h) * 0.35;
-                ctx.strokeStyle = `rgba(0, 255, 255, ${0.5 + Math.sin(this.timeTotal*20)*0.5})`; ctx.lineWidth = 10;
-                ctx.beginPath(); ctx.moveTo(cx, uiY); ctx.lineTo(cx, cy); ctx.stroke();
-
-                const ringSize = Math.max(20, targetR * (1 - this.extractProgress/150));
-                ctx.save(); ctx.translate(cx, cy); ctx.rotate(this.timeTotal * 5);
-                ctx.strokeStyle = this.colors.danger; ctx.lineWidth = 6; ctx.setLineDash([20, 15]);
-                ctx.beginPath(); ctx.arc(0, 0, ringSize, 0, Math.PI*2); ctx.stroke(); ctx.restore();
-
-                if (this.extractProgress >= 100) {
-                    this.cargo.push(this.activeAnomaly.val);
-                    this.score += this.activeAnomaly.val / 10;
-                    window.System.msg(this.activeAnomaly.type === 'RARE' ? "CARGA RARA COLETADA!" : "COLETADO!");
-                    
-                    if (this.currentMission && this.currentMission.active) {
-                        this.currentMission.progress++;
-                        if (this.currentMission.progress >= this.currentMission.goal) {
-                            this.completeMission();
-                        }
-                    }
-
-                    this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
-                    this.isExtracting = false;
-                    this.cooldown = 2.0; 
-                    
-                    if(window.Gfx && typeof window.Gfx.shakeScreen === 'function') window.Gfx.shakeScreen(20);
-                    if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
-                    this.collectGlow = 1.0;
-                    this.collectZoom = 1.0;
-                    this.spawnParticles(cx, cy, 40, this.colors.main);
-                }
-
-                if (this.activeAnomaly && nearestDist > 30) {
-                    this.isExtracting = false;
-                    window.System.msg("ALVO PERDIDO");
-                }
-            }
-        },
-
-        drawHUD: function(ctx, w, h) {
-            let fuelPct = this.displayFuel / this.stats.maxFuel;
-            let isFull = this.cargo.length >= this.stats.maxCargo;
-            let radHead = (this.currentHeading - this.baseHeading) * (Math.PI / 180);
-            
-            if (this.collectGlow > 0) {
-                ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`;
-                ctx.fillRect(0, 0, w, h);
-                this.collectGlow -= 0.03;
-            }
-
-            // O SEGREDO DO AR: WAYPOINTS HOLOGRÁFICOS 3D
-            const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
-                let dx = worldX - this.vPos.x;
-                let dy = worldY - this.vPos.y;
-                let dist = Math.hypot(dx, dy);
-                
-                let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
-                let fwdAngle = angle + Math.PI/2;
-                fwdAngle = Math.atan2(Math.sin(fwdAngle), Math.cos(fwdAngle)); // -PI to PI
-                
-                let fov = Math.PI / 2.5; 
-                
-                if (Math.abs(fwdAngle) < fov) {
-                    // Está na frente da câmera!
-                    let projX = (w/2) + (fwdAngle / fov) * (w/2);
-                    let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
-                    if (this.isExtracting && !isBase) projY += (Math.random() * 5 - 2.5); // Tremor de captura
-                    
-                    // Desenha o Losango AR
-                    ctx.fillStyle = (this.isExtracting && !isBase) ? this.colors.danger : color;
-                    ctx.beginPath();
-                    ctx.moveTo(projX, projY - 25);
-                    ctx.lineTo(projX + 15, projY);
-                    ctx.lineTo(projX, projY + 25);
-                    ctx.lineTo(projX - 15, projY);
-                    ctx.fill();
-                    
-                    ctx.fillStyle = "#fff";
-                    ctx.font = "bold 14px 'Russo One'";
-                    ctx.textAlign = "center";
-                    ctx.shadowColor = "#000"; ctx.shadowBlur = 4;
-                    ctx.fillText(label, projX, projY - 35);
-                    ctx.font = "bold 12px Arial";
-                    ctx.fillText(Math.floor(dist) + "m", projX, projY + 45);
-                    ctx.shadowBlur = 0;
-                } else {
-                    // Fora da tela: Indicador nas bordas!
-                    let edgeX = fwdAngle > 0 ? w - 20 : 20;
-                    let edgeY = h/2;
-                    ctx.fillStyle = isBase ? this.colors.success : color;
-                    ctx.beginPath();
-                    if (fwdAngle > 0) {
-                        ctx.moveTo(edgeX-15, edgeY - 15); ctx.lineTo(edgeX + 10, edgeY); ctx.lineTo(edgeX-15, edgeY + 15);
-                    } else {
-                        ctx.moveTo(edgeX+15, edgeY - 15); ctx.lineTo(edgeX - 10, edgeY); ctx.lineTo(edgeX+15, edgeY + 15);
-                    }
-                    ctx.fill();
-                    ctx.fillStyle = "#fff"; ctx.font = "bold 12px Arial"; ctx.textAlign = "center";
-                    ctx.fillText(Math.floor(dist) + "m", edgeX + (fwdAngle > 0 ? -25 : 25), edgeY + 5);
-                }
-            };
-
-            // Se a caçamba está cheia, a missão principal é voltar para a base
-            if (isFull || this.state === 'TOW_MODE') {
-                drawARWaypoint(0, 0, "BASE USR", this.colors.success, true);
-            } else {
-                this.anomalies.forEach(a => {
-                    let col = a.type === 'RARE' ? this.colors.rare : this.colors.warn;
-                    let lbl = a.type === 'RARE' ? "RARO" : "SUCATA";
-                    drawARWaypoint(a.x, a.y, lbl, col, false);
-                });
-                ctx.globalAlpha = 0.3;
-                drawARWaypoint(0, 0, "BASE", this.colors.success, true);
-                ctx.globalAlpha = 1.0;
-            }
-
-            // --- HUD SUPERIOR (LIMPO E COMPACTO) ---
-            const topH = 40;
-            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, 0, w, topH);
-            ctx.strokeStyle = this.colors.main; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, topH); ctx.lineTo(w, topH); ctx.stroke();
-
-            ctx.fillStyle = "#fff"; ctx.font = "bold 12px 'Chakra Petch'"; ctx.textAlign = "left";
-            ctx.fillText(`LVL ${this.level} | VIDA: ${Math.floor(this.health)}%`, 10, 25);
-            
-            ctx.save();
-            const fuelW = Math.min(120, w/3);
-            if (fuelPct < 0.2) {
-                let pulse = 1 + Math.abs(Math.sin(this.timeTotal * 10)) * 0.05;
-                ctx.translate(140 + fuelW/2, 16 + 5); ctx.scale(pulse, pulse); ctx.translate(-(140 + fuelW/2), -(16 + 5));
-            }
-            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(140, 16, fuelW, 10);
-            ctx.fillStyle = fuelPct > 0.2 ? this.colors.success : this.colors.danger;
-            ctx.fillRect(140, 16, fuelPct * fuelW, 10);
-            ctx.strokeStyle = "#fff"; ctx.strokeRect(140, 16, fuelW, 10);
-            ctx.restore();
-
-            // --- MENSAGEM CENTRALIZADA E CLARA ---
-            ctx.textAlign = "center";
-            if (isFull) {
-                ctx.fillStyle = (Math.sin(this.timeTotal*5) > 0) ? this.colors.success : "#fff";
-                ctx.font = "bold clamp(16px, 4vw, 24px) 'Russo One'";
-                ctx.fillText("CAÇAMBA CHEIA! SIGA A SETA PARA A BASE!", w/2, topH + 30);
-            } else if (this.currentMission && this.currentMission.active && this.state !== 'TOW_MODE') {
-                ctx.fillStyle = this.colors.warn;
-                ctx.font = "bold clamp(14px, 3.5vw, 18px) 'Chakra Petch'";
-                ctx.fillText(`MISSÃO: ${this.currentMission.type} (${this.currentMission.progress}/${this.currentMission.goal})`, w/2, topH + 25);
-            }
-
-            // --- RADAR E GARAGEM (CANTO DIREITO) ---
-            const rR = Math.min(40, w * 0.1);
-            const rCx = w - rR - 10; const rCy = topH + rR + 10;
-            let radarGradient = ctx.createRadialGradient(rCx, rCy, 0, rCx, rCy, rR);
-            radarGradient.addColorStop(0, "rgba(0, 50, 40, 0.9)"); radarGradient.addColorStop(1, "rgba(0, 10, 20, 0.7)");
-            ctx.fillStyle = radarGradient; ctx.beginPath(); ctx.arc(rCx, rCy, rR, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = this.colors.main; ctx.lineWidth = 2; ctx.stroke();
-
-            const drawBlip = (wX, wY, col, sz) => {
-                let dx = wX - this.vPos.x; let dy = wY - this.vPos.y;
-                let dist = Math.hypot(dx, dy);
-                if (dist < this.stats.radarRange) {
-                    let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2); 
-                    let sD = (dist / this.stats.radarRange) * rR;
-                    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rCx + Math.cos(angle)*sD, rCy + Math.sin(angle)*sD, sz, 0, Math.PI*2); ctx.fill();
-                }
-            };
-            drawBlip(0, 0, this.colors.success, 5);
-            if (!isFull) this.anomalies.forEach(a => drawBlip(a.x, a.y, a.type==='RARE'?this.colors.rare:this.colors.warn, 3));
-            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(rCx, rCy - 5); ctx.lineTo(rCx+4, rCy+4); ctx.lineTo(rCx-4, rCy+4); ctx.fill();
-
-            // Botão da Garagem
-            let distToBase = Math.hypot(this.vPos.x, this.vPos.y);
-            let atBase = distToBase < 30;
-            const btnW = 100; const btnH = 35;
-            ctx.fillStyle = atBase ? this.colors.success : "rgba(100,100,100,0.5)";
-            ctx.fillRect(w - btnW - 10, rCy + rR + 10, btnW, btnH);
-            ctx.strokeStyle = "#fff"; ctx.strokeRect(w - btnW - 10, rCy + rR + 10, btnW, btnH);
-            ctx.fillStyle = "#000"; ctx.textAlign="center"; ctx.font = "bold 12px 'Russo One'"; 
-            ctx.fillText(atBase ? "ENTRAR OFICINA" : "BASE LONGE", w - 10 - btnW/2, rCy + rR + 32);
-
-            // --- PAINEL INFERIOR E ACELERADOR ---
-            const botH = 50; const botY = h - botH;
-            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, botY, w, botH);
-            ctx.strokeStyle = this.colors.main; ctx.beginPath(); ctx.moveTo(0, botY); ctx.lineTo(w, botY); ctx.stroke();
-
-            const accR = Math.min(40, w * 0.12);
-            ctx.fillStyle = this.manualAccelerate ? "rgba(0,255,255,0.6)" : "rgba(0,255,255,0.2)";
-            ctx.beginPath(); ctx.arc(10 + accR, botY - accR - 10, accR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-            ctx.fillStyle = "#fff"; ctx.font = "bold 12px Arial"; ctx.textAlign="center"; ctx.fillText("GAS", 10 + accR, botY - accR - 6);
-
-            ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Chakra Petch'";
-            ctx.fillText(`CARGA: ${this.cargo.length}/${this.stats.maxCargo}`, 20, h - 20);
-            ctx.fillStyle = this.colors.success; ctx.font = "bold 18px 'Russo One'";
-            ctx.fillText(`R$ ${Math.floor(this.displayMoney).toLocaleString()}`, w/2 - 40, h - 18);
-            
-            ctx.textAlign = "right"; ctx.fillStyle = this.colors.main; ctx.font = "bold 14px 'Chakra Petch'";
-            ctx.fillText(`BASE: ${Math.floor(distToBase)}m`, w - 20, h - 20);
-        },
-
-        deliverCargo: function() {
-            if (this.cargo.length > 0) {
-                let total = this.cargo.reduce((a, b) => a + b, 0);
-                let effBonus = Math.floor(total * (this.fuel / this.stats.maxFuel) * 0.3); 
-                total += effBonus;
-
-                if (this.currentMission && this.currentMission.active && this.currentMission.type === 'HEAVY LOAD') {
-                    total = Math.floor(total * 1.5);
-                }
-
-                this.money += total;
-                this.score += total / 10;
-                
-                this.xp += this.cargo.length * 100;
-                if (this.xp >= this.level * 600) {
-                    this.xp = 0; this.level++;
-                    window.System.msg("NÍVEL " + this.level + " ALCANÇADO!");
-                } else {
-                    window.System.msg(`ENTREGA: R$${total}`);
-                }
-                
-                this.cargo = [];
-            }
-        },
-
-        handleOfficeAction: function(actionId) {
-            const buyObj = (cost, callback) => {
-                if (this.money >= cost && cost > 0) { this.money -= cost; callback(); if(window.Sfx && typeof window.Sfx.coin === 'function') window.Sfx.coin(); return true; }
-                if(window.Sfx && typeof window.Sfx.error === 'function') window.Sfx.error(); return false;
-            };
-
-            let fuelCost = Math.floor((this.stats.maxFuel - this.fuel) * 2);
-            let repCost = Math.floor((100 - this.health) * 5);
-
-            if (actionId === 'REFUEL') buyObj(fuelCost, () => this.fuel = this.stats.maxFuel);
-            if (actionId === 'REPAIR') buyObj(repCost, () => { this.health = 100; });
-            
-            if (actionId === 'UPG_ENGINE') {
-                let u = this.upgrades.engine;
-                if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); });
-            }
-            if (actionId === 'UPG_TANK') {
-                let u = this.upgrades.tank;
-                if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); });
-            }
-            if (actionId === 'UPG_RADAR') {
-                let u = this.upgrades.radar;
-                if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); });
-            }
-            if (actionId === 'UPG_TRUCK') {
-                let u = this.upgrades.truck;
-                if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); });
-            }
-
-            if (actionId === 'EXIT') {
-                // Ao clicar em sair (fallback ou gesto), aciona o Switch IMEDIATAMENTE
-                this.pendingCamPromise = CameraManager.startRearCamera();
-                this.changeState('EXIT_BASE_TRANSITION');
-            }
-        },
-
-        applyStats: function() {
-            this.stats.baseSpeed = 20 + (this.upgrades.engine.lvl * 5);
-            this.stats.maxFuel = 100 + (this.upgrades.tank.lvl * 50);
-            this.stats.radarRange = 150 + (this.upgrades.radar.lvl * 50);
-            this.stats.wearRate = Math.max(0.1, 0.3 - (this.upgrades.truck.lvl * 0.05));
-            if (this.fuel > this.stats.maxFuel) this.fuel = this.stats.maxFuel;
-        },
-
-        drawOverlay: function(ctx, w, h, title, sub) {
-            ctx.fillStyle = "rgba(0, 5, 10, 0.95)"; ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = this.colors.main; ctx.textAlign = "center";
-            ctx.font = "bold clamp(30px, 6vw, 60px) 'Russo One'"; ctx.fillText(title, w/2, h/2 - 20);
-            ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.fillText(sub, w/2, h/2 + 30);
-        },
-
-        spawnParticles: function(x, y, count, color) {
-            for(let i=0; i<count; i++) {
-                particles.push({
-                    x: x, y: y,
-                    vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20,
-                    life: 1.0, color: color, size: Math.random()*8+4
-                });
-            }
-        },
-
-        updateParticles: function(ctx, dt, w, h) {
-            ctx.globalCompositeOperation = 'screen';
-            for (let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i];
-                p.x += p.vx * dt * 60; p.y += p.vy * dt * 60;
-                p.life -= dt * 2;
-                if (p.life <= 0) { particles.splice(i, 1); continue; }
-                ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life);
-                ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
-            }
-            ctx.globalAlpha = 1.0; ctx.globalCompositeOperation = 'source-over';
-        },
-
-        cleanup: function() {
-            this.stopAILoop();
-            if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
-            if (this._deviceOrientationHandler) window.removeEventListener('deviceorientation', this._deviceOrientationHandler);
-            if (this._deviceMotionHandler) window.removeEventListener('devicemotion', this._deviceMotionHandler);
+    <!-- Bibliotecas Essenciais -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FIREBASE (App, Auth e Database) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Russo+One&family=Roboto:wght@300;400;500;700&display=swap');
+
+        :root {
+            --wii-bg: #ececec;
+            --wii-blue: #00b0f0;
+            --wii-blue-glow: rgba(0, 176, 240, 0.4);
+            --glass-bg: rgba(255, 255, 255, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.6);
+            --xp-color: #f1c40f;
         }
-    };
 
-    const regLoop = setInterval(() => {
-        if(window.System && window.System.registerGame) {
-            window.System.registerGame('ar_truck_sim', 'AR Ops Premium', '🚀', Game, {
-                camera: 'environment',
-                phases: [
-                    { id: 'f1', name: 'MISSÃO AR GLOBAL', desc: 'Siga as Setas AR para recolher o material.', reqLvl: 1 }
-                ]
-            });
-            clearInterval(regLoop);
+        body { 
+            background: radial-gradient(circle at center, #ffffff 0%, #e4e7eb 100%);
+            margin: 0; overflow: hidden; 
+            font-family: 'Roboto', sans-serif; 
+            user-select: none; touch-action: none;
+            height: 100dvh; width: 100dvw; 
         }
-    }, 100);
 
-})();
+        .crt-overlay {
+            position: fixed; inset: 0; pointer-events: none; z-index: 999;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.02) 50%);
+            background-size: 100% 4px;
+        }
+
+        #webcam { 
+            position: absolute; bottom: clamp(70px, 10vh, 95px); right: clamp(10px, 3vw, 25px); 
+            width: clamp(90px, 20vw, 130px); 
+            border-radius: 12px; border: 3px solid white; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            transform: scaleX(-1); 
+            z-index: 50; opacity: 0; transition: opacity 0.5s ease;
+        }
+
+        #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 10; }
+
+        .wii-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            height: 100%; width: 100%; position: relative; z-index: 20; 
+            padding: clamp(10px, 3vh, 30px) 0; box-sizing: border-box;
+            background: url('data:image/svg+xml;utf8,<svg opacity="0.03" xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="1.5" fill="%23000"/></svg>');
+        }
+
+        /* --- AUTH SCREEN STYLES --- */
+        .auth-box {
+            background: var(--glass-bg); backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border); border-radius: 20px;
+            padding: clamp(20px, 5vh, 40px); width: 90%; max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; gap: 15px; margin: auto;
+        }
+        .wii-input {
+            width: 100%; padding: 12px 15px; border-radius: 30px;
+            border: 2px solid #ddd; font-family: 'Roboto'; font-size: 1rem;
+            outline: none; transition: border-color 0.3s; text-align: center;
+        }
+        .wii-input:focus { border-color: var(--wii-blue); }
+        .auth-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        .auth-btn { flex: 1; text-align: center; }
+
+        /* --- MENU STYLES --- */
+        .wii-header {
+            width: 95%; max-width: 1000px; 
+            display: flex; flex-direction: column; gap: 10px;
+            border-bottom: 2px solid rgba(0,0,0,0.05); 
+            padding-bottom: clamp(5px, 2vh, 15px); margin-bottom: 5px;
+        }
+        
+        .header-top-row {
+            display: flex; justify-content: space-between; align-items: center; width: 100%;
+        }
+
+        .wii-title { 
+            font-family: 'Russo One', sans-serif; font-weight: 400; color: #444; 
+            font-size: clamp(1.2rem, 4vw, 1.8rem); letter-spacing: 1px; 
+            text-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        }
+        .wii-title span { color: var(--wii-blue); }
+
+        .net-info {
+            font-size: clamp(0.6rem, 2vw, 0.85rem); color: #888; 
+            font-family: 'Chakra Petch', sans-serif; font-weight: bold;
+        }
+
+        .player-profile {
+            display: flex; align-items: center; justify-content: center; gap: clamp(8px, 2vw, 15px);
+            background: var(--glass-bg); backdrop-filter: blur(10px);
+            padding: clamp(6px, 1.5vh, 8px) clamp(10px, 3vw, 20px); 
+            border-radius: 30px; border: 1px solid var(--glass-border);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05); width: fit-content; align-self: center;
+        }
+        .level-badge {
+            background: var(--wii-blue); color: white; font-family: 'Russo One';
+            width: clamp(30px, 8vw, 40px); height: clamp(30px, 8vw, 40px); 
+            border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+            font-size: clamp(0.9rem, 2.5vw, 1.2rem);
+            box-shadow: 0 4px 10px var(--wii-blue-glow); border: 2px solid #fff;
+        }
+        .xp-container { display: flex; flex-direction: column; width: clamp(80px, 25vw, 120px); }
+        .xp-text { font-size: clamp(0.55rem, 1.5vw, 0.7rem); font-weight: bold; color: #888; display: flex; justify-content: space-between; }
+        .xp-bar-bg { width: 100%; height: clamp(6px, 1.5vh, 8px); background: #ddd; border-radius: 4px; overflow: hidden; margin-top: 3px; }
+        .xp-bar-fill { height: 100%; background: var(--xp-color); width: 0%; transition: width 0.5s ease-out; }
+        .coin-box { 
+            display: flex; align-items: center; gap: 5px; font-family: 'Russo One'; 
+            color: #f39c12; font-size: clamp(0.9rem, 2.5vw, 1.2rem); 
+            margin-left: clamp(5px, 1vw, 10px); border-left: 1px solid #ddd; padding-left: clamp(5px, 2vw, 15px); 
+        }
+
+        .channel-grid { 
+            display: grid; grid-template-columns: repeat(2, 1fr); 
+            gap: clamp(10px, 3vw, 20px); width: 95%; max-width: 900px; 
+            padding: 5px; overflow-y: auto; flex-grow: 1; align-content: center;
+        }
+        @media (min-width: 768px) { 
+            .channel-grid { grid-template-columns: repeat(4, 1fr); gap: 25px; } 
+            .wii-header { flex-direction: row; align-items: center; }
+            .player-profile { align-self: auto; }
+        }
+
+        .channel {
+            background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%); 
+            aspect-ratio: 16/11; min-height: 90px;
+            border-radius: clamp(12px, 3vw, 20px); border: 2px solid #fff;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.06), inset 0 -4px 10px rgba(0,0,0,0.02); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer; position: relative; overflow: hidden; transition: all 0.2s ease;
+        }
+        .channel::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 40%; background: linear-gradient(to bottom, rgba(255,255,255,0.8), rgba(255,255,255,0)); border-radius: 18px 18px 0 0; pointer-events: none; }
+        .channel:active { transform: scale(0.95); }
+        .channel:hover { transform: scale(1.05) translateY(-2px); border-color: var(--wii-blue); box-shadow: 0 10px 20px var(--wii-blue-glow); z-index: 10; }
+        
+        .channel-icon { font-size: clamp(2rem, 8vw, 3.5rem); margin-bottom: 5px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); transition: transform 0.3s; }
+        .channel:hover .channel-icon { transform: scale(1.15); }
+        .channel-title { 
+            font-family: 'Chakra Petch', sans-serif; font-size: clamp(0.65rem, 2vw, 0.9rem); 
+            color: #555; font-weight: 700; text-transform: uppercase; 
+            background: rgba(255,255,255,0.8); padding: 2px 8px; border-radius: 8px; text-align: center;
+        }
+
+        #phase-screen { background: radial-gradient(circle at center, #2c3e50 0%, #000000 100%); }
+        .mission-grid { display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 600px; margin: auto; overflow-y: auto; max-height: 60vh; padding: 10px; }
+        .mission-card {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
+            padding: clamp(10px, 3vw, 20px); display: flex; align-items: center; justify-content: space-between;
+            color: white; cursor: pointer; transition: all 0.2s ease; backdrop-filter: blur(5px);
+        }
+        .mission-card:hover:not(.locked) { background: rgba(0, 176, 240, 0.4); transform: scale(1.02); border-color: #00b0f0; }
+        .mission-card:active:not(.locked) { transform: scale(0.98); }
+        .mission-card.locked { opacity: 0.5; filter: grayscale(100%); pointer-events: none; }
+        .mission-info h2 { font-family: 'Russo One'; font-size: clamp(1rem, 3.5vw, 1.5rem); margin: 0; color: #f1c40f; text-transform: uppercase; }
+        .mission-info p { font-family: 'Chakra Petch'; margin: 2px 0 0 0; font-size: clamp(0.7rem, 2vw, 0.9rem); color: #ccc; }
+        .mission-icon { font-size: clamp(1.5rem, 5vw, 2.5rem); }
+
+        .wii-footer { 
+            width: 95%; max-width: 700px; height: clamp(50px, 8vh, 70px); 
+            background: var(--glass-bg); backdrop-filter: blur(10px); 
+            border: 1px solid var(--glass-border); border-radius: 35px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 0 clamp(10px, 3vw, 20px); margin-bottom: clamp(15px, 4vh, 20px); 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05); flex-shrink: 0;
+        }
+        .wii-oval-btn { 
+            background: linear-gradient(180deg, #ffffff 0%, #e0e5ec 100%); border: 2px solid #fff; 
+            padding: clamp(6px, 2vh, 12px) clamp(12px, 4vw, 35px); border-radius: 25px; 
+            font-weight: 700; color: #555; cursor: pointer; text-transform: uppercase; 
+            font-size: clamp(0.7rem, 2vw, 1rem); box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.2s; 
+        }
+        .wii-oval-btn:hover { background: #fff; transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,176,240,0.2); color: var(--wii-blue); }
+        .wii-oval-btn:active { transform: translateY(2px); box-shadow: none; }
+        .clock { font-size: clamp(1rem, 4vw, 1.6rem); color: #777; font-weight: 400; font-family: 'Chakra Petch', sans-serif; }
+
+        /* --- ADMIN SCREEN --- */
+        #admin-screen { background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); overflow-y: auto; }
+        .admin-header { width: 90%; max-width: 800px; display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 2px solid rgba(255,255,255,0.1); margin-bottom: 20px; }
+        .admin-title { font-family: 'Russo One'; color: white; font-size: 2rem; }
+        .admin-user-list { width: 90%; max-width: 800px; display: flex; flex-direction: column; gap: 15px; padding-bottom: 30px; }
+        .admin-user-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; gap: 10px; color: white; }
+        .admin-user-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+        .admin-user-name { font-family: 'Russo One'; font-size: 1.2rem; color: #00b0f0; text-transform: uppercase; }
+        .admin-user-stats { font-family: 'Chakra Petch'; font-size: 0.9rem; color: #aaa; }
+        .admin-toggles { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .admin-toggle-btn { 
+            background: rgba(0,0,0,0.3); border: 1px solid #555; border-radius: 20px; 
+            padding: 5px 15px; font-family: 'Roboto'; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; color: #ccc;
+        }
+        .admin-toggle-btn.active { background: #2ecc71; border-color: #27ae60; color: white; font-weight: bold; }
+
+        #loading { background: radial-gradient(circle at center, #ffffff 0%, #d1d8e0 100%); z-index: 1000; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; transition: opacity 0.4s ease; }
+        .hidden { display: none !important; opacity: 0; pointer-events: none; }
+        .spinner-wii { width: clamp(40px, 10vw, 60px); height: clamp(40px, 10vw, 60px); border: 5px solid #e0e0e0; border-top: 5px solid var(--wii-blue); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #game-ui { pointer-events: none; } #game-ui > * { pointer-events: auto; }
+        .hud-score-box { 
+            position: fixed; top: clamp(10px, 3vh, 25px); left: clamp(10px, 3vw, 25px); 
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(8px); 
+            padding: clamp(4px, 1vh, 10px) clamp(12px, 4vw, 30px); border-radius: 30px; 
+            border: 1px solid rgba(255,255,255,0.3); display: flex; align-items: center; gap: 10px; 
+        }
+        #hud-score { color: #f1c40f; font-family: 'Russo One'; font-size: clamp(1.5rem, 5vw, 2.5rem); }
+        
+        #game-msg { position: fixed; top: 35%; left: 50%; transform: translate(-50%, -50%); font-family: 'Russo One'; font-size: clamp(2rem, 10vw, 70px); color: #fff; text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,176,240,0.8); width: 100%; text-align: center; pointer-events: none; }
+        
+        .home-btn { 
+            position: fixed; top: clamp(10px, 3vh, 25px); right: clamp(10px, 3vw, 25px); 
+            width: clamp(45px, 12vw, 65px); height: clamp(45px, 12vw, 65px); 
+            background: radial-gradient(circle at top left, #ffffff, #e0e0e0); border-radius: 50%; border: 3px solid #fff; 
+            display: flex; align-items: center; justify-content: center; font-size: clamp(1.2rem, 4vw, 2rem); 
+            cursor: pointer; z-index: 100; box-shadow: 0 5px 15px rgba(0,0,0,0.3); color: var(--wii-blue);
+        }
+
+        #screen-over { background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(0, 0, 0, 0.98) 100%); }
+        .results-container { 
+            background: rgba(255,255,255,0.05); padding: clamp(20px, 5vh, 40px) clamp(20px, 5vw, 60px); 
+            border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); text-align: center; 
+            display: flex; flex-direction: column; align-items: center; width: 90%; max-width: 500px;
+        }
+        .rank-stamp { font-family: 'Russo One'; font-size: clamp(5rem, 20vw, 8rem); margin: -10px 0 5px 0; text-shadow: 0 0 30px currentColor; transform: scale(5); opacity: 0; transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .rank-stamp.show { transform: scale(1) rotate(-10deg); opacity: 1; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(10px, 2vw, 20px); width: 100%; margin-top: 15px; }
+        .stat-box { background: rgba(0,0,0,0.3); padding: clamp(8px, 2vh, 15px); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        .stat-title { color: #a4b0be; font-size: clamp(0.65rem, 2vw, 0.9rem); text-transform: uppercase; }
+        .stat-val { font-family: 'Russo One'; font-size: clamp(1.2rem, 5vw, 2rem); color: white; }
+
+        .signature-badge { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); font-family: 'Chakra Petch', sans-serif; font-size: 0.65rem; color: #888; letter-spacing: 1px; text-transform: uppercase; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+        .signature-badge span { color: var(--wii-blue); font-weight: 700; }
+    </style>
+</head>
+<body>
+
+    <video id="webcam" autoplay playsinline muted></video>
+    <div class="crt-overlay"></div>
+    <canvas id="game-canvas"></canvas>
+
+    <div id="loading">
+        <div class="spinner-wii"></div>
+        <h1 class="mt-4 text-xl md:text-3xl text-gray-700 font-['Russo_One'] tracking-wider">ThIAguinho <span style="color: #00b0f0">OS</span></h1>
+        <p id="loading-text" class="mt-2 text-gray-500 font-bold tracking-widest text-xs md:text-sm uppercase">INICIANDO SISTEMA...</p>
+    </div>
+
+    <!-- TELA DE LOGIN / REGISTRO -->
+    <div id="auth-screen" class="wii-container hidden" style="justify-content: center;">
+        <div class="wii-title" style="margin-bottom: 20px;">ThIAguinho <span>Wii</span></div>
+        <div class="auth-box">
+            <h2 style="text-align: center; font-family: 'Russo One'; color: #444; font-size: 1.2rem;">IDENTIFICAÇÃO</h2>
+            <input type="text" id="auth-user" class="wii-input" placeholder="Seu Nome (Ex: joaozinho)" autocomplete="username">
+            <input type="password" id="auth-pass" class="wii-input" placeholder="Senha secreta" autocomplete="current-password">
+            <div class="auth-buttons">
+                <button class="wii-oval-btn auth-btn" onclick="window.Auth.login()">ENTRAR</button>
+                <button class="wii-oval-btn auth-btn" style="background: #2ecc71; color: white; border-color: #27ae60;" onclick="window.Auth.register()">CRIAR</button>
+            </div>
+            <p id="auth-error" style="color: #e74c3c; font-size: 0.8rem; text-align: center; margin-top: 5px; display: none;"></p>
+        </div>
+        <div class="signature-badge">Powered by <span>thIAguinho Soluções</span></div>
+    </div>
+
+    <!-- MENU PRINCIPAL -->
+    <div id="menu-screen" class="wii-container hidden">
+        <div class="wii-header">
+            <div class="header-top-row">
+                <div class="wii-title">ThIAguinho <span>Wii</span></div>
+                <div class="net-info">REDE: <span id="net-status" style="color: #999;">OFFLINE</span></div>
+            </div>
+            <div class="player-profile">
+                <div class="level-badge" id="ui-level">1</div>
+                <div class="xp-container">
+                    <div class="xp-text"><span id="ui-username">Jogador</span> <span id="ui-xp-text">0/1000</span></div>
+                    <div class="xp-bar-bg"><div class="xp-bar-fill" id="ui-xp-bar"></div></div>
+                </div>
+                <div class="coin-box">🪙 <span id="ui-coins">0</span></div>
+            </div>
+        </div>
+
+        <div class="channel-grid" id="channel-grid"></div>
+
+        <div class="wii-footer">
+            <div class="wii-oval-btn" onclick="window.Auth.logout()">Sair</div>
+            <div class="clock" id="clock">12:00</div>
+            <!-- Botão Admin, gerado via JS se for admin -->
+            <div id="admin-btn-container"></div>
+        </div>
+        
+        <div class="signature-badge">Powered by <span>thIAguinho Soluções</span></div>
+    </div>
+
+    <!-- PAINEL ADMIN -->
+    <div id="admin-screen" class="wii-container hidden" style="justify-content: flex-start;">
+        <div class="admin-header">
+            <div class="admin-title">PAINEL DO GESTOR</div>
+            <button class="wii-oval-btn" onclick="document.getElementById('admin-screen').classList.add('hidden'); document.getElementById('menu-screen').classList.remove('hidden');">VOLTAR</button>
+        </div>
+        <div class="admin-user-list" id="admin-user-list">
+            <!-- Usuários renderizados pelo admin.js -->
+        </div>
+    </div>
+
+    <!-- MODO CARREIRA (TELA DE FASES) -->
+    <div id="phase-screen" class="wii-container hidden" style="justify-content: center;">
+        <h1 id="phase-title" style="font-family: 'Russo One'; font-size: clamp(2rem, 8vw, 3.5rem); color: #fff; margin-bottom: clamp(15px, 4vh, 40px); text-shadow: 0 0 15px rgba(0,176,240,0.8); text-align: center;">KART LEGENDS</h1>
+        <div class="mission-grid" id="phase-grid"></div>
+        <button class="wii-oval-btn" onclick="document.getElementById('phase-screen').classList.add('hidden'); document.getElementById('menu-screen').classList.remove('hidden');" style="margin-top: clamp(20px, 5vh, 40px);">VOLTAR AO MENU</button>
+    </div>
+
+    <!-- HUD DO JOGO -->
+    <div id="game-ui" class="hidden">
+        <div class="hud-score-box">
+            <span style="color: #fff; font-size: clamp(0.7rem, 2vw, 1rem); font-weight: 800; letter-spacing: 1px;">SCORE</span>
+            <span id="hud-score">0</span>
+        </div>
+        <div id="game-msg"></div>
+        <button class="home-btn" onclick="window.System.home()">🏠</button>
+    </div>
+
+    <!-- TELA DE RESULTADOS -->
+    <div id="screen-over" class="wii-container hidden" style="justify-content: center;">
+        <h1 style="font-family: 'Russo One'; font-size: clamp(2rem, 6vw, 3rem); color: #fff; margin-bottom: 15px; letter-spacing: 2px; text-align: center;" id="result-header">MISSÃO CONCLUÍDA!</h1>
+        
+        <div class="results-container">
+            <p style="color: #ccc; font-weight: bold; margin-bottom: 5px; font-size: clamp(0.7rem, 2vw, 1rem); letter-spacing: 2px;">RANKING</p>
+            <div class="rank-stamp" id="result-rank">S</div>
+            
+            <div class="stats-grid">
+                <div class="stat-box"><div class="stat-title">Pontos</div><div class="stat-val" id="result-score">0</div></div>
+                <div class="stat-box"><div class="stat-title">Objetivo</div><div class="stat-val" style="color: #3498db" id="result-status">VITÓRIA</div></div>
+                <div class="stat-box"><div class="stat-title">XP Ganho</div><div class="stat-val" style="color: var(--xp-color);" id="result-xp">+0</div></div>
+                <div class="stat-box"><div class="stat-title">Moedas</div><div class="stat-val" style="color: #2ecc71" id="result-coins">+0</div></div>
+            </div>
+        </div>
+        
+        <button class="wii-oval-btn" onclick="window.System.home()" style="margin-top: clamp(20px, 5vh, 40px); font-size: clamp(1rem, 3vw, 1.4rem);">CONTINUAR</button>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk", authDomain: "thiaguinhowii.firebaseapp.com",
+            databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com", projectId: "thiaguinhowii",
+            storageBucket: "thiaguinhowii.firebasestorage.app", messagingSenderId: "63695043126", appId: "1:63695043126:web:abd6a8ba7792313991b697"
+        };
+        try {
+            if (typeof firebase !== 'undefined') {
+                firebase.initializeApp(firebaseConfig); 
+                window.DB = firebase.database();
+                window.AuthApp = firebase.auth();
+                const statusEl = document.getElementById('net-status');
+                if(statusEl) { statusEl.innerHTML = "ONLINE 🟢"; statusEl.style.color = "#2ecc71"; }
+            }
+        } catch (e) {
+            console.error("Firebase Init Error", e);
+        }
+    </script>
+
+    <!-- CARREGANDO O CORE, ADMIN E OS JOGOS MODULARMENTE -->
+    <script src="js/core.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/game_kart.js"></script>
+    <script src="js/game_run.js"></script>
+    <script src="js/game_box.js"></script>
+    <script src="js/game_tennis.js"></script>
+    <script src="js/game_ar.js"></script>
+
+    <script>setInterval(() => { const now = new Date(); const el = document.getElementById('clock'); if(el) el.innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }, 1000);</script>
+</body>
+</html>
