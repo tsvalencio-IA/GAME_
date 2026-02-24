@@ -46,8 +46,9 @@ window.Admin = {
 
         for (let uid in users) {
             const u = users[uid];
-            // Se for o admin, não o listamos para ele não se excluir acidentalmente
-            if (u.role === 'admin') continue;
+            
+            // TRAVA DE SEGURANÇA REMOVIDA: Agora o Admin aparece na lista normalmente!
+            // if (u.role === 'admin') continue; 
 
             const card = document.createElement('div');
             card.className = 'admin-user-card';
@@ -57,7 +58,7 @@ window.Admin = {
             const statusClass = isOnline ? 'status-online' : 'status-offline';
             const statusTitle = isOnline ? 'Online Agora' : 'Offline';
 
-            // HTML dos Upgrades (Como ele gastou o dinheiro no Caminhão AR)
+            // HTML dos Upgrades (Como ele gastou o dinheiro no Caminhão AR/Kart)
             let upgradesHTML = '';
             if (u.arSave && u.arSave.upgrades) {
                 const upg = u.arSave.upgrades;
@@ -87,11 +88,19 @@ window.Admin = {
                 `;
             });
 
+            // Botão de Excluir dinâmico (Protege o Admin de se auto-deletar)
+            let deleteBtnHTML = '';
+            if (u.role === 'admin') {
+                deleteBtnHTML = `<button class="admin-btn-action btn-delete" style="opacity: 0.5; cursor: not-allowed;" onclick="alert('Sistema: Você não pode excluir a própria conta de Super Gestor!')">🛡️ ADMINISTRAÇÃO</button>`;
+            } else {
+                deleteBtnHTML = `<button class="admin-btn-action btn-delete" onclick="window.Admin.deleteUser('${uid}', '${u.username}')">🗑️ EXCLUIR PILOTO</button>`;
+            }
+
             card.innerHTML = `
                 <div class="admin-user-header">
                     <div class="admin-user-name" style="display: flex; align-items: center;">
                         <span class="status-dot ${statusClass}" title="${statusTitle}"></span>
-                        ${u.username}
+                        ${u.username} ${u.role === 'admin' ? '<span style="color:#f1c40f; font-size:12px; margin-left:10px;">(GESTOR)</span>' : ''}
                     </div>
                 </div>
                 
@@ -117,7 +126,7 @@ window.Admin = {
 
                 <div class="admin-actions">
                     <button class="admin-btn-action btn-gift" onclick="window.Admin.giftCoins('${uid}', '${u.username}')">🎁 DAR DINHEIRO (R$)</button>
-                    <button class="admin-btn-action btn-delete" onclick="window.Admin.deleteUser('${uid}', '${u.username}')">🗑️ EXCLUIR PILOTO</button>
+                    ${deleteBtnHTML}
                 </div>
             `;
 
