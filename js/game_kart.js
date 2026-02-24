@@ -1,7 +1,7 @@
 // =============================================================================
-// KART LEGENDS: TITANIUM MASTER FINAL V16 (ULTIMATE COMBAT & HOMING SHELLS)
+// KART LEGENDS: TITANIUM MASTER FINAL V17 (ULTIMATE COMBAT, GARAGE & CUSTOM KARTS)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. ITENS COLOSSAIS, HITBOX FACILITADA E CASCOS TELEGUIADOS.
+// STATUS: 100% COMPLETO. ITENS COLOSSAIS, HITBOX FACILITADA, CASCOS E OFICINA GLOBAL.
 // =============================================================================
 
 (function() {
@@ -111,9 +111,21 @@
         currentFase: null, matchCoins: 0,
         item: null, itemCooldown: 0, projectiles: [],
 
+        // --- SISTEMA DE KART PERSONALIZADO E GARAGEM ---
+        useCustomKart: false, kartUpgrades: {}, shopHitboxes: [],
+
         init: function(faseData) { 
             this.cleanup(); this.state = 'MODE_SELECT'; this.setupUI(); this.resetPhysics(); KartAudio.init(); 
             this.currentFase = faseData || { id: 'arcade', mode: 'RACE', targetRank: 3, trackId: 0, diff: 'MEDIUM' }; 
+
+            // Carrega a Oficina do Kart do Banco de Dados Global do Jogador
+            if (window.Profile) {
+                if (!window.Profile.kartSave) window.Profile.kartSave = { upgrades: { engine: 1, tires: 1, chassis: 1 } };
+                this.kartUpgrades = window.Profile.kartSave.upgrades || { engine: 1, tires: 1, chassis: 1 };
+            } else {
+                this.kartUpgrades = { engine: 1, tires: 1, chassis: 1 };
+            }
+            this.useCustomKart = false;
         },
 
         cleanup: function() {
@@ -148,7 +160,10 @@
             document.getElementById('game-ui').appendChild(nitroBtn); document.getElementById('game-ui').appendChild(resetBtn);
 
             window.System.canvas.onclick = (e) => {
-                const rect = window.System.canvas.getBoundingClientRect(); const y = (e.clientY - rect.top) / rect.height;
+                const rect = window.System.canvas.getBoundingClientRect(); 
+                const y = (e.clientY - rect.top) / rect.height;
+                const x = (e.clientX - rect.left) / rect.width;
+
                 KartAudio.init(); if(KartAudio.ctx && KartAudio.ctx.state === 'suspended') KartAudio.ctx.resume();
 
                 if (this.state === 'MODE_SELECT') { 
@@ -166,8 +181,12 @@
                             } else { this.toggleReady(); }
                         } else { this.startRace(this.currentFase.trackId !== undefined ? this.currentFase.trackId : this.selectedTrack); }
                     } 
-                    else if (y < 0.35) { this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; window.Sfx.hover(); if(this.isOnline) this.syncLobby(); } 
-                    else if (y > 0.35 && y < 0.6) { 
+                    else if (y < 0.35) { 
+                        this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; 
+                        window.Sfx.hover(); 
+                        if(this.isOnline) this.syncLobby(); 
+                    } 
+                    else if (y >= 0.35 && y < 0.50) { 
                         if (this.currentFase.id === 'arcade') {
                             if(!this.isOnline || this.isHost) { 
                                 this.selectedTrack = (this.selectedTrack + 1) % TRACKS.length; 
@@ -176,6 +195,44 @@
                             }
                         } else {
                             window.Sfx.error(); this.pushMsg("PISTA FIXA NA MISSÃO!", "#f00", 25);
+                        }
+                    }
+                    else if (y >= 0.50 && y < 0.62) {
+                        this.useCustomKart = !this.useCustomKart;
+                        window.Sfx.hover();
+                    }
+                    else if (y >= 0.62 && y < 0.78) {
+                        this.state = 'KART_SHOP';
+                        window.Sfx.click();
+                    }
+                }
+                else if (this.state === 'KART_SHOP') {
+                    if (this.shopHitboxes) {
+                        const cw = window.System.canvas.width; const ch = window.System.canvas.height;
+                        const clickX = x * cw; const clickY = y * ch;
+                        let clicked = this.shopHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
+                        if (clicked) {
+                            if (clicked.action === 'back') {
+                                this.state = 'LOBBY';
+                                window.Sfx.click();
+                            } else if (clicked.action === 'buy') {
+                                let type = clicked.type; let cost = clicked.cost; let targetLvl = clicked.targetLvl;
+                                let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
+                                if (wallet >= cost) {
+                                    if (window.Profile) { window.Profile.coins -= cost; }
+                                    this.kartUpgrades[type] = targetLvl;
+                                    if (window.Profile) {
+                                        if (!window.Profile.kartSave) window.Profile.kartSave = {};
+                                        window.Profile.kartSave.upgrades = this.kartUpgrades;
+                                        if (window.Profile.save) window.Profile.save();
+                                    }
+                                    window.Sfx.coin();
+                                    window.System.msg("UPGRADE ADQUIRIDO!");
+                                } else {
+                                    window.Sfx.error();
+                                    window.System.msg("SEM SALDO SUFICIENTE!");
+                                }
+                            }
                         }
                     }
                 } 
@@ -231,7 +288,7 @@
 
             this.roomRef.child('raceState').on('value', (snap) => {
                 const globalState = snap.val(); this.raceState = globalState; 
-                if(globalState === 'RACING' && (this.state === 'LOBBY' || this.state === 'WAITING')) { this.roomRef.child('trackId').once('value').then(tSnap => { this.startRace(tSnap.val() || 0); }); }
+                if(globalState === 'RACING' && (this.state === 'LOBBY' || this.state === 'WAITING' || this.state === 'KART_SHOP')) { this.roomRef.child('trackId').once('value').then(tSnap => { this.startRace(tSnap.val() || 0); }); }
                 if(globalState === 'GAMEOVER' && (this.state === 'RACE' || this.state === 'SPECTATE')) { this.state = 'GAMEOVER'; window.Sfx.play(1000, 'sine', 1, 0.5); }
                 if(globalState === 'LOBBY' && (this.state === 'GAMEOVER' || this.state === 'RACE')) { this.state = 'LOBBY'; this.resetPhysics(); window.System.msg("SALA REINICIADA"); }
             });
@@ -284,6 +341,7 @@
         update: function(ctx, w, h, pose) {
             if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
             if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
+            if (this.state === 'KART_SHOP') { this.renderShop(ctx, w, h); return; }
             if (this.state === 'GAMEOVER') { return Math.floor(this.score); }
             
             this.updatePhysics(w, h, pose);
@@ -336,7 +394,21 @@
         },
 
         updatePhysics: function(w, h, pose) {
-            const d = Logic; const char = CHARACTERS[this.selectedChar]; const canControl = (d.status === 'RACING');
+            const d = Logic; 
+            
+            // CLONA E APLICA UPGRADES SE O "MEU KART" ESTIVER ATIVO
+            let baseChar = CHARACTERS[this.selectedChar];
+            let char = { ...baseChar };
+            
+            if (this.useCustomKart) {
+                const upg = this.kartUpgrades || { engine: 1, tires: 1, chassis: 1 };
+                char.speedInfo += (upg.engine - 1) * 0.15; // Motor aumenta Max Speed
+                char.accel += (upg.engine - 1) * 0.015;    // Motor aumenta Aceleração
+                char.turnInfo += (upg.tires - 1) * 0.15;   // Pneus aumentam Curva
+                char.weight += (upg.chassis - 1) * 0.4;    // Chassi aumenta Peso e defesa
+            }
+
+            const canControl = (d.status === 'RACING');
             let detected = false; let itemTriggered = false;
 
             if (d.status === 'FINISHED') {
@@ -377,7 +449,19 @@
             const carScaleGlobal = w * 0.0022;
             const partY = (h * 0.80) + (15 * carScaleGlobal) + 5; 
             
-            if (absX > 1.45) { currentGrip = PHYSICS.gripOffroad; currentDrag = CONF.OFFROAD_DECEL; d.vibration = 5; if(d.speed > 50) d.speed *= 0.98; if(d.speed > 10) this.spawnParticle(w/2 + (Math.random()-0.5)*40, partY, 'dust'); } 
+            if (absX > 1.45) { 
+                currentGrip = PHYSICS.gripOffroad; 
+                currentDrag = CONF.OFFROAD_DECEL; 
+                
+                // Pneus Upgrade diminuem a penalidade de Offroad
+                if (this.useCustomKart && this.kartUpgrades.tires > 1) {
+                    currentDrag += (this.kartUpgrades.tires - 1) * 0.025;
+                }
+                
+                d.vibration = 5; 
+                if(d.speed > 50) d.speed *= 0.98; 
+                if(d.speed > 10) this.spawnParticle(w/2 + (Math.random()-0.5)*40, partY, 'dust'); 
+            } 
             else if (absX > 1.0) { currentGrip = PHYSICS.gripZebra; d.vibration = 2; }
 
             let max = CONF.MAX_SPEED * char.speedInfo;
@@ -583,7 +667,8 @@
             d.rivals.forEach(r => {
                 const distZ = Math.abs(((d.lap * trackLength) + d.pos) - ((Number(r.lap) * trackLength) + Number(r.pos)));
                 if (distZ < 250 && Math.abs(r.x - d.playerX) < 0.8 && r.status === 'RACING' && d.status === 'RACING') {
-                    const pushForce = 0.2 * ((CHARACTERS[r.charId] || char).weight / char.weight);
+                    // Peso Customizado Aplicado aos Choques com os Rivais!
+                    const pushForce = 0.2 * ((CHARACTERS[r.charId] || baseChar).weight / char.weight);
                     d.lateralInertia += (d.playerX > r.x ? pushForce : -pushForce); d.speed *= 0.95; 
                     if (!r.isRemote && this.localBots.includes(r)) r.x += (d.playerX > r.x ? -0.1 : 0.1);
                     KartAudio.crash();
@@ -797,8 +882,14 @@
 
             if (d.state === 'GAMEOVER') return; 
 
-            ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.roundRect(20, 100, 70, 70, 15); ctx.fill();
-            ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3; ctx.stroke();
+            // Círculo do Item Ativo
+            if (ctx.roundRect) {
+                ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.beginPath(); ctx.roundRect(20, 100, 70, 70, 15); ctx.fill();
+                ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3; ctx.stroke();
+            } else {
+                ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(20, 100, 70, 70);
+            }
+
             if (d.item) {
                 ctx.font = "40px Arial"; ctx.textAlign = "center";
                 let emoji = d.item === 'mushroom' ? '🍄' : (d.item === 'banana' ? '🍌' : '🐢');
@@ -818,7 +909,11 @@
 
             ctx.fillStyle = '#111'; ctx.fillRect(w/2 - 110, 20, 220, 20); ctx.fillStyle = d.turboLock ? '#0ff' : (d.nitro > 25 ? '#f90' : '#f33'); ctx.fillRect(w/2 - 108, 22, (216) * (d.nitro/100), 16);
 
-            ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.roundRect(20, h - 80, 120, 50, 25); ctx.fill();
+            if (ctx.roundRect) {
+                ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(20, h - 80, 120, 50, 25); ctx.fill();
+            } else {
+                ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20, h - 80, 120, 50);
+            }
             ctx.fillStyle = "#f1c40f"; ctx.font = "bold 26px 'Russo One'"; ctx.textAlign = "left";
             ctx.fillText(`🪙 ${d.matchCoins}`, 35, h - 45);
 
@@ -848,39 +943,121 @@
             ctx.fillStyle = "white"; ctx.font = "bold 20px 'Russo One'"; ctx.fillText("ARCADE (SOLO)", w/2, h * 0.45 + 40); ctx.fillText("ONLINE (P2P)", w/2, h * 0.6 + 40);
         },
 
+        // --- NOVO RENDER DA OFICINA DE KART (COMPRAS COM MOEDAS GLOBAIS) ---
+        renderShop: function(ctx, w, h) {
+            ctx.fillStyle = "#1e272e"; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.font = "bold clamp(24px, 5vw, 40px) 'Russo One'";
+            ctx.fillText("OFICINA DE KART", w/2, h * 0.1);
+
+            let coins = window.Profile ? (window.Profile.coins || 0) : 0;
+            ctx.fillStyle = "#2ecc71"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'";
+            ctx.fillText(`SALDO GERAL: R$ ${coins}`, w/2, h * 0.15);
+
+            this.shopHitboxes = [];
+            const startY = h * 0.22;
+            const gap = h * 0.05;
+            const rowH = Math.min(80, h * 0.15);
+            const boxW = Math.min(450, w * 0.9);
+            const boxX = w/2 - boxW/2;
+
+            const items = [
+                { id: 'engine', name: '⚙️ MOTOR', desc: 'Aumenta Vel. Máxima e Aceleração', levels: [0, 1500, 4000] },
+                { id: 'tires', name: '🛞 PNEUS', desc: 'Melhora Curvas e Aderência na Terra', levels: [0, 1200, 3000] },
+                { id: 'chassis', name: '🏎️ CHASSI', desc: 'Aumenta Peso e Resiste a Cascos', levels: [0, 2000, 5000] }
+            ];
+
+            items.forEach((item, i) => {
+                let currentLvl = this.kartUpgrades[item.id] || 1;
+                let nextCost = item.levels[currentLvl]; 
+                
+                let y = startY + i * (rowH + gap);
+                ctx.fillStyle = "rgba(255,255,255,0.05)"; 
+                if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 15); ctx.fill(); } 
+                else { ctx.fillRect(boxX, y, boxW, rowH); }
+                
+                ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(16px, 3vw, 20px) 'Russo One'";
+                ctx.fillText(`${item.name} (LVL ${currentLvl})`, boxX + 15, y + rowH * 0.4);
+                ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 14px) Arial";
+                ctx.fillText(item.desc, boxX + 15, y + rowH * 0.75);
+
+                if (currentLvl < 3) {
+                    let btnW = boxW * 0.25; let btnH = rowH * 0.6;
+                    let btnX = boxX + boxW - btnW - 15; let btnY = y + rowH/2 - btnH/2;
+                    let canBuy = coins >= nextCost;
+                    
+                    ctx.fillStyle = canBuy ? "#3498db" : "#7f8c8d";
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 8); ctx.fill(); }
+                    else { ctx.fillRect(btnX, btnY, btnW, btnH); }
+                    
+                    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold clamp(12px, 2.5vw, 16px) 'Russo One'";
+                    ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + btnH/2 + 6);
+
+                    this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy', type: item.id, targetLvl: currentLvl + 1, cost: nextCost });
+                } else {
+                    ctx.fillStyle = "#f1c40f"; ctx.textAlign = "right"; ctx.font = "bold clamp(14px, 3vw, 18px) 'Russo One'";
+                    ctx.fillText("MÁXIMO", boxX + boxW - 15, y + rowH/2 + 6);
+                }
+            });
+
+            // Botão Voltar
+            let backW = 220; let backH = 50;
+            let backX = w/2 - backW/2; let backY = h * 0.85;
+            ctx.fillStyle = "#e74c3c"; 
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(backX, backY, backW, backH, 25); ctx.fill(); }
+            else { ctx.fillRect(backX, backY, backW, backH); }
+            ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px 'Russo One'";
+            ctx.fillText("VOLTAR AO LOBBY", w/2, backY + 30);
+            this.shopHitboxes.push({ x: backX, y: backY, w: backW, h: backH, action: 'back' });
+        },
+
         renderLobby: function(ctx, w, h) {
             ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, w, h); const char = CHARACTERS[this.selectedChar];
-            ctx.fillStyle = char.color; ctx.beginPath(); ctx.arc(w/2, h*0.3, 60, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One'"; ctx.fillText(char.name, w/2, h*0.3 + 100);
+            ctx.fillStyle = char.color; ctx.beginPath(); ctx.arc(w/2, h*0.25, 50, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 28px 'Russo One'"; ctx.fillText(char.name, w/2, h*0.25 + 80);
             
-            ctx.fillStyle = "#f1c40f"; ctx.font = "24px 'Russo One'"; 
-            if (this.currentFase.mode === 'COIN_HUNT') ctx.fillText(`MISSÃO: COLETE ${this.currentFase.targetCoins} MOEDAS`, w/2, h*0.5);
-            else ctx.fillText(`MISSÃO: CHEGUE NO TOP ${this.currentFase.targetRank}`, w/2, h*0.5);
+            ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Russo One'"; 
+            if (this.currentFase.mode === 'COIN_HUNT') ctx.fillText(`MISSÃO: COLETE ${this.currentFase.targetCoins} MOEDAS`, w/2, h*0.42);
+            else ctx.fillText(`MISSÃO: CHEGUE NO TOP ${this.currentFase.targetRank}`, w/2, h*0.42);
             
             let displayTrack = this.currentFase.id === 'arcade' ? this.selectedTrack : this.currentFase.trackId;
-            ctx.fillStyle = "#fff"; ctx.font = "18px 'Russo One'"; ctx.fillText("PISTA: " + TRACKS[displayTrack].name, w/2, h*0.58);
+            ctx.fillStyle = "#fff"; ctx.font = "16px 'Russo One'"; ctx.fillText("PISTA: " + TRACKS[displayTrack].name, w/2, h*0.48);
             
             if (this.currentFase.id === 'arcade') {
-                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText("(Clique no menu abaixo para mudar)", w/2, h*0.62);
+                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText("(Clique no menu acima para mudar a pista)", w/2, h*0.51);
             }
+
+            // --- NOVO: BOTÕES DE KART PERSONALIZADO E OFICINA ---
+            let btnWidth = Math.min(300, w * 0.8);
+            
+            ctx.fillStyle = this.useCustomKart ? "#2ecc71" : "#7f8c8d";
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, h*0.56, btnWidth, 45, 20); ctx.fill(); }
+            else { ctx.fillRect(w/2 - btnWidth/2, h*0.56, btnWidth, 45); }
+            ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Russo One'";
+            ctx.fillText(this.useCustomKart ? "KART: MEU KART CUSTOM" : "KART: PADRÃO DO PERSONAGEM", w/2, h*0.56 + 28);
+
+            ctx.fillStyle = "#3498db";
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, h*0.65, btnWidth, 45, 20); ctx.fill(); }
+            else { ctx.fillRect(w/2 - btnWidth/2, h*0.65, btnWidth, 45); }
+            ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Russo One'";
+            ctx.fillText("⚙️ ABRIR OFICINA DO KART", w/2, h*0.65 + 28);
 
             if (resetBtn) resetBtn.style.display = (this.isOnline && this.isHost) ? 'flex' : 'none';
 
             if (this.isOnline) {
-                const pids = Object.keys(this.remotePlayersData || {}); let startY = h * 0.65; ctx.font = "14px Arial"; ctx.fillStyle = "#ccc"; ctx.fillText("JOGADORES NA SALA:", w/2, startY - 20);
+                const pids = Object.keys(this.remotePlayersData || {}); let startY = h * 0.74; ctx.font = "12px Arial"; ctx.fillStyle = "#ccc"; ctx.fillText("JOGADORES NA SALA:", w/2, startY - 15);
                 pids.forEach((pid, i) => {
                     const p = this.remotePlayersData[pid]; const isMe = pid === window.System.playerId; const color = CHARACTERS[p.charId || 0].color;
-                    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(w/2 - 100, startY + (i*25), 8, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = isMe ? "#fff" : "#aaa"; ctx.textAlign = "left"; ctx.fillText(`${CHARACTERS[p.charId||0].name} ${isMe ? '(VOCÊ)' : ''}`, w/2 - 80, startY + (i*25) + 5);
-                    if (i === 0) { ctx.fillStyle = "#f1c40f"; ctx.fillText("👑 HOST", w/2 + 50, startY + (i*25) + 5); } else if (p.ready) { ctx.fillStyle = "#2ecc71"; ctx.fillText("✔ PRONTO", w/2 + 50, startY + (i*25) + 5); }
+                    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(w/2 - 100, startY + (i*20), 6, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = isMe ? "#fff" : "#aaa"; ctx.textAlign = "left"; ctx.fillText(`${CHARACTERS[p.charId||0].name} ${isMe ? '(VOCÊ)' : ''}`, w/2 - 80, startY + (i*20) + 4);
+                    if (i === 0) { ctx.fillStyle = "#f1c40f"; ctx.fillText("👑 HOST", w/2 + 50, startY + (i*20) + 4); } else if (p.ready) { ctx.fillStyle = "#2ecc71"; ctx.fillText("✔ PRONTO", w/2 + 50, startY + (i*20) + 4); }
                 }); ctx.textAlign = "center";
             }
 
             if (this.isOnline && this.isHost) {
                 const canStart = Object.keys(this.remotePlayersData || {}).length >= 2;
-                ctx.fillStyle = canStart ? "#c0392b" : "#7f8c8d"; ctx.fillRect(w/2 - 160, h*0.8, 320, 70); ctx.fillStyle = "white"; ctx.font = "bold 24px 'Russo One'"; ctx.fillText(canStart ? "INICIAR CORRIDA" : "AGUARDANDO PLAYERS...", w/2, h*0.8 + 45);
+                ctx.fillStyle = canStart ? "#c0392b" : "#7f8c8d"; ctx.fillRect(w/2 - 160, h*0.85, 320, 60); ctx.fillStyle = "white"; ctx.font = "bold 22px 'Russo One'"; ctx.fillText(canStart ? "INICIAR CORRIDA" : "AGUARDANDO PLAYERS...", w/2, h*0.85 + 38);
             } else {
-                ctx.fillStyle = this.isReady ? "#e67e22" : "#27ae60"; ctx.fillRect(w/2 - 160, h*0.8, 320, 70); ctx.fillStyle = "white"; ctx.font = "bold 24px 'Russo One'"; ctx.fillText(this.isReady ? "AGUARDANDO HOST..." : "PRONTO!", w/2, h*0.8 + 45);
+                ctx.fillStyle = this.isReady ? "#e67e22" : "#27ae60"; ctx.fillRect(w/2 - 160, h*0.85, 320, 60); ctx.fillStyle = "white"; ctx.font = "bold 22px 'Russo One'"; ctx.fillText(this.isReady ? "AGUARDANDO HOST..." : "PRONTO!", w/2, h*0.85 + 38);
             }
         }
     };
