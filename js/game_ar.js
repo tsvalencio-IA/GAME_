@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V24 - THE ULTIMATE HYBRID)
-// FIX DEFINITIVO: EXTRAÇÃO DE POSE (MINORITY REPORT), RADAR DE BRINQUEDOS ATIVO
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V25 - TRULY ULTIMATE)
+// FIX: MOVENET DINÂMICO (PALITINHOS CORRETOS) E RECONHECIMENTO GLOBAL DE TOYS
 // =============================================================================
 
 (function() {
@@ -24,11 +24,9 @@
             this.isSwitching = true;
             
             try {
-                // Tenta usar a função nativa do core.js primeiro
                 if (window.System && typeof window.System.switchCamera === 'function') {
                     await window.System.switchCamera(mode);
                 } else {
-                    // Fallback manual caso o core.js não responda
                     this.stopCurrentStream();
                     const stream = await navigator.mediaDevices.getUserMedia({
                         video: { facingMode: { ideal: mode }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -98,12 +96,11 @@
             ctx.fillStyle = "rgba(0, 15, 30, 0.85)"; ctx.fillRect(0, 0, w, h);
             
             // ========================================================
-            // PROCESSAMENTO MOVENET - FIX DEFINITIVO DE ARRAY
+            // PROCESSAMENTO MOVENET - ESCALA DINÂMICA
             // ========================================================
             this.cursor.active = false;
             let kps = [];
             
-            // Extração à prova de falhas para o MoveNet do core.js
             if (rawPose) {
                 if (Array.isArray(rawPose) && rawPose.length > 0) {
                     kps = rawPose[0].keypoints ? rawPose[0].keypoints : rawPose;
@@ -116,26 +113,19 @@
             
             if (kps && kps.length > 0) {
                 ctx.lineWidth = 5;
-                ctx.strokeStyle = "rgba(0, 255, 255, 0.7)";
+                ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
                 ctx.fillStyle = "#fff";
 
-                // Desenha a cabeça (nariz) para provar que a IA está a ver o utilizador
-                const nose = kps.find(k => k.name === 'nose');
-                if (nose && nose.score > 0.15) {
-                    const nx = ((640 - nose.x) / 640) * w; const ny = (nose.y / 480) * h;
-                    if(Number.isFinite(nx) && Number.isFinite(ny)) {
-                        ctx.fillStyle = "rgba(0, 255, 0, 0.6)";
-                        ctx.beginPath(); ctx.arc(nx, ny, 12, 0, Math.PI*2); ctx.fill();
-                    }
-                }
+                // Pega o tamanho real do vídeo para espelhar e escalar corretamente os palitinhos
+                const vW = window.System?.video?.videoWidth || 640;
+                const vH = window.System?.video?.videoHeight || 480;
 
-                // Desenha os braços (Mirror X: 640 - x)
                 const drawBone = (p1Name, p2Name) => {
                     const kp1 = kps.find(k => k.name === p1Name);
                     const kp2 = kps.find(k => k.name === p2Name);
                     if (kp1 && kp2 && kp1.score > 0.15 && kp2.score > 0.15) {
-                        const x1 = ((640 - kp1.x) / 640) * w; const y1 = (kp1.y / 480) * h;
-                        const x2 = ((640 - kp2.x) / 640) * w; const y2 = (kp2.y / 480) * h;
+                        const x1 = ((vW - kp1.x) / vW) * w; const y1 = (kp1.y / vH) * h;
+                        const x2 = ((vW - kp2.x) / vW) * w; const y2 = (kp2.y / vH) * h;
                         if(Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
                             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
                             ctx.beginPath(); ctx.arc(x1, y1, 6, 0, Math.PI*2); ctx.fill();
@@ -148,7 +138,6 @@
                 drawBone('left_shoulder', 'left_elbow'); drawBone('left_elbow', 'left_wrist');
                 drawBone('right_shoulder', 'right_elbow'); drawBone('right_elbow', 'right_wrist');
 
-                // Define o pulso dominante (o mais alto) como cursor
                 const rw = kps.find(k => k.name === 'right_wrist');
                 const lw = kps.find(k => k.name === 'left_wrist');
                 let domWrist = null;
@@ -158,8 +147,8 @@
                 else if (lw && lw.score > 0.15) { domWrist = lw; }
 
                 if (domWrist) {
-                    const cxW = ((640 - domWrist.x) / 640) * w;
-                    const cyW = (domWrist.y / 480) * h;
+                    const cxW = ((vW - domWrist.x) / vW) * w;
+                    const cyW = (domWrist.y / vH) * h;
                     if(Number.isFinite(cxW) && Number.isFinite(cyW)) {
                         this.cursor.x = cxW;
                         this.cursor.y = cyW;
@@ -400,7 +389,7 @@
         update: function(ctx, w, h, inputOrPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
 
-            // Extrai a pose de forma segura para o Minority Report (suporta assinaturas antigas e novas do core.js)
+            // Extrai a pose de forma segura para o Minority Report
             let rawPose = inputOrPose;
             if (inputOrPose && inputOrPose.pose) rawPose = inputOrPose.pose;
 
@@ -410,7 +399,7 @@
             let fps = 1 / dt; let newInterval = (fps < 20) ? 1000 : 500;
             if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') { this.startAILoop(); } }
 
-            // RENDERIZAÇÃO DA CÂMARA DE FUNDO (EXCETO NA OFICINA)
+            // RENDERIZAÇÃO DA CÂMARA DE FUNDO
             if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
                 if (this.virtualSpeed > 0.1 && this.state === 'PLAY_REAR_AR') {
@@ -439,7 +428,7 @@
                 case 'WAITING_PICKUP':
                 case 'TOW_MODE':
                     this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt); this.drawHUD(ctx, w, h); break;
-                case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'FRONT_AR_OFFICE'); break;
+                case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startFrontCamera', 'FRONT_AR_OFFICE'); break;
                 case 'FRONT_AR_OFFICE':
                     if (window.System?.video && window.System.video.readyState === 4) {
                         const vW = window.System.video.videoWidth || w; const vH = window.System.video.videoHeight || h;
@@ -448,14 +437,14 @@
                         ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -dx, dy, dw, dh); ctx.restore();
                     }
                     GestureOffice.update(ctx, w, h, dt, this, rawPose); break;
-                case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'PLAY_REAR_AR'); break;
+                case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startRearCamera', 'PLAY_REAR_AR'); break;
                 case 'GAME_OVER': this.drawOverlay(ctx, w, h, "FIM DE JOGO", "Calculando pontuação..."); break;
             }
 
             this.updateParticles(ctx, dt, w, h); return this.score || 0; 
         },
 
-        processTransition: function(ctx, w, h, dt, nextState) {
+        processTransition: function(ctx, w, h, dt, camFunc, nextState) {
             if (this.transitionPhase === 'FADE_OUT') {
                 this.transitionAlpha += dt * 3.0; 
                 if (this.transitionAlpha >= 1) {
@@ -465,7 +454,7 @@
                     } else { this.transitionPhase = 'FADE_IN'; }
                 }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR HOLOGRAMA...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0;
                 if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
@@ -557,19 +546,17 @@
             const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
             const sX = w / vW; const sY = h / vH;
 
-            // 1) RECONHECIMENTO LIVRE DE BRINQUEDOS (IA)
-            // Agora usa "Blacklist" para detetar qualquer coisa pequena que pareça um brinquedo
-            const ignoredClasses = ['person', 'bed', 'sofa', 'tv', 'refrigerator', 'door', 'dining table', 'chair'];
+            // 1) RECONHECIMENTO GLOBAL (Qualquer Brinquedo em Qualquer Lugar)
+            const ignoredClasses = ['person', 'bed', 'sofa', 'tv', 'refrigerator', 'door', 'dining table', 'chair', 'couch', 'potted plant'];
             
             this.detectedItems.forEach(item => {
                 if (ignoredClasses.includes(item.class) || item.score < 0.20) return;
                 
                 const bW = item.bbox[2]*sX; const bH = item.bbox[3]*sY;
-                if (bW > w * 0.8) return; // Se for gigante (uma parede), ignora. Retiramos o limite mínimo para ler carrinhos pequenos!
+                if (bW > w * 0.5 || bW < w * 0.05) return; // Tem que ter tamanho de brinquedo na tela
                 
                 const cX = (item.bbox[0]*sX) + bW/2; const cY = (item.bbox[1]*sY) + bH/2;
-                
-                let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.35;
+                let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.3;
                 
                 ctx.strokeStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.6)"; ctx.lineWidth = isCentered ? 4 : 2;
                 ctx.strokeRect(item.bbox[0]*sX, item.bbox[1]*sY, bW, bH);
@@ -581,12 +568,15 @@
                 }
             });
 
-            // 2) Fallback Óptico (Cor) Global: Se a IA não vir nada, mas o chão mudar de cor drasticamente à frente do camião
+            // 2) Fallback Óptico (Cor) - Permite achar "brinquedos" que a IA não entende
             if (!visualFound) {
-                this.floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 40);
-                this.targetColor = this.getAverageColor(ctx, cx - 40, cy - 40, 80, 80);
-                let diff = Math.abs(this.floorColor.r - this.targetColor.r) + Math.abs(this.floorColor.g - this.targetColor.g) + Math.abs(this.floorColor.b - this.targetColor.b);
-                if (diff > 80) visualFound = true; 
+                let floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 30);
+                let targetColor = this.getAverageColor(ctx, cx - 30, cy - 30, 60, 60);
+                let diff = Math.abs(floorColor.r - targetColor.r) + Math.abs(floorColor.g - targetColor.g) + Math.abs(floorColor.b - targetColor.b);
+                
+                if (diff > 80) { 
+                    visualFound = true; foundBox = { x: cx - 30, y: cy - 30, w: 60, h: 60, label: "CONTRASTE" };
+                }
             }
 
             if (this.state === 'PLAY_REAR_AR') {
@@ -601,7 +591,7 @@
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 20px) Arial";
                 ctx.fillText("PARE O CAMINHÃO E REMOVA COM A MÃO!", cx, uiY - 15);
 
-                // Se sumiu da visão, a mão pegou!
+                // O GRANDE TRUQUE: Se sumiu da visão, a mão pegou!
                 if (!visualFound) {
                     this.pickupTimer += dt;
                     ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 20);
@@ -609,7 +599,7 @@
                     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY + 10, w*0.8, 20);
                     
                     if (this.pickupTimer > 1.5) { 
-                        let val = (this.activeAnomaly && nearestDist < 30) ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
+                        let val = (this.activeAnomaly && nearestDist < 40) ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
                         this.cargo.push(val); this.score += val / 10;
                         window.System.msg("BRINQUEDO NA CAÇAMBA!");
                         
@@ -617,7 +607,7 @@
                             this.currentMission.progress++;
                             if (this.currentMission.progress >= this.currentMission.goal) this.completeMission();
                         }
-                        if (this.activeAnomaly && nearestDist < 30) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
+                        if (this.activeAnomaly && nearestDist < 40) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
 
                         this.changeState('PLAY_REAR_AR'); this.cooldown = 3.0; 
                         if(window.Gfx && typeof window.Gfx.shakeScreen === 'function') window.Gfx.shakeScreen(20);
@@ -641,7 +631,7 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // NAVEGAÇÃO REAL PARA A BASE 3D
+            // AR WAYPOINTS (NAVEGAÇÃO REAL PARA A BASE 3D)
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
                 let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
                 let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
