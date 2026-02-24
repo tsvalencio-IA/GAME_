@@ -222,7 +222,7 @@
                                     if (window.Profile) { window.Profile.coins -= cost; }
                                     this.kartUpgrades[type] = targetLvl;
                                     if (window.Profile) {
-                                        if (!window.Profile.kartSave) window.Profile.kartSave = {};
+                                        if (!window.Profile.kartSave) window.Profile.kartSave = { upgrades: {} };
                                         window.Profile.kartSave.upgrades = this.kartUpgrades;
                                         if (window.Profile.save) window.Profile.save();
                                     }
@@ -882,7 +882,6 @@
 
             if (d.state === 'GAMEOVER') return; 
 
-            // Círculo do Item Ativo
             if (ctx.roundRect) {
                 ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.beginPath(); ctx.roundRect(20, 100, 70, 70, 15); ctx.fill();
                 ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3; ctx.stroke();
