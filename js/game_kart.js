@@ -121,21 +121,24 @@
         item: null, itemCooldown: 0, projectiles: [],
 
         // --- SISTEMA DE GARAGEM E KART PERSONALIZADO ---
-        garage: [{ modelId: 0 }], activeKartIdx: 0, shopTab: 'GARAGE', shopHitboxes: [],
+        useCustomKart: false, kartUpgrades: {}, shopHitboxes: [], lobbyHitboxes: [], garage: [{ modelId: 0 }], activeKartIdx: 0, shopTab: 'GARAGE',
 
         init: function(faseData) { 
             this.cleanup(); this.state = 'MODE_SELECT'; this.setupUI(); this.resetPhysics(); KartAudio.init(); 
             this.currentFase = faseData || { id: 'arcade', mode: 'RACE', targetRank: 3, trackId: 0, diff: 'MEDIUM' }; 
 
-            // Carrega os dados da Garagem do Firebase
+            // Carrega os dados da Garagem do Firebase (Nuvem Global)
             if (window.Profile) {
-                if (!window.Profile.kartSave) window.Profile.kartSave = { garage: [{ modelId: 0 }], activeKartIdx: 0 };
+                if (!window.Profile.kartSave) window.Profile.kartSave = { garage: [{ modelId: 0 }], activeKartIdx: 0, upgrades: { engine: 1, tires: 1, suspension: 1 } };
                 this.garage = window.Profile.kartSave.garage || [{ modelId: 0 }];
                 this.activeKartIdx = window.Profile.kartSave.activeKartIdx || 0;
+                this.kartUpgrades = window.Profile.kartSave.upgrades || { engine: 1, tires: 1, suspension: 1 };
             } else {
                 this.garage = [{ modelId: 0 }];
                 this.activeKartIdx = 0;
+                this.kartUpgrades = { engine: 1, tires: 1, suspension: 1 };
             }
+            this.useCustomKart = false;
         },
 
         cleanup: function() {
@@ -173,6 +176,10 @@
                 const rect = window.System.canvas.getBoundingClientRect(); 
                 const y = (e.clientY - rect.top) / rect.height;
                 const x = (e.clientX - rect.left) / rect.width;
+                const cw = window.System.canvas.width; 
+                const ch = window.System.canvas.height;
+                const clickX = x * cw; 
+                const clickY = y * ch;
 
                 KartAudio.init(); if(KartAudio.ctx && KartAudio.ctx.state === 'suspended') KartAudio.ctx.resume();
 
@@ -190,33 +197,38 @@
                                 if (activePlayers.length >= 2) { this.roomRef.update({ raceState: 'RACING', totalRacers: activePlayers.length, raceStartTime: firebase.database.ServerValue.TIMESTAMP }); } else { window.System.msg("PRECISA DE 2 JOGADORES!"); window.Sfx.play(150, 'sawtooth', 0.3, 0.1); }
                             } else { this.toggleReady(); }
                         } else { this.startRace(this.currentFase.trackId !== undefined ? this.currentFase.trackId : this.selectedTrack); }
-                    } 
-                    else if (y < 0.35) { 
-                        this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; 
-                        window.Sfx.hover(); 
-                        if(this.isOnline) this.syncLobby(); 
-                    } 
-                    else if (y > 0.35 && y < 0.55) { 
-                        if (this.currentFase.id === 'arcade') {
-                            if(!this.isOnline || this.isHost) { 
-                                this.selectedTrack = (this.selectedTrack + 1) % TRACKS.length; 
-                                window.Sfx.hover(); 
-                                if(this.isOnline && this.isHost) this.roomRef.update({ trackId: this.selectedTrack }); 
+                    } else {
+                        // NOVO SISTEMA DE HITBOXES EXATAS NO LOBBY
+                        if (this.lobbyHitboxes) {
+                            let clicked = this.lobbyHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
+                            if (clicked) {
+                                if (clicked.action === 'change_char') {
+                                    this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; 
+                                    window.Sfx.hover(); 
+                                    if(this.isOnline) this.syncLobby(); 
+                                } else if (clicked.action === 'change_track') {
+                                    if (this.currentFase.id === 'arcade') {
+                                        if(!this.isOnline || this.isHost) { 
+                                            this.selectedTrack = (this.selectedTrack + 1) % TRACKS.length; 
+                                            window.Sfx.hover(); 
+                                            if(this.isOnline && this.isHost) this.roomRef.update({ trackId: this.selectedTrack }); 
+                                        }
+                                    } else {
+                                        window.Sfx.error(); this.pushMsg("PISTA FIXA NA MISSÃO!", "#f00", 25);
+                                    }
+                                } else if (clicked.action === 'toggle_kart') {
+                                    this.useCustomKart = !this.useCustomKart;
+                                    window.Sfx.hover();
+                                } else if (clicked.action === 'open_shop') {
+                                    this.state = 'KART_SHOP';
+                                    window.Sfx.click();
+                                }
                             }
-                        } else {
-                            window.Sfx.error(); this.pushMsg("PISTA FIXA NA MISSÃO!", "#f00", 25);
                         }
-                    }
-                    else if (y > 0.60 && y < 0.75) {
-                        this.state = 'KART_SHOP';
-                        window.Sfx.click();
                     }
                 }
                 else if (this.state === 'KART_SHOP') {
                     if (this.shopHitboxes) {
-                        const cw = window.System.canvas.width; const ch = window.System.canvas.height;
-                        const clickX = x * cw; const clickY = y * ch;
-                        
                         let clicked = this.shopHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
                         if (clicked) {
                             if (clicked.action === 'back') {
@@ -244,7 +256,7 @@
                                     window.Sfx.error(); window.System.msg("NÃO PODE VENDER SEU ÚLTIMO KART!");
                                 }
                             }
-                            else if (clicked.action === 'buy') {
+                            else if (clicked.action === 'buy_kart') {
                                 let model = KART_MODELS[clicked.modelId];
                                 let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
                                 if (this.garage.length >= 3) {
@@ -257,9 +269,23 @@
                                     window.Sfx.error(); window.System.msg("SEM SALDO SUFICIENTE!");
                                 }
                             }
+                            else if (clicked.action === 'buy_upgrade') {
+                                let type = clicked.type; let cost = clicked.cost; let targetLvl = clicked.targetLvl;
+                                let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
+                                if (wallet >= cost) {
+                                    if (window.Profile) { window.Profile.coins -= cost; }
+                                    this.kartUpgrades[type] = targetLvl;
+                                    this.saveGarage();
+                                    window.Sfx.coin();
+                                    window.System.msg("UPGRADE ADQUIRIDO!");
+                                } else {
+                                    window.Sfx.error();
+                                    window.System.msg("SEM SALDO SUFICIENTE!");
+                                }
+                            }
                         }
                     }
-                }
+                } 
             };
         },
 
@@ -268,6 +294,7 @@
                 if (!window.Profile.kartSave) window.Profile.kartSave = {};
                 window.Profile.kartSave.garage = this.garage;
                 window.Profile.kartSave.activeKartIdx = this.activeKartIdx;
+                window.Profile.kartSave.upgrades = this.kartUpgrades;
                 if (window.Profile.save) window.Profile.save();
             }
         },
@@ -390,7 +417,7 @@
         syncMultiplayer: function() {
             if (Date.now() - this.lastSync > 100) {
                 this.lastSync = Date.now();
-                let myKartId = this.garage[this.activeKartIdx] ? this.garage[this.activeKartIdx].modelId : 0;
+                let myKartId = (this.useCustomKart && this.garage[this.activeKartIdx]) ? this.garage[this.activeKartIdx].modelId : 0;
                 
                 this.dbRef.child('players/' + window.System.playerId).update({ 
                     pos: Math.floor(this.pos), x: this.playerX, speed: this.speed, steer: this.steer, lap: this.lap, status: this.status, finishTime: this.finishTime, charId: this.selectedChar, kartId: myKartId, lastSeen: firebase.database.ServerValue.TIMESTAMP 
@@ -435,19 +462,32 @@
         updatePhysics: function(w, h, pose) {
             const d = Logic; 
             
-            // --- APLICAÇÃO DOS BÓNUS DO KART PERSONALIZADO ---
-            let char = { ...CHARACTERS[this.selectedChar] }; // Clona para não sujar o original
+            // --- APLICAÇÃO DOS BÓNUS DO KART PERSONALIZADO (PROJETADO NA FÍSICA) ---
+            let char = { ...CHARACTERS[this.selectedChar] }; // Clona o original
             let activeKart = KART_MODELS[0];
             
-            if (this.garage && this.garage[this.activeKartIdx]) {
+            if (this.useCustomKart && this.garage && this.garage[this.activeKartIdx]) {
                 let kId = this.garage[this.activeKartIdx].modelId;
                 activeKart = KART_MODELS.find(k => k.id === kId) || KART_MODELS[0];
+                
+                const upg = this.kartUpgrades || { engine: 1, tires: 1, suspension: 1 };
+                
+                // Bônus do Modelo do Kart
+                char.speedInfo += activeKart.speedBonus;
+                char.turnInfo += activeKart.turnBonus;
+                char.weight += activeKart.weightBonus;
+
+                // Bônus das Peças da Oficina
+                char.speedInfo += (upg.engine - 1) * 0.08; 
+                char.accel += (upg.engine - 1) * 0.005; 
+                char.turnInfo += (upg.tires - 1) * 0.10; 
+                
+                char.tireLevel = upg.tires || 1;
+                char.suspensionLevel = upg.suspension || 1;
+            } else {
+                char.tireLevel = 1;
+                char.suspensionLevel = 1;
             }
-            
-            // Soma os bónus do modelo escolhido
-            char.speedInfo += activeKart.speedBonus;
-            char.turnInfo += activeKart.turnBonus;
-            char.weight += activeKart.weightBonus;
 
             const canControl = (d.status === 'RACING');
             let detected = false; let itemTriggered = false;
@@ -490,8 +530,14 @@
             
             // O Monster Truck perde menos velocidade na terra
             let offroadDrag = activeKart.type === 'monster' ? 0.95 : CONF.OFFROAD_DECEL;
+            if (char.tireLevel > 1) { offroadDrag += (char.tireLevel - 1) * 0.015; } // Pneus melhores anulam penalidade
 
-            if (absX > 1.45) { currentGrip = PHYSICS.gripOffroad; currentDrag = offroadDrag; d.vibration = 5; if(d.speed > 50) d.speed *= 0.98; if(d.speed > 10) this.spawnParticle(w/2 + (Math.random()-0.5)*40, partY, 'dust'); } 
+            if (absX > 1.45) { 
+                currentGrip = PHYSICS.gripOffroad; currentDrag = offroadDrag; 
+                d.vibration = 5; 
+                if (char.suspensionLevel > 1) d.vibration -= (char.suspensionLevel - 1) * 1.5; // Suspensão absorve o tremor da terra
+                if(d.speed > 50) d.speed *= 0.98; if(d.speed > 10) this.spawnParticle(w/2 + (Math.random()-0.5)*40, partY, 'dust'); 
+            } 
             else if (absX > 1.0) { currentGrip = PHYSICS.gripZebra; d.vibration = 2; }
 
             let max = CONF.MAX_SPEED * char.speedInfo;
@@ -591,8 +637,13 @@
                 if (p.owner !== 'player' && d.status === 'RACING') {
                     let distZPlayer = Math.abs(p.pos - d.pos);
                     if (distZPlayer < 250 && Math.abs(p.x - d.playerX) < 1.0) { 
-                        // Chassi Pesado protege o jogador de voar no capotamento
-                        d.speed *= 0.1; d.spinTimer = 80; d.bounce = char.weight > 1.4 ? -40 : -80; 
+                        d.speed *= 0.1; d.spinTimer = 80; 
+                        
+                        // Chassi Pesado ou Suspensão Alta protege de voar longe no capotamento
+                        let baseBounce = char.weight > 1.4 ? -40 : -80; 
+                        if (char.suspensionLevel > 1) baseBounce *= (1 - (char.suspensionLevel - 1) * 0.25);
+                        d.bounce = baseBounce;
+                        
                         p.active = false;
                         window.Sfx.error(); window.Gfx.shakeScreen(30);
                         this.pushMsg("CAPOTOU!", "#f00", 50);
@@ -1034,11 +1085,14 @@
                     ctx.fillStyle = "rgba(255,255,255,0.05)"; 
                     if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 15); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
                     
-                    ctx.fillStyle = model.color; ctx.beginPath(); ctx.arc(boxX + 40, y + rowH/2, 20, 0, Math.PI*2); ctx.fill();
+                    // DESENHO DO KART NA LOJA (Sprite Renderizado)
+                    let charColor = CHARACTERS[this.selectedChar].color;
+                    this.drawKartSprite(ctx, boxX + 45, y + rowH/2 + 5, w * 0.0012, 0, 0, 0, charColor, this.selectedChar, model.id);
+                    
                     ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(16px, 3vw, 20px) 'Russo One'";
-                    ctx.fillText(model.name, boxX + 80, y + rowH * 0.4);
+                    ctx.fillText(model.name, boxX + 90, y + rowH * 0.4);
                     ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
-                    ctx.fillText(model.desc, boxX + 80, y + rowH * 0.7);
+                    ctx.fillText(model.desc, boxX + 90, y + rowH * 0.7);
 
                     let btnW = boxW * 0.22; let btnH = rowH * 0.6;
                     
@@ -1051,7 +1105,7 @@
                     ctx.fillText(isEquipped ? "EQUIPADO" : "EQUIPAR", equipX + btnW/2, btnY + btnH/2 + 5);
                     if (!isEquipped) this.shopHitboxes.push({ x: equipX, y: btnY, w: btnW, h: btnH, action: 'equip', index: index });
 
-                    // Botão Vender (Só aparece se tiver mais de 1 kart)
+                    // Botão Vender
                     if (this.garage.length > 1) {
                         let sellX = equipX - btnW - 10;
                         let refund = Math.floor(model.price * 0.5);
@@ -1062,6 +1116,48 @@
                         this.shopHitboxes.push({ x: sellX, y: btnY, w: btnW, h: btnH, action: 'sell', index: index });
                     }
                 });
+
+                // NOVO: UPGRADES (MOTOR, PNEUS E SUSPENSÃO) PARA O KART EQUIPADO
+                const upgradesList = [
+                    { id: 'engine', name: '⚙️ MOTOR', desc: 'Aceleração/Velocidade', levels: [0, 1500, 4000] },
+                    { id: 'tires', name: '🛞 PNEUS', desc: 'Curvas / Menos Drag na Terra', levels: [0, 1200, 3000] },
+                    { id: 'suspension', name: '🏎️ SUSPENSÃO', desc: 'Menos vibração e saltos menores', levels: [0, 2000, 5000] }
+                ];
+
+                let upgStartY = startY + 3 * (rowH + gap) + 10;
+                ctx.fillStyle = "#f1c40f"; ctx.textAlign = "center"; ctx.font = "bold 20px 'Russo One'";
+                ctx.fillText("PEÇAS PARA MEU KART", w/2, upgStartY - 15);
+
+                upgradesList.forEach((upg, i) => {
+                    let currentLvl = this.kartUpgrades[upg.id] || 1;
+                    let nextCost = upg.levels[currentLvl]; 
+                    
+                    let y = upgStartY + i * (rowH * 0.8 + gap);
+                    ctx.fillStyle = "rgba(0,0,0,0.4)"; 
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH * 0.8, 10); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH * 0.8); }
+                    
+                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(14px, 3vw, 18px) 'Russo One'";
+                    ctx.fillText(`${upg.name} (LVL ${currentLvl})`, boxX + 15, y + rowH * 0.35);
+                    ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
+                    ctx.fillText(upg.desc, boxX + 15, y + rowH * 0.65);
+
+                    if (currentLvl < 3) {
+                        let btnW = boxW * 0.25; let btnH = rowH * 0.5;
+                        let btnX = boxX + boxW - btnW - 15; let btnY = y + (rowH*0.8)/2 - btnH/2;
+                        let canBuy = coins >= nextCost;
+                        
+                        ctx.fillStyle = canBuy ? "#f39c12" : "#7f8c8d";
+                        if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(btnX, btnY, btnW, btnH); }
+                        ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold clamp(12px, 2.5vw, 16px) 'Russo One'";
+                        ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + btnH/2 + 5);
+
+                        this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy_upgrade', type: upg.id, targetLvl: currentLvl + 1, cost: nextCost });
+                    } else {
+                        ctx.fillStyle = "#2ecc71"; ctx.textAlign = "right"; ctx.font = "bold clamp(14px, 3vw, 18px) 'Russo One'";
+                        ctx.fillText("MÁXIMO", boxX + boxW - 15, y + (rowH*0.8)/2 + 6);
+                    }
+                });
+
             } 
             else if (this.shopTab === 'SHOP') {
                 let displayIndex = 0;
@@ -1072,11 +1168,14 @@
                     ctx.fillStyle = "rgba(255,255,255,0.05)"; 
                     if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 15); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
                     
-                    ctx.fillStyle = model.color; ctx.beginPath(); ctx.arc(boxX + 40, y + rowH/2, 20, 0, Math.PI*2); ctx.fill();
+                    // DESENHO DO KART NA LOJA (Sprite Renderizado)
+                    let charColor = CHARACTERS[this.selectedChar].color;
+                    this.drawKartSprite(ctx, boxX + 45, y + rowH/2 + 5, w * 0.0012, 0, 0, 0, charColor, this.selectedChar, model.id);
+                    
                     ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(16px, 3vw, 20px) 'Russo One'";
-                    ctx.fillText(model.name, boxX + 80, y + rowH * 0.4);
+                    ctx.fillText(model.name, boxX + 90, y + rowH * 0.4);
                     ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
-                    ctx.fillText(model.desc, boxX + 80, y + rowH * 0.7);
+                    ctx.fillText(model.desc, boxX + 90, y + rowH * 0.7);
 
                     let btnW = boxW * 0.25; let btnH = rowH * 0.6;
                     let btnX = boxX + boxW - btnW - 15; let btnY = y + rowH/2 - btnH/2;
@@ -1091,13 +1190,13 @@
                         ctx.fillStyle = "#e74c3c"; ctx.font = "10px Arial"; ctx.fillText("GARAGEM CHEIA", btnX + btnW/2, btnY + btnH + 12);
                     }
 
-                    this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy', modelId: model.id });
+                    this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy_kart', modelId: model.id });
                 });
             }
 
             // Botão Voltar
             let backW = 220; let backH = 50;
-            let backX = w/2 - backW/2; let backY = h * 0.88;
+            let backX = w/2 - backW/2; let backY = h * 0.90;
             ctx.fillStyle = "#c0392b"; 
             if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(backX, backY, backW, backH, 25); ctx.fill(); } else { ctx.fillRect(backX, backY, backW, backH); }
             ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px 'Russo One'";
@@ -1113,9 +1212,15 @@
 
         renderLobby: function(ctx, w, h) {
             ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, w, h); const char = CHARACTERS[this.selectedChar];
+            
+            this.lobbyHitboxes = []; // Reset hitboxes for exact clicking!
+
+            // Botão/Área do Personagem
             ctx.fillStyle = char.color; ctx.beginPath(); ctx.arc(w/2, h*0.2, 45, 0, Math.PI*2); ctx.fill();
             ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 28px 'Russo One'"; ctx.fillText(char.name, w/2, h*0.2 + 70);
+            this.lobbyHitboxes.push({ x: w/2 - 60, y: h*0.2 - 50, w: 120, h: 130, action: 'change_char' });
             
+            // Textos de Missão e Pista
             ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Russo One'"; 
             if (this.currentFase.mode === 'COIN_HUNT') ctx.fillText(`MISSÃO: COLETE ${this.currentFase.targetCoins} MOEDAS`, w/2, h*0.35);
             else ctx.fillText(`MISSÃO: CHEGUE NO TOP ${this.currentFase.targetRank}`, w/2, h*0.35);
@@ -1123,24 +1228,29 @@
             let displayTrack = this.currentFase.id === 'arcade' ? this.selectedTrack : this.currentFase.trackId;
             ctx.fillStyle = "#fff"; ctx.font = "16px 'Russo One'"; ctx.fillText("PISTA: " + TRACKS[displayTrack].name, w/2, h*0.42);
             if (this.currentFase.id === 'arcade') {
-                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText("(Clique no menu acima para mudar a pista)", w/2, h*0.45);
+                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText("(Clique nesta área para mudar a pista)", w/2, h*0.45);
+                this.lobbyHitboxes.push({ x: w/2 - 150, y: h*0.38, w: 300, h: 80, action: 'change_track' });
             }
 
-            // --- BOTÕES DE KART PERSONALIZADO E OFICINA ---
+            // --- BOTÕES DE KART PERSONALIZADO E OFICINA (HITBOXES EXATAS) ---
             let btnWidth = Math.min(320, w * 0.85);
             
+            let btnKartY = h*0.52;
             ctx.fillStyle = this.useCustomKart ? "#2ecc71" : "#7f8c8d";
-            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, h*0.52, btnWidth, 45, 15); ctx.fill(); }
-            else { ctx.fillRect(w/2 - btnWidth/2, h*0.52, btnWidth, 45); }
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, btnKartY, btnWidth, 45, 15); ctx.fill(); }
+            else { ctx.fillRect(w/2 - btnWidth/2, btnKartY, btnWidth, 45); }
             ctx.fillStyle = "#fff"; ctx.font = "bold 15px 'Russo One'";
             let currentKartName = this.garage[this.activeKartIdx] ? KART_MODELS[this.garage[this.activeKartIdx].modelId].name : "PADRÃO";
-            ctx.fillText(this.useCustomKart ? `USANDO: ${currentKartName}` : "KART: PADRÃO DO PERSONAGEM", w/2, h*0.52 + 28);
+            ctx.fillText(this.useCustomKart ? `USANDO: ${currentKartName}` : "KART: PADRÃO DO PERSONAGEM", w/2, btnKartY + 28);
+            this.lobbyHitboxes.push({ x: w/2 - btnWidth/2, y: btnKartY, w: btnWidth, h: 45, action: 'toggle_kart' });
 
+            let btnShopY = h*0.62;
             ctx.fillStyle = "#8e44ad";
-            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, h*0.62, btnWidth, 50, 15); ctx.fill(); }
-            else { ctx.fillRect(w/2 - btnWidth/2, h*0.62, btnWidth, 50); }
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(w/2 - btnWidth/2, btnShopY, btnWidth, 50, 15); ctx.fill(); }
+            else { ctx.fillRect(w/2 - btnWidth/2, btnShopY, btnWidth, 50); }
             ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Russo One'";
-            ctx.fillText("⚙️ OFICINA DE KARTS", w/2, h*0.62 + 32);
+            ctx.fillText("⚙️ OFICINA DE KARTS", w/2, btnShopY + 32);
+            this.lobbyHitboxes.push({ x: w/2 - btnWidth/2, y: btnShopY, w: btnWidth, h: 50, action: 'open_shop' });
 
             if (resetBtn) resetBtn.style.display = (this.isOnline && this.isHost) ? 'flex' : 'none';
 
