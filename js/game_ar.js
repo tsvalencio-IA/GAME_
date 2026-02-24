@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V20 - THE PERFECT HYBRID)
-// OFICINA GESTUAL (CÂMARA FRONTAL) + COLETA FÍSICA MANUAL DE BRINQUEDOS
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V21 - MINORITY REPORT)
+// OFICINA GESTUAL COM MOVENET (PALITINHOS), NAVEGAÇÃO AR REAL E COLETA FÍSICA
 // =============================================================================
 
 (function() {
@@ -65,10 +65,10 @@
     };
 
     // =========================================================================
-    // 2) FRONT_AR_OFFICE (GESTURE MODULE)
+    // 2) FRONT_AR_OFFICE (GESTURE MODULE VIA MOVENET CORE)
     // =========================================================================
     const GestureOffice = {
-        hands: null, isActive: false, cursor: { x: 0, y: 0, active: false }, hoverTime: 0, hoveredBtn: null, lastProcessTime: 0, eventCallback: null,
+        isActive: false, cursor: { x: 0, y: 0, active: false }, hoverTime: 0, hoveredBtn: null, eventCallback: null,
         
         buttons: [
             { id: 'REFUEL', label: 'ABASTECER', x: 0, y: 0, w: 160, h: 60, color: '#f39c12' },
@@ -80,43 +80,14 @@
             { id: 'EXIT', label: 'SAIR DA BASE', x: 0, y: 0, w: 260, h: 60, color: '#00ff66' }
         ],
 
-        init: async function(callback) {
-            this.eventCallback = callback; this.isActive = true; this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false }; this.hoverTime = 0; this.hoveredBtn = null;
-            if (typeof window.Hands === 'undefined') {
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js");
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js");
-                await this.loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js");
-            }
-            if (!this.hands && window.Hands) {
-                this.hands = new window.Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-                this.hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-                this.hands.onResults(this.onResults.bind(this));
-            }
+        init: function(callback) {
+            this.eventCallback = callback; this.isActive = true; 
+            this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false }; 
+            this.hoverTime = 0; this.hoveredBtn = null;
         },
 
-        loadScript: function(src) {
-            return new Promise((resolve, reject) => {
-                const s = document.createElement('script'); s.src = src; s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
-            });
-        },
-
-        onResults: function(results) {
+        update: function(ctx, w, h, dt, gameState, pose) {
             if (!this.isActive) return;
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const indexFinger = results.multiHandLandmarks[0][8]; 
-                this.cursor.x = (1 - indexFinger.x) * window.innerWidth; this.cursor.y = indexFinger.y * window.innerHeight; this.cursor.active = true;
-            } else {
-                this.cursor.active = false; this.hoverTime = 0;
-            }
-        },
-
-        update: async function(ctx, w, h, dt, gameState) {
-            if (!this.isActive) return;
-            const now = Date.now();
-            if (now - this.lastProcessTime > 100 && window.System?.video && window.System.video.readyState === 4) {
-                this.lastProcessTime = now;
-                try { await this.hands.send({image: window.System.video}); } catch(e) {}
-            }
 
             const cx = w / 2; const cy = h / 2;
             const gap = 10; const btnW = Math.min(160, (w/2) - 20);
@@ -128,7 +99,48 @@
             this.buttons[5].x = cx + gap;        this.buttons[5].y = cy + 60;  this.buttons[5].w = btnW;
             this.buttons[6].x = cx - 130;        this.buttons[6].y = cy + 140; this.buttons[6].w = 260;
 
-            ctx.fillStyle = "rgba(0, 15, 30, 0.9)"; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = "rgba(0, 15, 30, 0.85)"; ctx.fillRect(0, 0, w, h);
+            
+            // PROCESSAMENTO MOVENET (BRAÇOS EM PALITINHO)
+            this.cursor.active = false;
+            if (pose && pose.length > 0) {
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+                ctx.fillStyle = "#fff";
+
+                const drawBone = (p1Name, p2Name) => {
+                    const kp1 = pose.find(k => k.name === p1Name);
+                    const kp2 = pose.find(k => k.name === p2Name);
+                    if (kp1 && kp2 && kp1.score > 0.3 && kp2.score > 0.3) {
+                        // 640x480 é a resolução padrão do MoveNet no core.js. Invertemos o X para espelho.
+                        const x1 = ((640 - kp1.x) / 640) * w; const y1 = (kp1.y / 480) * h;
+                        const x2 = ((640 - kp2.x) / 640) * w; const y2 = (kp2.y / 480) * h;
+                        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.arc(x2, y2, 5, 0, Math.PI*2); ctx.fill();
+                    }
+                };
+
+                drawBone('left_shoulder', 'left_elbow'); drawBone('left_elbow', 'left_wrist');
+                drawBone('right_shoulder', 'right_elbow'); drawBone('right_elbow', 'right_wrist');
+
+                // Acha o pulso dominante (o que estiver mais alto na tela) para ser o mouse
+                const rw = pose.find(k => k.name === 'right_wrist');
+                const lw = pose.find(k => k.name === 'left_wrist');
+                let domWrist = null;
+                
+                if (rw && rw.score > 0.3 && lw && lw.score > 0.3) {
+                    domWrist = rw.y < lw.y ? rw : lw;
+                } else if (rw && rw.score > 0.3) { domWrist = rw; } 
+                else if (lw && lw.score > 0.3) { domWrist = lw; }
+
+                if (domWrist) {
+                    this.cursor.x = ((640 - domWrist.x) / 640) * w;
+                    this.cursor.y = (domWrist.y / 480) * h;
+                    this.cursor.active = true;
+                }
+            }
+
             ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.font = "bold clamp(24px, 6vw, 40px) 'Russo One'"; ctx.fillText("OFICINA HOLOGRÁFICA", cx, Math.max(40, cy - 160));
             ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(70, cy - 130));
             ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | COMB: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(90, cy - 110));
@@ -142,6 +154,7 @@
                 ctx.fillStyle = isHover ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.6)"; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
                 ctx.strokeStyle = btn.color; ctx.lineWidth = isHover ? 4 : 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
                 ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Chakra Petch'"; ctx.textAlign = "center"; ctx.fillText(btn.label, btn.x + btn.w/2, btn.y + btn.h/2 + 2);
+                
                 ctx.font = "12px Arial"; ctx.fillStyle = btn.color; let costTxt = "";
                 if(btn.id==='REFUEL') costTxt = `R$ ${Math.floor((gameState.stats.maxFuel - gameState.fuel)*2)}`;
                 if(btn.id==='REPAIR') costTxt = `R$ ${Math.floor((100 - gameState.health)*5)}`;
@@ -165,15 +178,11 @@
                     ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 25, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.0)*(Math.PI*2)); ctx.stroke();
                 }
             } else {
-                ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.textAlign = "center"; ctx.fillText("MOSTRE A MÃO PARA A CÂMERA OU TOQUE NOS BOTÕES", cx, h - 20);
+                ctx.fillStyle = "#aaa"; ctx.font = "14px Arial"; ctx.textAlign = "center"; ctx.fillText("LEVANTE A MÃO PARA CONTROLAR", cx, h - 20);
             }
         },
 
-        destroy: function() {
-            this.isActive = false;
-            if (this.hands) { this.hands.onResults(() => {}); if (typeof this.hands.close === 'function') { this.hands.close(); } }
-            this.cursor = { x: 0, y: 0, active: false };
-        }
+        destroy: function() { this.isActive = false; this.cursor = { x: 0, y: 0, active: false }; }
     };
 
     // =========================================================================
@@ -190,10 +199,8 @@
         floorColor: { r: 0, g: 0, b: 0 }, targetColor: { r: 0, g: 0, b: 0 },
         activeAnomaly: null, anomalies: [], spawnTimer: 0,
         
-        // INTERAÇÃO FÍSICA DE COLETA
-        isExtracting: false, targetFoundTimer: 0, pickupTimer: 0, cooldown: 0,
+        isExtracting: false, extractProgress: 0, cooldown: 0, currentEvent: null, eventTimer: 0, pickupTimer: 0,
         
-        currentEvent: null, eventTimer: 0,
         displayMoney: 0, displayFuel: 100, collectGlow: 0, collectZoom: 0, baseFlash: 0,
         currentMission: { type: 'NORMAL', goal: 3, progress: 0, timer: 0, active: false },
         
@@ -206,8 +213,7 @@
             this.state = 'INIT'; this.lastTime = performance.now(); this.timeTotal = 0; this.score = 0;
             this.health = 100; this.fuel = this.stats.maxFuel; this.wear = { motor: 0, wheels: 0 }; this.displayFuel = this.fuel;
             this.money = 0; this.displayMoney = 0; this.xp = 0; this.level = 1; this.cargo = []; this.anomalies = [];
-            this.isExtracting = false; this.pickupTimer = 0; this.targetFoundTimer = 0;
-            this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
+            this.isExtracting = false; this.pickupTimer = 0; this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
             
             this.generateMission(); this.setupSensors(); this.setupInput(); this.changeState('BOOT');
         },
@@ -235,10 +241,6 @@
                     this.startAILoop();
                     if (!this.currentMission.active) this.generateMission();
                     break;
-                case 'WAITING_PICKUP':
-                    this.pickupTimer = 0;
-                    if(window.Sfx) window.Sfx.play(800, 'square', 0.2, 0.2);
-                    break;
                 case 'ENTER_BASE_TRANSITION':
                     this.stopAILoop(); this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.virtualSpeed = 0; this.isExtracting = false; this.manualAccelerate = false;
                     break;
@@ -265,10 +267,11 @@
                     let acc = e.acceleration || e.accelerationIncludingGravity; if (!acc) return;
                     let mag = Math.sqrt((acc.x||0)*(acc.x||0) + (acc.y||0)*(acc.y||0) + (acc.z||0)*(acc.z||0));
                     let force = Math.abs(mag - (e.acceleration ? 0 : 9.81));
+                    
                     if (force > 0.3) {
                         this.deviceForce = force;
                         if (force > 15 && this.state === 'PLAY_REAR_AR') {
-                            this.health -= force * 0.5;
+                            let impactDmg = force * 0.5; this.health -= impactDmg;
                             if(navigator.vibrate) navigator.vibrate(200);
                             this.spawnParticles(window.innerWidth/2, window.innerHeight/2, 20, this.colors.danger); window.System.msg("IMPACTO DETECTADO!");
                             if (this.health <= 0 && this.state !== 'TOW_MODE') this.changeState('TOW_MODE');
@@ -304,6 +307,7 @@
                     if (x < 30 + accR*2 && y > h - 80 - accR*2 && this.state !== 'TOW_MODE') { this.manualAccelerate = true; }
                 }
                 else if (this.state === 'FRONT_AR_OFFICE') {
+                    // Touch Fallback para crianças
                     GestureOffice.buttons.forEach(btn => { if (x > btn.x && x < btn.x + btn.w && y > btn.y && y < btn.y + btn.h) { if (GestureOffice.eventCallback) GestureOffice.eventCallback(btn.id); } });
                 }
             };
@@ -330,7 +334,7 @@
             if (this.aiIntervalId !== null) { clearInterval(this.aiIntervalId); this.aiIntervalId = null; }
             this.aiIntervalId = setInterval(async () => {
                 if (this.aiProcessing) return;
-                if ((this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') && this.objectModel && window.System?.video && window.System.video.readyState === 4) {
+                if ((this.state === 'PLAY_REAR_AR') && this.objectModel && window.System?.video && window.System.video.readyState === 4) {
                     this.aiProcessing = true;
                     try {
                         const preds = await this.objectModel.detect(window.System.video);
@@ -352,13 +356,12 @@
             this.displayMoney += (this.money - this.displayMoney) * 10 * dt; this.displayFuel += (this.fuel - this.displayFuel) * 5 * dt;
 
             let fps = 1 / dt; let newInterval = (fps < 25) ? 1000 : 500;
-            if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') { this.startAILoop(); } }
+            if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR') { this.startAILoop(); } }
 
             if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
-                if (this.virtualSpeed > 0.1 && this.state === 'PLAY_REAR_AR') {
-                    let susY = Math.sin(this.timeTotal * this.virtualSpeed * 1.5) * (this.virtualSpeed / this.stats.baseSpeed) * 3;
-                    ctx.translate(0, susY);
+                if (this.virtualSpeed > 0.1 && !this.isExtracting) {
+                    let susY = Math.sin(this.timeTotal * this.virtualSpeed * 1.5) * (this.virtualSpeed / this.stats.baseSpeed) * 3; ctx.translate(0, susY);
                 }
                 if (this.collectZoom > 0) {
                     let z = 1 + (this.collectZoom * 0.03); ctx.translate(w/2, h/2); ctx.scale(z, z); ctx.translate(-w/2, -h/2); this.collectZoom -= dt * 2;
@@ -371,9 +374,7 @@
                 } else { ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h); }
                 
                 if (this.baseFlash > 0) { ctx.fillStyle = `rgba(0, 255, 100, ${this.baseFlash * 0.5})`; ctx.fillRect(0, 0, w, h); this.baseFlash -= dt * 1.5; }
-                if (this.state === 'WAITING_PICKUP') { ctx.fillStyle = `rgba(255, 0, 60, ${Math.abs(Math.sin(this.timeTotal*10))*0.2})`; ctx.fillRect(0, 0, w, h); }
-                else { ctx.fillStyle = `rgba(0, 50, 60, ${0.1 + Math.sin(this.timeTotal*2)*0.05})`; ctx.fillRect(0, 0, w, h); }
-                
+                ctx.fillStyle = `rgba(0, 50, 60, ${0.1 + Math.sin(this.timeTotal*2)*0.05})`; ctx.fillRect(0, 0, w, h);
                 ctx.restore();
             }
 
@@ -381,10 +382,8 @@
                 case 'BOOT': this.drawOverlay(ctx, w, h, "INICIALIZANDO", "Carregando Engine Premium..."); break;
                 case 'CALIBRATION': this.drawOverlay(ctx, w, h, "PONTO ZERO", "Aponte o caminhão para a pista e TOQUE"); break;
                 case 'PLAY_REAR_AR':
-                case 'WAITING_PICKUP':
                 case 'TOW_MODE':
-                    this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt); this.drawHUD(ctx, w, h);
-                    break;
+                    this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt); this.drawHUD(ctx, w, h); break;
                 case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startFrontCamera', 'FRONT_AR_OFFICE'); break;
                 case 'FRONT_AR_OFFICE':
                     if (window.System?.video && window.System.video.readyState === 4) {
@@ -393,8 +392,7 @@
                         if (vr > cr) { dw = h * vr; dx = (w - dw) / 2; } else { dh = w / vr; dy = (h - dh) / 2; }
                         ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -dx, dy, dw, dh); ctx.restore();
                     }
-                    GestureOffice.update(ctx, w, h, dt, this);
-                    break;
+                    GestureOffice.update(ctx, w, h, dt, this, pose); break;
                 case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startRearCamera', 'PLAY_REAR_AR'); break;
                 case 'GAME_OVER': this.drawOverlay(ctx, w, h, "FIM DE JOGO", "Calculando pontuação..."); break;
             }
@@ -440,6 +438,7 @@
             }
 
             let isMoving = this.virtualSpeed > 0.15;
+
             if (isMoving) {
                 let speedMod = 1.0; if (this.currentEvent === 'STORM') speedMod *= 0.5; 
                 let currentSpeed = this.virtualSpeed * speedMod;
@@ -494,105 +493,95 @@
         },
 
         processAR: function(ctx, w, h, dt) {
-            if (this.state === 'TOW_MODE') return; 
+            if (this.state === 'TOW_MODE') { this.isExtracting = false; return; }
 
             const cx = w / 2; const cy = h / 2;
             let nearestDist = 9999; this.activeAnomaly = null;
             this.anomalies.forEach(ano => { let d = Math.hypot(ano.x - this.vPos.x, ano.y - this.vPos.y); if (d < nearestDist) { nearestDist = d; this.activeAnomaly = ano; } });
 
-            let visualFound = false; let foundBox = null;
-            const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
-            const sX = w / vW; const sY = h / vH;
-
-            // FILTRO DE TAMANHO RESTRITO (SÓ CARRINHOS/OBJETOS PEQUENOS)
-            this.detectedItems.forEach(item => {
-                if (['person', 'bed', 'sofa', 'tv', 'refrigerator', 'door', 'dining table'].includes(item.class)) return;
-                if (item.score < 0.15) return;
+            // FILTRO DE TAMANHO E TOYS: Só ativamos a mecânica se a IA reconhecer algo entre 5% e 60% do ecrã
+            let visualFound = false;
+            let foundBox = null;
+            
+            if (this.activeAnomaly && nearestDist < 30 && this.cargo.length < this.stats.maxCargo && this.cooldown <= 0) {
+                const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
+                const sX = w / vW; const sY = h / vH;
                 
-                const bW = item.bbox[2] * sX; const bH = item.bbox[3] * sY;
-                if (bW < w * 0.05 || bW > w * 0.6) return; // Regra Estrita: Nem grão de areia, nem sofá
-                
-                const cX = (item.bbox[0] * sX) + bW/2; const cY = (item.bbox[1] * sY) + bH/2;
-                if (Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4) {
-                    visualFound = true; foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: item.class };
-                }
-            });
+                const allowedClasses = ['car', 'truck', 'bus', 'train', 'mouse', 'cell phone', 'remote', 'bottle', 'cup'];
 
-            // Fallback Óptico Leve (Apenas se a IA não achar e a cor for MUITO contrastante no centro)
-            if (!visualFound) {
-                this.floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 40);
-                this.targetColor = this.getAverageColor(ctx, cx - 40, cy - 40, 80, 80);
-                let diff = Math.abs(this.floorColor.r - this.targetColor.r) + Math.abs(this.floorColor.g - this.targetColor.g) + Math.abs(this.floorColor.b - this.targetColor.b);
-                if (diff > 80) visualFound = true; // Sensibilidade reduzida para não captar tudo
-            }
+                this.detectedItems.forEach(item => {
+                    if (!allowedClasses.includes(item.class) || item.score < 0.2) return;
+                    const bW = item.bbox[2]*sX; const bH = item.bbox[3]*sY;
+                    if (bW < w * 0.05 || bW > w * 0.6) return; // Fator chave: Não é muito grande nem muito pequeno
+                    
+                    const cX = (item.bbox[0]*sX) + bW/2; const cY = (item.bbox[1]*sY) + bH/2;
+                    if (Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4) {
+                        visualFound = true;
+                        foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: item.class };
+                    }
+                });
 
-            if (this.state === 'PLAY_REAR_AR') {
-                if (this.cargo.length < this.stats.maxCargo && this.cooldown <= 0) {
-                    if (visualFound) {
-                        this.targetFoundTimer = (this.targetFoundTimer || 0) + dt;
-                        if (this.targetFoundTimer > 0.5) { 
-                            this.changeState('WAITING_PICKUP'); 
-                            if(window.Sfx) window.Sfx.play(1000, 'sawtooth', 0.1, 0.1);
-                        }
-                    } else { this.targetFoundTimer = 0; }
-
+                if (!this.isExtracting) {
                     const targetR = Math.min(w, h) * 0.35;
-                    ctx.strokeStyle = visualFound ? this.colors.success : this.colors.warn; ctx.lineWidth = 3;
+                    ctx.strokeStyle = this.colors.warn; ctx.lineWidth = 4;
                     ctx.beginPath(); ctx.arc(cx, cy, targetR, 0, Math.PI*2); ctx.stroke();
                     ctx.beginPath(); ctx.moveTo(cx - targetR - 20, cy); ctx.lineTo(cx + targetR + 20, cy); ctx.stroke();
                     ctx.beginPath(); ctx.moveTo(cx, cy - targetR - 20); ctx.lineTo(cx, cy + targetR + 20); ctx.stroke();
 
                     if (foundBox) {
                         ctx.strokeStyle = "rgba(0, 255, 255, 0.8)"; ctx.lineWidth = 3; ctx.strokeRect(foundBox.x, foundBox.y, foundBox.w, foundBox.h);
-                        ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(foundBox.x, foundBox.y - 25, 100, 25);
-                        ctx.fillStyle = "#0ff"; ctx.textAlign="left"; ctx.font="14px Arial"; ctx.fillText("BRINQUEDO", foundBox.x + 5, foundBox.y - 8);
                     }
                 }
+
+                if (visualFound && !this.isExtracting) {
+                    this.isExtracting = true;
+                    this.pickupTimer = 0;
+                }
             }
-            else if (this.state === 'WAITING_PICKUP') {
-                // TELA VERMELHA DE ALERTA DE COLETA FÍSICA
+
+            // A MÁGICA: INTERAÇÃO DE PEGADA FÍSICA
+            if (this.isExtracting && this.activeAnomaly) {
+                ctx.fillStyle = `rgba(255, 0, 60, ${Math.abs(Math.sin(this.timeTotal*10))*0.3})`; ctx.fillRect(0, 0, w, h);
+                
                 const uiY = h - 140;
                 ctx.fillStyle = this.colors.danger; ctx.textAlign = "center"; ctx.font = "bold clamp(20px, 5vw, 40px) 'Russo One'";
-                ctx.fillText("ALVO BLOQUEADO!", cx, cy - 80);
+                ctx.fillText("ALVO BLOQUEADO!", cx, uiY - 45);
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 20px) Arial";
-                ctx.fillText("REMOVA O CARRINHO COM A MÃO!", cx, cy - 50);
+                ctx.fillText("PARE O CAMINHÃO E REMOVA COM A MÃO!", cx, uiY - 15);
 
                 if (foundBox) {
                     ctx.strokeStyle = this.colors.danger; ctx.lineWidth = 4; ctx.strokeRect(foundBox.x, foundBox.y, foundBox.w, foundBox.h);
-                    ctx.beginPath(); ctx.moveTo(cx, h); ctx.lineTo(foundBox.x + foundBox.w/2, foundBox.y + foundBox.h/2); ctx.stroke();
                 }
 
-                // O GRANDE TRUQUE: Se o objeto SUMIR da câmara, o jogador apanhou-o!
+                // O segredo de Game Design: Se visualFound ficou FALSO, significa que ele meteu a mão e tirou o objeto da frente!
                 if (!visualFound) {
                     this.pickupTimer += dt;
-                    ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.2, cy + 20, w*0.6, 20);
-                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.2, cy + 20, (this.pickupTimer/1.0)*(w*0.6), 20);
-                    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.2, cy + 20, w*0.6, 20);
-                    ctx.fillStyle = this.colors.success; ctx.font = "bold 16px Arial"; ctx.fillText("GUARDANDO NA CAÇAMBA...", cx, cy + 60);
-
-                    if (this.pickupTimer > 1.0) { // Ficou 1 segundo sem ver o objeto
-                        let val = this.activeAnomaly ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
-                        this.cargo.push(val); this.score += val / 10;
-                        window.System.msg("BRINQUEDO NA CAÇAMBA!");
+                    ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 20);
+                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.0)*(w*0.8), 20);
+                    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY + 10, w*0.8, 20);
+                    
+                    if (this.pickupTimer > 1.0) { // Ficou 1s sem ver o objeto
+                        this.cargo.push(this.activeAnomaly.val);
+                        this.score += this.activeAnomaly.val / 10;
+                        window.System.msg("COLOCADO NA CAÇAMBA!");
                         
                         if (this.currentMission && this.currentMission.active) {
                             this.currentMission.progress++;
-                            if (this.currentMission.progress >= this.currentMission.goal) this.completeMission();
+                            if (this.currentMission.progress >= this.currentMission.goal) { this.completeMission(); }
                         }
-                        if (this.activeAnomaly) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
-
-                        this.changeState('PLAY_REAR_AR'); this.cooldown = 3.0; 
+                        this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
+                        this.isExtracting = false; this.cooldown = 2.0; 
+                        
                         if(window.Gfx && typeof window.Gfx.shakeScreen === 'function') window.Gfx.shakeScreen(20);
                         if(navigator.vibrate) navigator.vibrate([50, 50, 50]);
                         this.collectGlow = 1.0; this.collectZoom = 1.0; this.spawnParticles(cx, cy, 40, this.colors.main);
                     }
                 } else {
-                    this.pickupTimer = Math.max(0, this.pickupTimer - dt); // Reseta se o objeto voltar
+                    this.pickupTimer = Math.max(0, this.pickupTimer - dt);
                 }
 
-                // Se o caminhão se afastar (Virtual Speed), cancela
                 if (this.virtualSpeed > 10) {
-                    this.changeState('PLAY_REAR_AR'); window.System.msg("ALVO ABANDONADO");
+                    this.isExtracting = false; window.System.msg("ALVO ABANDONADO");
                 }
             }
         },
@@ -604,90 +593,70 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // Top Panel
-            const topH = 50;
-            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, 0, w, topH);
-            ctx.strokeStyle = this.colors.main; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, topH); ctx.lineTo(w, topH); ctx.stroke();
+            // AR WAYPOINTS (SETAS DIRECIONAIS PARA A BASE 3D)
+            const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
+                let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
+                let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
+                let fwdAngle = Math.atan2(Math.sin(angle + Math.PI/2), Math.cos(angle + Math.PI/2)); // -PI to PI
+                let fov = Math.PI / 2.5; 
+                
+                if (Math.abs(fwdAngle) < fov) {
+                    let projX = (w/2) + (fwdAngle / fov) * (w/2); let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
+                    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(projX, projY - 25); ctx.lineTo(projX + 15, projY); ctx.lineTo(projX, projY + 25); ctx.lineTo(projX - 15, projY); ctx.fill();
+                    ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Russo One'"; ctx.textAlign = "center"; ctx.fillText(label, projX, projY - 35);
+                    ctx.font = "bold 12px Arial"; ctx.fillText(Math.floor(dist) + "m", projX, projY + 45);
+                } else {
+                    let isRight = fwdAngle > 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
+                    ctx.fillStyle = isBase ? this.colors.success : color; ctx.beginPath();
+                    if (isRight) { ctx.moveTo(edgeX-20, edgeY - 30); ctx.lineTo(edgeX + 20, edgeY); ctx.lineTo(edgeX-20, edgeY + 30); } 
+                    else { ctx.moveTo(edgeX+20, edgeY - 30); ctx.lineTo(edgeX - 20, edgeY); ctx.lineTo(edgeX+20, edgeY + 30); }
+                    ctx.fill();
+                    ctx.fillStyle = "#fff"; ctx.font = "bold 14px Arial"; ctx.textAlign = "center"; ctx.fillText(isRight ? "GIRE ->" : "<- GIRE", isRight ? edgeX - 40 : edgeX + 40, edgeY + 5);
+                }
+            };
 
-            ctx.fillStyle = "#fff"; ctx.font = "bold clamp(10px, 3vw, 14px) 'Chakra Petch'"; ctx.textAlign = "left";
-            ctx.fillText(`LVL ${this.level} | VIDA: ${Math.floor(this.health)}%`, 10, 20);
+            if (isFull || this.state === 'TOW_MODE') {
+                drawARWaypoint(0, 0, "BASE DE ENTREGA", this.colors.success, true);
+            } else {
+                this.anomalies.forEach(a => drawARWaypoint(a.x, a.y, a.type==='RARE'?"RARO":"SUCATA", a.type==='RARE'?this.colors.rare:this.colors.warn, false));
+                ctx.globalAlpha = 0.3; drawARWaypoint(0, 0, "BASE", this.colors.success, true); ctx.globalAlpha = 1.0;
+            }
+
+            const topH = 50;
+            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, 0, w, topH); ctx.strokeStyle = this.colors.main; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, topH); ctx.lineTo(w, topH); ctx.stroke();
+
+            ctx.fillStyle = "#fff"; ctx.font = "bold clamp(10px, 3vw, 14px) 'Chakra Petch'"; ctx.textAlign = "left"; ctx.fillText(`LVL ${this.level} | VIDA: ${Math.floor(this.health)}%`, 10, 20);
             
             ctx.save();
             const fuelW = Math.min(150, w/2.5);
-            if (fuelPct < 0.2) {
-                let pulse = 1 + Math.abs(Math.sin(this.timeTotal * 10)) * 0.05;
-                ctx.translate(10 + fuelW/2, 28 + 5); ctx.scale(pulse, pulse); ctx.translate(-(10 + fuelW/2), -(28 + 5));
-            }
-            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(10, 28, fuelW, 12);
-            ctx.fillStyle = fuelPct > 0.2 ? this.colors.success : this.colors.danger; ctx.fillRect(10, 28, fuelPct * fuelW, 12);
-            ctx.strokeStyle = "#fff"; ctx.strokeRect(10, 28, fuelW, 12);
-            ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.fillText("COMBUSTÍVEL", 15, 38);
-            ctx.restore();
+            if (fuelPct < 0.2) { let pulse = 1 + Math.abs(Math.sin(this.timeTotal * 10)) * 0.05; ctx.translate(10 + fuelW/2, 28 + 5); ctx.scale(pulse, pulse); ctx.translate(-(10 + fuelW/2), -(28 + 5)); }
+            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(10, 28, fuelW, 12); ctx.fillStyle = fuelPct > 0.2 ? this.colors.success : this.colors.danger; ctx.fillRect(10, 28, fuelPct * fuelW, 12);
+            ctx.strokeStyle = "#fff"; ctx.strokeRect(10, 28, fuelW, 12); ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.fillText("COMBUSTÍVEL", 15, 38); ctx.restore();
 
-            // MENSAGEM GIGANTE SE CAÇAMBA CHEIA
-            if (isFull && this.state !== 'TOW_MODE') {
-                ctx.fillStyle = (Math.sin(this.timeTotal*5) > 0) ? this.colors.success : "#fff";
-                ctx.textAlign = "center"; ctx.font = "bold clamp(16px, 4vw, 24px) 'Russo One'";
-                ctx.fillText("CAÇAMBA CHEIA! VOLTE À BASE!", w/2, topH + 30);
-            } else if (this.currentMission && this.currentMission.active && this.state !== 'TOW_MODE') {
-                ctx.fillStyle = this.colors.warn; ctx.textAlign = "center"; ctx.font = "bold clamp(12px, 3.5vw, 16px) 'Chakra Petch'";
-                ctx.fillText(`MISSÃO: ${this.currentMission.type} (${this.currentMission.progress}/${this.currentMission.goal})`, w/2, topH + 20);
-                if (this.currentMission.type === 'TIMED') { ctx.fillText(`TEMPO: ${Math.floor(this.currentMission.timer)}s`, w/2, topH + 40); }
-            }
-
-            // Radar & Garage
             const btnS = Math.min(50, w * 0.15); const rightPad = 15;
             let distToBase = Math.hypot(this.vPos.x, this.vPos.y); let atBase = distToBase < 30;
             const garageY = topH + 15;
-            ctx.fillStyle = atBase ? this.colors.success : "rgba(100,100,100,0.5)";
-            ctx.fillRect(w - btnS - rightPad, garageY, btnS, btnS); ctx.strokeStyle = "#fff"; ctx.strokeRect(w - btnS - rightPad, garageY, btnS, btnS);
-            ctx.fillStyle = "#000"; ctx.textAlign="center"; ctx.font = `bold ${btnS*0.5}px Arial`; ctx.fillText("🔧", w - rightPad - btnS/2, garageY + btnS*0.7);
+            ctx.fillStyle = atBase ? this.colors.success : "rgba(100,100,100,0.5)"; ctx.fillRect(w - btnS - rightPad, garageY, btnS, btnS);
+            ctx.strokeStyle = "#fff"; ctx.strokeRect(w - btnS - rightPad, garageY, btnS, btnS); ctx.fillStyle = "#000"; ctx.textAlign="center"; ctx.font = `bold ${btnS*0.5}px Arial`; ctx.fillText("🔧", w - rightPad - btnS/2, garageY + btnS*0.7);
 
-            const rR = Math.min(45, w * 0.12);
-            const rCx = w - rR - rightPad; const rCy = garageY + btnS + rR + 15;
-            let radarGradient = ctx.createRadialGradient(rCx, rCy, 0, rCx, rCy, rR);
-            radarGradient.addColorStop(0, "rgba(0, 50, 40, 0.9)"); radarGradient.addColorStop(1, "rgba(0, 10, 20, 0.7)");
-            ctx.fillStyle = radarGradient; ctx.beginPath(); ctx.arc(rCx, rCy, rR, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = this.currentEvent ? this.colors.danger : this.colors.main; ctx.lineWidth = 2; ctx.stroke();
-
-            const drawBlip = (wX, wY, col, sz, isBlinking) => {
-                let dx = wX - this.vPos.x; let dy = wY - this.vPos.y; let dist = Math.hypot(dx, dy);
-                if (dist < this.stats.radarRange) {
-                    if (isBlinking && Math.sin(this.timeTotal * 15) > 0) return;
-                    let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2); let sD = (dist / this.stats.radarRange) * rR;
-                    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rCx + Math.cos(angle)*sD, rCy + Math.sin(angle)*sD, sz, 0, Math.PI*2); ctx.fill();
-                }
-            };
-            drawBlip(0, 0, this.colors.success, 5, false); // Base
-            if(!isFull) this.anomalies.forEach(a => drawBlip(a.x, a.y, a.type==='RARE'?this.colors.rare:this.colors.warn, 3, a.type==='RARE'));
-            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(rCx, rCy - 6); ctx.lineTo(rCx+4, rCy+4); ctx.lineTo(rCx-4, rCy+4); ctx.fill(); // Player
-
-            // Bottom Panel
             const botH = 60; const botY = h - botH;
-            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, botY, w, botH);
-            ctx.strokeStyle = this.colors.main; ctx.beginPath(); ctx.moveTo(0, botY); ctx.lineTo(w, botY); ctx.stroke();
+            ctx.fillStyle = this.colors.panel; ctx.fillRect(0, botY, w, botH); ctx.strokeStyle = this.colors.main; ctx.beginPath(); ctx.moveTo(0, botY); ctx.lineTo(w, botY); ctx.stroke();
 
-            // Accelerate Button
             const accR = Math.min(45, w * 0.12); const accX = 15 + accR; const accY = botY - accR - 15;
-            ctx.fillStyle = this.manualAccelerate ? "rgba(0,255,255,0.6)" : "rgba(0,255,255,0.2)";
-            ctx.beginPath(); ctx.arc(accX, accY, accR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = this.manualAccelerate ? "rgba(0,255,255,0.6)" : "rgba(0,255,255,0.2)"; ctx.beginPath(); ctx.arc(accX, accY, accR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
             ctx.fillStyle = "#fff"; ctx.font = "bold 12px Arial"; ctx.textAlign="center"; ctx.fillText("GAS", accX, accY + 4);
 
-            ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 18px) 'Chakra Petch'";
-            ctx.fillText(`CARGA: ${this.cargo.length}/${this.stats.maxCargo}`, 15, h - 25);
-            ctx.fillStyle = this.colors.success; ctx.font = "bold clamp(18px, 5vw, 24px) 'Russo One'";
-            ctx.fillText(`R$ ${Math.floor(this.displayMoney).toLocaleString()}`, w/2 - 20, h - 22);
+            ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 18px) 'Chakra Petch'"; ctx.fillText(`CARGA: ${this.cargo.length}/${this.stats.maxCargo}`, 140, h - 25);
+            ctx.fillStyle = this.colors.success; ctx.font = "bold clamp(18px, 5vw, 24px) 'Russo One'"; ctx.fillText(`R$ ${Math.floor(this.displayMoney).toLocaleString()}`, 300, h - 22);
 
-            ctx.textAlign = "right"; ctx.fillStyle = this.colors.main; ctx.font = "bold clamp(12px, 3vw, 16px) 'Chakra Petch'";
-            ctx.fillText(`BASE: ${Math.floor(distToBase)}m`, w - 15, h - 25);
+            ctx.textAlign = "right"; ctx.fillStyle = this.colors.main; ctx.font = "bold clamp(12px, 3vw, 16px) 'Chakra Petch'"; ctx.fillText(`BASE: ${Math.floor(distToBase)}m`, w - 15, h - 25);
             
             if (this.state === 'TOW_MODE') { ctx.textAlign="center"; ctx.fillStyle = this.colors.danger; ctx.font = "bold clamp(20px, 5vw, 30px) 'Russo One'"; ctx.fillText("MODO REBOQUE!", w/2, h/2 - 20); }
         },
 
         deliverCargo: function() {
             if (this.cargo.length > 0) {
-                let total = this.cargo.reduce((a, b) => a + b, 0);
-                let effBonus = Math.floor(total * (this.fuel / this.stats.maxFuel) * 0.3); total += effBonus;
+                let total = this.cargo.reduce((a, b) => a + b, 0); let effBonus = Math.floor(total * (this.fuel / this.stats.maxFuel) * 0.3); total += effBonus;
                 if (this.currentMission && this.currentMission.active && this.currentMission.type === 'HEAVY LOAD') { total = Math.floor(total * 1.5); }
                 this.money += total; this.score += total / 10;
                 this.xp += this.cargo.length * 100;
@@ -715,18 +684,12 @@
         },
 
         applyStats: function() {
-            this.stats.baseSpeed = 20 + (this.upgrades.engine.lvl * 5);
-            this.stats.maxFuel = 100 + (this.upgrades.tank.lvl * 50);
-            this.stats.radarRange = 150 + (this.upgrades.radar.lvl * 50);
-            this.stats.wearRate = Math.max(0.1, 0.3 - (this.upgrades.truck.lvl * 0.05));
+            this.stats.baseSpeed = 20 + (this.upgrades.engine.lvl * 5); this.stats.maxFuel = 100 + (this.upgrades.tank.lvl * 50); this.stats.radarRange = 150 + (this.upgrades.radar.lvl * 50); this.stats.wearRate = Math.max(0.1, 0.3 - (this.upgrades.truck.lvl * 0.05));
             if (this.fuel > this.stats.maxFuel) this.fuel = this.stats.maxFuel;
         },
 
         drawOverlay: function(ctx, w, h, title, sub) {
-            ctx.fillStyle = "rgba(0, 5, 10, 0.95)"; ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = this.colors.main; ctx.textAlign = "center";
-            ctx.font = "bold clamp(24px, 6vw, 50px) 'Russo One'"; ctx.fillText(title, w/2, h/2 - 20);
-            ctx.fillStyle = "#fff"; ctx.font = "bold 14px Arial"; ctx.fillText(sub, w/2, h/2 + 30);
+            ctx.fillStyle = "rgba(0, 5, 10, 0.95)"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = this.colors.main; ctx.textAlign = "center"; ctx.font = "bold clamp(30px, 6vw, 60px) 'Russo One'"; ctx.fillText(title, w/2, h/2 - 20); ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.fillText(sub, w/2, h/2 + 30);
         },
 
         spawnParticles: function(x, y, count, color) {
@@ -737,15 +700,13 @@
             ctx.globalCompositeOperation = 'screen';
             for (let i = particles.length - 1; i >= 0; i--) {
                 let p = particles[i]; p.x += p.vx * dt * 60; p.y += p.vy * dt * 60; p.life -= dt * 2;
-                if (p.life <= 0) { particles.splice(i, 1); continue; }
-                ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+                if (p.life <= 0) { particles.splice(i, 1); continue; } ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
             }
             ctx.globalAlpha = 1.0; ctx.globalCompositeOperation = 'source-over';
         },
 
         cleanup: function() {
-            this.stopAILoop();
-            if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
+            this.stopAILoop(); if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
             if (this._deviceOrientationHandler) window.removeEventListener('deviceorientation', this._deviceOrientationHandler);
             if (this._deviceMotionHandler) window.removeEventListener('devicemotion', this._deviceMotionHandler);
         }
@@ -754,10 +715,7 @@
     const regLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
             window.System.registerGame('ar_truck_sim', 'AR Ops Premium', '🚀', Game, {
-                camera: 'environment',
-                phases: [
-                    { id: 'f1', name: 'MISSÃO AR GLOBAL', desc: 'Siga o Radar, apanhe com a mão e volte à base!', reqLvl: 1 }
-                ]
+                camera: 'environment', phases: [{ id: 'f1', name: 'MISSÃO AR GLOBAL', desc: 'Gerencie a frota AR Híbrida via HUD Premium.', reqLvl: 1 }]
             });
             clearInterval(regLoop);
         }
