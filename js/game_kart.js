@@ -1,7 +1,7 @@
 // =============================================================================
-// KART LEGENDS: TITANIUM MASTER FINAL V18 (ULTIMATE COMBAT, GARAGE & CUSTOM KARTS)
+// KART LEGENDS: TITANIUM MASTER FINAL V19 (ULTIMATE COMBAT, CAROUSEL SHOP & HD KARTS)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. MODELOS VISUAIS (TANQUE, AVIÃO, MOTO), FÍSICA E LOJA FIX.
+// STATUS: 100% COMPLETO. MODELOS VISUAIS HD, EXPLOSÕES REAIS, IA APRIMORADA, FÍSICA CORRIGIDA.
 // =============================================================================
 
 (function() {
@@ -10,9 +10,9 @@
     // 1. DADOS E CONFIGURAÇÕES
     // -----------------------------------------------------------------
     const AI_DIFFICULTY_SETTINGS = {
-        'EASY':   { speedMult: 0.90, accelMult: 0.9,  reaction: 0.05, lookAhead: 15, errorRate: 0.05, rubberBand: 0.0 },
-        'MEDIUM': { speedMult: 1.05, accelMult: 1.1,  reaction: 0.10, lookAhead: 25, errorRate: 0.02, rubberBand: 0.2 },
-        'HARD':   { speedMult: 1.25, accelMult: 1.4,  reaction: 0.25, lookAhead: 40, errorRate: 0.00, rubberBand: 0.4 } 
+        'EASY':   { speedMult: 0.90, accelMult: 0.9,  reaction: 0.05, lookAhead: 15, errorRate: 0.08, rubberBand: 0.0 },
+        'MEDIUM': { speedMult: 1.05, accelMult: 1.1,  reaction: 0.10, lookAhead: 25, errorRate: 0.04, rubberBand: 0.2 },
+        'HARD':   { speedMult: 1.25, accelMult: 1.4,  reaction: 0.25, lookAhead: 40, errorRate: 0.01, rubberBand: 0.4 } 
     };
     
     const CURRENT_DIFFICULTY = 'HARD'; 
@@ -28,14 +28,14 @@
         { id: 7, name: 'WARIO',  color: '#ffeb3b', hat: '#fbc02d', speedInfo: 1.08, turnInfo: 0.85, weight: 1.5, accel: 0.032, aggression: 0.95 }
     ];
 
-    // --- CATÁLOGO EXPANDIDO DE KARTS (ESTÉTICA E FÍSICA DEDICADAS) ---
+    // --- CATÁLOGO EXPANDIDO DE KARTS (ESTÉTICA HD E FÍSICA DEDICADAS) ---
     const KART_MODELS = [
         { id: 0, name: 'KART PADRÃO', type: 'standard', price: 0, speedBonus: 0.0, turnBonus: 0.0, weightBonus: 0.0, color: '#bdc3c7', desc: 'Kart equilibrado de fábrica.' },
-        { id: 1, name: 'FÓRMULA 1', type: 'f1', price: 2000, speedBonus: 0.25, turnBonus: -0.05, weightBonus: 0.1, color: '#e74c3c', desc: 'Velocidade Extrema no Asfalto.' },
+        { id: 1, name: 'FÓRMULA 1', type: 'f1', price: 2000, speedBonus: 0.25, turnBonus: -0.05, weightBonus: 0.1, color: '#e74c3c', desc: 'Velocidade extrema no asfalto.' },
         { id: 2, name: 'CARRO DE LUXO', type: 'luxury', price: 3000, speedBonus: 0.10, turnBonus: 0.05, weightBonus: 0.3, color: '#2c3e50', desc: 'Elegância, Peso e Estabilidade.' },
-        { id: 3, name: 'MOTO SUPER', type: 'moto', price: 1500, speedBonus: 0.15, turnBonus: 0.30, weightBonus: -0.4, color: '#2ecc71', desc: 'Curvas fechadas, mas leve nas batidas.' },
+        { id: 3, name: 'MOTO SUPER', type: 'moto', price: 1500, speedBonus: 0.15, turnBonus: 0.30, weightBonus: -0.4, color: '#2ecc71', desc: 'Curvas fechadas, muito leve.' },
         { id: 4, name: 'TRATOR', type: 'tractor', price: 3500, speedBonus: -0.10, turnBonus: 0.15, weightBonus: 0.8, color: '#f1c40f', desc: 'Ignora offroad, amassa os rivais.' },
-        { id: 5, name: 'TANQUE DE GUERRA', type: 'tank', price: 6000, speedBonus: -0.15, turnBonus: -0.10, weightBonus: 1.5, color: '#4b6584', desc: 'Imparável. Cascos não fazem cócegas.' },
+        { id: 5, name: 'TANQUE MILITAR', type: 'tank', price: 6000, speedBonus: -0.15, turnBonus: -0.10, weightBonus: 1.5, color: '#4b6584', desc: 'Blindado. Cascos não fazem cócegas.' },
         { id: 6, name: 'AVIÃO JATO', type: 'plane', price: 8000, speedBonus: 0.40, turnBonus: 0.05, weightBonus: -0.2, color: '#ffffff', desc: 'Praticamente voa sobre a pista!' }
     ];
 
@@ -123,13 +123,14 @@
         item: null, itemCooldown: 0, projectiles: [],
 
         // --- SISTEMA DE GARAGEM E KART PERSONALIZADO ---
-        useCustomKart: false, kartUpgrades: {}, shopHitboxes: [], lobbyHitboxes: [], garage: [{ modelId: 0 }], activeKartIdx: 0, shopTab: 'GARAGE',
+        useCustomKart: false, kartUpgrades: {}, shopHitboxes: [], lobbyHitboxes: [], 
+        garage: [{ modelId: 0 }], activeKartIdx: 0, shopTab: 'SHOP', shopCarouselIdx: 0,
 
         init: function(faseData) { 
             this.cleanup(); this.state = 'MODE_SELECT'; this.setupUI(); this.resetPhysics(); KartAudio.init(); 
             this.currentFase = faseData || { id: 'arcade', mode: 'RACE', targetRank: 3, trackId: 0, diff: 'MEDIUM' }; 
 
-            // Carrega os dados da Garagem do Firebase (Nuvem Global)
+            // Carrega os dados da Garagem do Firebase
             if (window.Profile) {
                 if (!window.Profile.kartSave) window.Profile.kartSave = { garage: [{ modelId: 0 }], activeKartIdx: 0, upgrades: { engine: 1, tires: 1, suspension: 1 } };
                 this.garage = window.Profile.kartSave.garage || [{ modelId: 0 }];
@@ -174,29 +175,27 @@
             
             document.getElementById('game-ui').appendChild(nitroBtn); document.getElementById('game-ui').appendChild(resetBtn);
 
-            // FIX: Usando pointerdown para evitar falhas em telas Touch
+            // SISTEMA DE PONTEIRO EXATO PARA ECRÃS TOUCH
             window.System.canvas.onpointerdown = (e) => {
                 const rect = window.System.canvas.getBoundingClientRect(); 
-                
-                // Mapeia o clique real e transforma no scale do canvas desenhado
-                const scaleX = window.System.canvas.width / rect.width;
-                const scaleY = window.System.canvas.height / rect.height;
+                const cw = window.System.canvas.width; 
+                const ch = window.System.canvas.height;
+                const scaleX = cw / rect.width;
+                const scaleY = ch / rect.height;
                 const clickX = (e.clientX - rect.left) * scaleX;
                 const clickY = (e.clientY - rect.top) * scaleY;
-                
-                // Variáveis auxiliares de percentagem para Menus Simples
-                const y = (e.clientY - rect.top) / rect.height;
+                const yPct = (e.clientY - rect.top) / rect.height;
 
                 KartAudio.init(); if(KartAudio.ctx && KartAudio.ctx.state === 'suspended') KartAudio.ctx.resume();
 
                 if (this.state === 'MODE_SELECT') { 
                     if (this.currentFase.id === 'arcade') {
-                        if (y < 0.5) this.selectMode('OFFLINE'); else this.selectMode('ONLINE'); 
+                        if (yPct < 0.5) this.selectMode('OFFLINE'); else this.selectMode('ONLINE'); 
                     } else { this.selectMode('OFFLINE'); }
                     window.Sfx.click(); 
                 } 
                 else if (this.state === 'LOBBY') {
-                    if (y > 0.8) { 
+                    if (yPct > 0.8) { 
                         if (this.isOnline) {
                             if (this.isHost) {
                                 const activePlayers = Object.values(this.remotePlayersData || {}).filter(p => (Date.now() - p.lastSeen < SAFETY.ZOMBIE_TIMEOUT));
@@ -204,30 +203,22 @@
                             } else { this.toggleReady(); }
                         } else { this.startRace(this.currentFase.trackId !== undefined ? this.currentFase.trackId : this.selectedTrack); }
                     } else {
-                        // SISTEMA DE HITBOXES EXATAS NO LOBBY
+                        // VERIFICAÇÃO EXATA POR HITBOX
                         if (this.lobbyHitboxes) {
                             let clicked = this.lobbyHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
                             if (clicked) {
                                 if (clicked.action === 'change_char') {
-                                    this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; 
-                                    window.Sfx.hover(); 
-                                    if(this.isOnline) this.syncLobby(); 
+                                    this.selectedChar = (this.selectedChar + 1) % CHARACTERS.length; window.Sfx.hover(); if(this.isOnline) this.syncLobby(); 
                                 } else if (clicked.action === 'change_track') {
                                     if (this.currentFase.id === 'arcade') {
                                         if(!this.isOnline || this.isHost) { 
-                                            this.selectedTrack = (this.selectedTrack + 1) % TRACKS.length; 
-                                            window.Sfx.hover(); 
-                                            if(this.isOnline && this.isHost) this.roomRef.update({ trackId: this.selectedTrack }); 
+                                            this.selectedTrack = (this.selectedTrack + 1) % TRACKS.length; window.Sfx.hover(); if(this.isOnline && this.isHost) this.roomRef.update({ trackId: this.selectedTrack }); 
                                         }
-                                    } else {
-                                        window.Sfx.error(); this.pushMsg("PISTA FIXA NA MISSÃO!", "#f00", 25);
-                                    }
+                                    } else { window.Sfx.error(); this.pushMsg("PISTA FIXA NA MISSÃO!", "#f00", 25); }
                                 } else if (clicked.action === 'toggle_kart') {
-                                    this.useCustomKart = !this.useCustomKart;
-                                    window.Sfx.hover();
+                                    this.useCustomKart = !this.useCustomKart; window.Sfx.hover();
                                 } else if (clicked.action === 'open_shop') {
-                                    this.state = 'KART_SHOP';
-                                    window.Sfx.click();
+                                    this.state = 'KART_SHOP'; this.shopTab = 'SHOP'; this.shopCarouselIdx = 1; window.Sfx.click();
                                 }
                             }
                         }
@@ -237,57 +228,48 @@
                     if (this.shopHitboxes) {
                         let clicked = this.shopHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
                         if (clicked) {
-                            if (clicked.action === 'back') {
-                                this.state = 'LOBBY'; window.Sfx.click();
-                            } 
-                            else if (clicked.action === 'tab_garage') {
-                                this.shopTab = 'GARAGE'; window.Sfx.hover();
+                            if (clicked.action === 'back') { this.state = 'LOBBY'; window.Sfx.click(); } 
+                            else if (clicked.action === 'tab_shop') { this.shopTab = 'SHOP'; this.shopCarouselIdx = 1; window.Sfx.hover(); }
+                            else if (clicked.action === 'tab_garage') { this.shopTab = 'GARAGE'; this.shopCarouselIdx = 0; window.Sfx.hover(); }
+                            else if (clicked.action === 'tab_parts') { this.shopTab = 'PARTS'; window.Sfx.hover(); }
+                            else if (clicked.action === 'prev') { 
+                                this.shopCarouselIdx--; 
+                                let max = this.shopTab === 'SHOP' ? KART_MODELS.length - 1 : this.garage.length - 1;
+                                if(this.shopCarouselIdx < 0) this.shopCarouselIdx = max; 
+                                window.Sfx.hover(); 
                             }
-                            else if (clicked.action === 'tab_shop') {
-                                this.shopTab = 'SHOP'; window.Sfx.hover();
+                            else if (clicked.action === 'next') { 
+                                this.shopCarouselIdx++; 
+                                let max = this.shopTab === 'SHOP' ? KART_MODELS.length - 1 : this.garage.length - 1;
+                                if(this.shopCarouselIdx > max) this.shopCarouselIdx = 0; 
+                                window.Sfx.hover(); 
                             }
-                            else if (clicked.action === 'equip') {
-                                this.activeKartIdx = clicked.index;
-                                this.saveGarage(); window.Sfx.click();
-                            }
+                            else if (clicked.action === 'equip') { this.activeKartIdx = this.shopCarouselIdx; this.saveGarage(); window.Sfx.click(); }
                             else if (clicked.action === 'sell') {
                                 if (this.garage.length > 1) {
-                                    const model = KART_MODELS[this.garage[clicked.index].modelId];
+                                    const model = KART_MODELS[this.garage[this.shopCarouselIdx].modelId];
                                     let refund = Math.floor(model.price * 0.5);
                                     if (window.Profile) window.Profile.coins = (window.Profile.coins || 0) + refund;
-                                    this.garage.splice(clicked.index, 1);
-                                    if (this.activeKartIdx >= this.garage.length) this.activeKartIdx = 0;
+                                    this.garage.splice(this.shopCarouselIdx, 1);
+                                    this.shopCarouselIdx = 0; this.activeKartIdx = 0;
                                     this.saveGarage(); window.Sfx.coin(); window.System.msg(`VENDIDO POR R$${refund}`);
-                                } else {
-                                    window.Sfx.error(); window.System.msg("NÃO PODE VENDER SEU ÚLTIMO KART!");
-                                }
+                                } else { window.Sfx.error(); window.System.msg("NÃO PODE VENDER SEU ÚLTIMO KART!"); }
                             }
                             else if (clicked.action === 'buy_kart') {
-                                let model = KART_MODELS[clicked.modelId];
-                                let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
-                                if (this.garage.length >= 3) {
-                                    window.Sfx.error(); window.System.msg("GARAGEM CHEIA! (MÁX 3)");
-                                } else if (wallet >= model.price) {
+                                let model = KART_MODELS[clicked.modelId]; let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
+                                if (this.garage.length >= 3) { window.Sfx.error(); window.System.msg("GARAGEM CHEIA! (MÁX 3)"); } 
+                                else if (wallet >= model.price) {
                                     if (window.Profile) window.Profile.coins -= model.price;
-                                    this.garage.push({ modelId: model.id });
-                                    this.saveGarage(); window.Sfx.coin(); window.System.msg("KART COMPRADO!");
-                                } else {
-                                    window.Sfx.error(); window.System.msg("SEM SALDO SUFICIENTE!");
-                                }
+                                    this.garage.push({ modelId: model.id }); this.saveGarage(); window.Sfx.coin(); window.System.msg("KART COMPRADO!");
+                                } else { window.Sfx.error(); window.System.msg("SEM SALDO SUFICIENTE!"); }
                             }
                             else if (clicked.action === 'buy_upgrade') {
                                 let type = clicked.type; let cost = clicked.cost; let targetLvl = clicked.targetLvl;
                                 let wallet = window.Profile ? (window.Profile.coins || 0) : 0;
                                 if (wallet >= cost) {
                                     if (window.Profile) { window.Profile.coins -= cost; }
-                                    this.kartUpgrades[type] = targetLvl;
-                                    this.saveGarage();
-                                    window.Sfx.coin();
-                                    window.System.msg("UPGRADE ADQUIRIDO!");
-                                } else {
-                                    window.Sfx.error();
-                                    window.System.msg("SEM SALDO SUFICIENTE!");
-                                }
+                                    this.kartUpgrades[type] = targetLvl; this.saveGarage(); window.Sfx.coin(); window.System.msg("UPGRADE ADQUIRIDO!");
+                                } else { window.Sfx.error(); window.System.msg("SEM SALDO SUFICIENTE!"); }
                             }
                         }
                     }
@@ -313,11 +295,8 @@
                     let globalIdx = segments.length; 
                     
                     let coinChance = (this.currentFase.mode === 'COIN_HUNT') ? 0.8 : 0.3;
-                    if (globalIdx % 8 === 0 && Math.random() < coinChance) {
-                        obsList.push({ type: 'coin', x: (Math.random() - 0.5) * 1.6, collected: false });
-                    }
+                    if (globalIdx % 8 === 0 && Math.random() < coinChance) { obsList.push({ type: 'coin', x: (Math.random() - 0.5) * 1.6, collected: false }); }
                     
-                    // Caixas garantidas geradas periodicamente
                     if (globalIdx > 50 && globalIdx % 35 === 0) {
                         obsList.push({ type: 'item_box', x: (Math.random() - 0.5) * 1.4, collected: false });
                         if(Math.random() < 0.4) { obsList.push({ type: 'item_box', x: (Math.random() - 0.5) * 1.4, collected: false }); }
@@ -558,7 +537,16 @@
             if(d.status === 'RACING' && d.spinTimer <= 0 && isAccelerating) { d.speed += (max - d.speed) * char.accel; } else if (d.status !== 'FINISHED') { d.speed *= 0.96; }
             d.speed *= currentDrag;
 
-            if (d.spinTimer > 0) d.vibration = 20;
+            // FIX: RECUPERAÇÃO DO GIRO (Não fica mais capotado para sempre!)
+            if (d.spinTimer > 0) { 
+                d.spinTimer--; 
+                d.spinAngle += 0.4; 
+                d.speed *= 0.95; 
+                d.bounce *= 0.85; // A gravidade puxa de volta
+            } else {
+                d.spinAngle = 0; // Volta a ficar de pé
+                d.bounce = (Math.random() - 0.5) * d.vibration; // Vibração normal da pista
+            }
 
             if (Math.abs(d.targetSteer) > 0.5 && d.speed > 100 && absX < 1.3 && d.spinTimer <= 0) {
                 d.driftSparks = Math.min((d.driftSparks || 0) + 1, 100);
@@ -591,7 +579,7 @@
                             d.item = possibleItems[Math.floor(Math.random() * possibleItems.length)];
                             this.pushMsg("CAIXA PEGA!", "#fff", 30);
                         } else if (o.type === 'banana') {
-                            o.collected = true; d.spinTimer = 80; d.speed *= 0.1; window.Sfx.error(); window.Gfx.shakeScreen(20);
+                            o.collected = true; d.spinTimer = 40; d.speed *= 0.2; window.Sfx.error(); window.Gfx.shakeScreen(20);
                             this.pushMsg("ESCORREGOU!", "#f00", 40);
                         }
                     }
@@ -645,18 +633,18 @@
                 if (p.owner !== 'player' && d.status === 'RACING') {
                     let distZPlayer = Math.abs(p.pos - d.pos);
                     if (distZPlayer < 250 && Math.abs(p.x - d.playerX) < 1.0) { 
-                        d.speed *= 0.1; d.spinTimer = 80; 
+                        d.speed *= 0.2; d.spinTimer = 40; 
                         
-                        // FÍSICA APLICADA: Proteção contra Cascos
                         let baseBounce = char.weight > 1.4 ? -40 : -80; 
-                        if (activeKart.type === 'tank') baseBounce = -10; // Tanque mal se mexe
+                        if (activeKart.type === 'tank') baseBounce = -10; 
                         
                         if (char.suspensionLevel > 1) baseBounce *= (1 - (char.suspensionLevel - 1) * 0.25);
-                        d.bounce = baseBounce;
+                        d.bounce = baseBounce; // Salto UP!
                         
                         p.active = false;
                         window.Sfx.error(); window.Gfx.shakeScreen(30);
-                        this.pushMsg("CAPOTOU!", "#f00", 50);
+                        this.pushMsg("ATINGIDO!", "#f00", 50);
+                        this.spawnParticle(w/2, h*0.8, 'explosion'); // EFEITO MÁXIMO
                     }
                 }
 
@@ -664,8 +652,9 @@
                     if (r.status === 'FINISHED' || p.owner === r.id) return;
                     let distZ = Math.abs(p.pos - r.pos);
                     if (distZ < 250 && Math.abs(p.x - r.x) < 1.0) {
-                        r.speed *= 0.1; r.spinTimer = 80; p.active = false;
+                        r.speed *= 0.2; r.spinTimer = 40; p.active = false;
                         window.Sfx.play(200, 'square', 0.2, 0.2); 
+                        // IA sofre explosão!
                     }
                 });
             });
@@ -706,10 +695,19 @@
                                     r.item = ['mushroom', 'banana', 'shell'][Math.floor(Math.random() * 3)];
                                     r.useItemTimer = 60 + Math.floor(Math.random() * 120); 
                                 } else if (o.type === 'banana') {
-                                    o.collected = true; r.speed *= 0.1; r.spinTimer = 80;
+                                    o.collected = true; r.speed *= 0.2; r.spinTimer = 40;
                                 }
                             }
                         });
+                    }
+
+                    // IA COMBATE AVANÇADO (Mira antes de atirar)
+                    if (r.item === 'shell') {
+                        let botTarget = d.rivals.concat([{pos: d.pos, x: d.playerX}]).find(x => x.pos > r.pos && x.pos - r.pos < 1000);
+                        if (botTarget) {
+                            r.ai_targetLane = botTarget.x; // Tenta alinhar para o tiro fatal
+                            if (Math.abs(r.x - botTarget.x) < 0.5) r.useItemTimer = 1;
+                        }
                     }
 
                     if (r.item && r.useItemTimer > 0) {
@@ -734,11 +732,17 @@
                     }
                     if (futureSeg.curve > 2) r.ai_targetLane = -0.8; else if (futureSeg.curve < -2) r.ai_targetLane = 0.8; 
 
+                    // IA ERRA A CURVA (Tornando-a realista)
+                    if (Math.random() < diff.errorRate * 0.05) { r.ai_targetLane = (Math.random() > 0.5 ? 1.6 : -1.6); }
+
                     let moveX = (r.ai_targetLane - r.x) * r.ai_reaction; moveX -= (getSegment(r.pos / CONF.SEGMENT_LENGTH).curve * 0.04); 
                     r.x += moveX; if (Math.abs(r.x) > 1.8) { r.x = Math.sign(r.x)*1.8; r.speed *= 0.95; } 
 
                     if (r.speed < targetSpeed) r.speed += rChar.accel * r.ai_accelMult * (dynamicRubberBand > 1 ? 1.5 : 1); else r.speed *= 0.995; 
+                    
+                    if (r.spinTimer > 0) { r.spinTimer--; r.speed *= 0.95; }
                     r.pos += r.speed;
+
                     if (r.pos >= trackLength) { r.pos -= trackLength; r.lap++; if (r.lap > CONF.TOTAL_LAPS) { r.status = 'FINISHED'; if (r.finishTime === 0) r.finishTime = Date.now(); r.speed = 0; r.lap = CONF.TOTAL_LAPS; } }
                 });
             }
@@ -752,9 +756,6 @@
                     KartAudio.crash();
                 }
             });
-
-            if (d.spinTimer > 0) { d.spinTimer--; d.spinAngle += 0.5; d.speed *= 0.95; }
-            else if (absX > 1.5 && ratio > 0.82 && Math.abs(d.lateralInertia) > 0.15) { d.spinTimer = 45; KartAudio.crash(); d.pushMsg("DERRAPOU!"); }
 
             d.playerX = Math.max(-3.5, Math.min(3.5, d.playerX)); d.pos += d.speed;
 
@@ -772,9 +773,6 @@
             
             d.visualTilt += ((d.steer * 8) - d.visualTilt) * 0.15; d.visualTilt = Math.max(-12, Math.min(12, d.visualTilt)); 
             
-            if (d.bounce < 0 && d.spinTimer > 0) { d.bounce *= 0.9; } 
-            else { d.bounce = (Math.random() - 0.5) * d.vibration; }
-            
             d.score += d.speed * 0.01;
             particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.l--; if(p.l <= 0) particles.splice(i, 1); });
         },
@@ -783,6 +781,11 @@
             if (type === 'drift_yellow') { particles.push({ x, y, vx: (Math.random()-0.5)*8, vy: -Math.random()*5, l: 15, maxL: 15, c: '#f1c40f', isDrift: true }); return; }
             if (type === 'drift_blue') { particles.push({ x, y, vx: (Math.random()-0.5)*12, vy: -Math.random()*8, l: 20, maxL: 20, c: '#00d2d3', isDrift: true }); return; }
             if (type === 'wind') { particles.push({ x, y, vx: 0, vy: 15 + Math.random()*15, l: 10, maxL: 10, c: 'rgba(255,255,255,0.6)', isLine: true }); return; }
+            // Efeito explosão estilo Mario Kart
+            if (type === 'explosion') {
+                for(let i=0; i<8; i++) { particles.push({ x, y, vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15, l: 30, maxL: 30, c: ['#ff0000', '#ff9900', '#ffff00'][Math.floor(Math.random()*3)], isExplosion: true }); }
+                return;
+            }
             if(Math.random() > 0.5) return;
             particles.push({ x, y, vx: (Math.random()-0.5)*4, vy: (Math.random())*4, l: 20, maxL: 20, c: type==='turbo'?'#ffaa00':(type==='dust'?'#95a5a6':'#ecf0f1') });
         },
@@ -861,7 +864,7 @@
                 d.rivals.forEach(r => {
                     let relPos = r.pos - d.pos; if(relPos < -trackLength/2) relPos += trackLength;
                     if (Math.abs(Math.floor(relPos / CONF.SEGMENT_LENGTH) - n) < 2.0 && n > 0) {
-                        this.drawKartSprite(ctx, coord.x + (r.x * (w*1.5) * coord.scale), coord.y, w*0.0022*coord.scale, 0, 0, 0, r.color, r.charId, r.kartId);
+                        this.drawKartSprite(ctx, coord.x + (r.x * (w*1.5) * coord.scale), coord.y, w*0.0022*coord.scale, 0, 0, r.spinAngle || 0, r.color, r.charId, r.kartId);
                         if (r.status === 'FINISHED') { ctx.fillStyle = "#ff0"; ctx.font = `bold ${20*coord.scale}px Arial`; ctx.fillText("🏁", coord.x + (r.x * (w*1.5) * coord.scale), coord.y - 80*coord.scale); }
                     }
                 });
@@ -887,6 +890,7 @@
                 ctx.fillStyle = p.c; ctx.globalAlpha = p.l / p.maxL;
                 if (p.isLine) { ctx.strokeStyle = p.c; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - 60); ctx.stroke(); } 
                 else if (p.isDrift) { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill(); } 
+                else if (p.isExplosion) { ctx.beginPath(); ctx.arc(p.x, p.y, (p.maxL - p.l)*3, 0, Math.PI*2); ctx.fill(); }
                 else { ctx.beginPath(); ctx.arc(p.x, p.y, 4 + (p.maxL - p.l)*0.5, 0, Math.PI*2); ctx.fill(); }
             }); ctx.globalAlpha = 1;
 
@@ -897,11 +901,13 @@
         },
 
         drawKartSprite: function(ctx, cx, y, carScale, steer, tilt, spinAngle, color, charId, kartModelId = 0) {
-            ctx.save(); ctx.translate(cx, y); ctx.scale(carScale, carScale); ctx.rotate(tilt * 0.03 + spinAngle); 
+            ctx.save(); ctx.translate(cx, y); ctx.scale(carScale, carScale); 
+            ctx.rotate(tilt * 0.03 + spinAngle); // Aqui o spinAngle é zero se estiver curado
+            
             const stats = CHARACTERS[charId] || CHARACTERS[0]; const n = stats.name; const w = stats.weight;
             const kartModel = KART_MODELS[kartModelId] || KART_MODELS[0];
 
-            // Sombra geral
+            // Sombra
             ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 35, w > 1.2 ? 75 : (w < 0.9 ? 55 : 65), 15, 0, 0, Math.PI*2); ctx.fill();
 
             const drawWheels = (wWidth, wHeight, colorObj, offset = 0) => {
@@ -909,7 +915,7 @@
                 dw(-45 - offset, 15, false); dw(45 + offset, 15, false); dw(-40 - offset, -15, true); dw(40 + offset, -15, true);
             };
 
-            // --- RENDERIZADOR DINÂMICO DOS NOVOS KARTS ---
+            // --- DESENHO HD DOS NOVOS KARTS ---
             if (kartModel.type !== 'standard') {
                 if (kartModel.type === 'f1') {
                     drawWheels(22, 35, '#111', 15);
@@ -920,8 +926,7 @@
                 } 
                 else if (kartModel.type === 'luxury') {
                     drawWheels(25, 35, '#222', 10);
-                    ctx.fillStyle = kartModel.color;
-                    ctx.fillRect(-30, -40, 60, 65); // Corpo
+                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.roundRect(-30, -40, 60, 65, 10); ctx.fill();
                     ctx.fillStyle = '#000'; ctx.fillRect(-25, -20, 50, 30); // Teto
                     ctx.fillStyle = '#f1c40f'; ctx.fillRect(-20, -42, 10, 5); ctx.fillRect(10, -42, 10, 5); // Faróis
                 }
@@ -940,33 +945,27 @@
                     ctx.fillStyle = '#ecf0f1'; ctx.beginPath(); ctx.arc(15, -30, 5, 0, Math.PI*2); ctx.fill(); // Tubo Escape
                 }
                 else if (kartModel.type === 'tank') {
-                    ctx.fillStyle = '#2d3436'; ctx.fillRect(-55, -40, 25, 80); ctx.fillRect(30, -40, 25, 80); // Esteiras Base
-                    ctx.fillStyle = '#636e72'; for(let i=-35; i<40; i+=10) { ctx.fillRect(-55, i, 25, 3); ctx.fillRect(30, i, 25, 3); } // Linhas Esteiras
+                    ctx.fillStyle = '#2d3436'; ctx.fillRect(-55, -40, 25, 80); ctx.fillRect(30, -40, 25, 80); // Esteiras
+                    ctx.fillStyle = '#636e72'; for(let i=-35; i<40; i+=10) { ctx.fillRect(-55, i, 25, 3); ctx.fillRect(30, i, 25, 3); } 
                     ctx.fillStyle = kartModel.color; ctx.fillRect(-30, -35, 60, 70); // Blindagem
                     ctx.fillStyle = '#2d3436'; ctx.beginPath(); ctx.arc(0, -5, 20, 0, Math.PI*2); ctx.fill(); // Torre
                     ctx.save(); ctx.rotate(steer * 0.5); ctx.fillStyle = '#111'; ctx.fillRect(-6, -55, 12, 50); ctx.restore(); // Canhão
                 }
                 else if (kartModel.type === 'plane') {
                     const dwPlane = (wx, wy, isFront) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-6, -10, 12, 20); ctx.restore(); };
-                    dwPlane(-15, 20, false); dwPlane(15, 20, false); dwPlane(0, -40, true); // Trens aterragem
+                    dwPlane(-15, 20, false); dwPlane(15, 20, false); dwPlane(0, -40, true);
                     ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -10, 20, 50, 0, 0, Math.PI*2); ctx.fill(); // Fuselagem
                     ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-70, 0); ctx.lineTo(70, 0); ctx.lineTo(0, -20); ctx.fill(); // Asas
                     ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(-30, 35); ctx.lineTo(30, 35); ctx.lineTo(0, 25); ctx.fill(); // Cauda
-                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-25, -3, 50, 6); ctx.restore(); // Hélice
+                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-25, -3, 50, 6); ctx.restore(); // Hélice animada
                 }
-                else if (kartModel.type === 'monster') {
-                    drawWheels(40, 55, '#111', 25);
-                    ctx.fillStyle = '#2c3e50'; ctx.fillRect(-25, -10, 50, 40); 
-                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -5, 45, 30, 0, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = '#111'; ctx.fillRect(-50, 25, 100, 10);
-                } 
                 else if (kartModel.type === 'sport') {
                     drawWheels(18, 28, '#2c3e50', 5);
                     ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, 0, 35, 45, 0, 0, Math.PI*2); ctx.fill();
                     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-10, -40); ctx.lineTo(10, -40); ctx.lineTo(0, 20); ctx.fill(); 
                 }
 
-                // Cabeça do Piloto Adaptada ao Kart
+                // Cabeça do Piloto (No Custom Kart)
                 ctx.save(); 
                 let headY = -10;
                 if (kartModel.type === 'moto') headY = 5;
@@ -976,6 +975,7 @@
 
                 ctx.translate(0, headY); ctx.rotate(steer * 0.3);
                 ctx.fillStyle = stats.color; ctx.beginPath(); ctx.ellipse(0, -15, 18, 20, 0, 0, Math.PI*2); ctx.fill(); 
+                ctx.fillStyle = '#ffccaa'; ctx.beginPath(); ctx.ellipse(0, -15, 12, 10, 0, 0, Math.PI*2); ctx.fill(); // Rosto
                 ctx.fillStyle = stats.hat; ctx.beginPath(); ctx.ellipse(0, -35, 18, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -30, 22, 6, 0, 0, Math.PI*2); ctx.fill(); 
                 ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText(n[0], 0, -10); 
                 ctx.restore();
@@ -999,27 +999,6 @@
                 ctx.save(); ctx.translate(0, -5); ctx.rotate(steer * 0.3); ctx.fillStyle = '#27ae60'; ctx.beginPath(); ctx.ellipse(0, -25, 45, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 8; ctx.stroke(); 
                 ctx.fillStyle = '#ecf0f1'; const drawSpike = (sx, sy) => { ctx.beginPath(); ctx.arc(sx, sy, 10, 0, Math.PI*2); ctx.fill(); }; drawSpike(0, -55); drawSpike(-25, -30); drawSpike(25, -30); drawSpike(0, -10);
                 ctx.fillStyle = '#e67e22'; ctx.beginPath(); ctx.ellipse(0, -75, 20, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
-            }
-            else if (n === 'YOSHI') {
-                drawWheels(18, 28, '#27ae60');
-                ctx.fillStyle = '#ecf0f1'; ctx.beginPath(); ctx.ellipse(0, 0, 28, 40, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(-15, 10, 10, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(15, -15, 8, 0, Math.PI*2); ctx.fill();
-                ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); ctx.fillStyle = '#76ff03'; ctx.beginPath(); ctx.ellipse(0, -20, 20, 30, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.ellipse(0, -10, 14, 10, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-6, -45); ctx.lineTo(0, -55); ctx.lineTo(6, -45); ctx.fill(); ctx.beginPath(); ctx.moveTo(-5, -30); ctx.lineTo(0, -40); ctx.lineTo(5, -30); ctx.fill(); ctx.restore();
-            }
-            else if (n === 'PEACH') {
-                drawWheels(16, 26, '#ecf0f1');
-                ctx.fillStyle = '#ff9ff3'; ctx.beginPath(); ctx.moveTo(-25, -20); ctx.lineTo(25, -20); ctx.lineTo(35, 15); ctx.lineTo(-35, 15); ctx.fill(); ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 5; ctx.stroke(); 
-                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(-20, 10, 5, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(20, 10, 5, 0, Math.PI*2); ctx.fill();
-                ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); ctx.fillStyle = '#ff9ff3'; ctx.beginPath(); ctx.ellipse(0, -15, 22, 25, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.moveTo(-18, -45); ctx.lineTo(18, -45); ctx.lineTo(22, -10); ctx.lineTo(-22, -10); ctx.fill(); ctx.fillStyle = '#f39c12'; ctx.beginPath(); ctx.moveTo(-12, -45); ctx.lineTo(-18, -60); ctx.lineTo(-5, -50); ctx.lineTo(0, -65); ctx.lineTo(5, -50); ctx.lineTo(18, -60); ctx.lineTo(12, -45); ctx.fill(); ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(0, -55, 3, 0, Math.PI*2); ctx.fill(); ctx.restore();
-            }
-            else if (n === 'WARIO') {
-                drawWheels(26, 32); 
-                ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-35, 5, 12, 35); ctx.fillRect(23, 5, 12, 35); ctx.fillStyle = '#8e44ad'; ctx.beginPath(); ctx.moveTo(-40, -15); ctx.lineTo(40, -15); ctx.lineTo(45, 20); ctx.lineTo(-45, 20); ctx.fill();
-                ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.ellipse(0, -15, 32, 25, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#8e44ad'; ctx.fillRect(-22, -25, 8, 25); ctx.fillRect(14, -25, 8, 25); ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-25, -35); ctx.lineTo(-35, -32); ctx.lineTo(-40, -38); ctx.stroke(); ctx.beginPath(); ctx.moveTo(25, -35); ctx.lineTo(35, -32); ctx.lineTo(40, -38); ctx.stroke(); ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.ellipse(0, -42, 20, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -37, 28, 6, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
-            }
-            else if (n === 'TOAD') {
-                drawWheels(14, 22);
-                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.ellipse(0, 10, 25, 15, 0, 0, Math.PI*2); ctx.fill();
-                ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); ctx.fillStyle = '#3498db'; ctx.fillRect(-12, -15, 24, 15); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, -35, 32, 22, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.ellipse(0, -40, 12, 8, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(-22, -30, 8, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(22, -30, 8, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
             }
             else {
                 drawWheels(20, 30);
@@ -1090,6 +1069,7 @@
             }
         },
 
+        // --- SISTEMA DE CARROSSEL PARA A OFICINA (SOLUÇÃO DE UI PERFEITA) ---
         renderShop: function(ctx, w, h) {
             ctx.fillStyle = "#1e272e"; ctx.fillRect(0, 0, w, h);
             
@@ -1103,148 +1083,121 @@
             this.shopHitboxes = [];
             
             // Abas Superiores
-            let tabW = w * 0.4; let tabH = 40;
-            let tabGarageX = w/2 - tabW - 5; let tabShopX = w/2 + 5;
+            let tabW = Math.min(w * 0.3, 200); let tabH = 40;
+            let tab1X = w/2 - tabW*1.5 - 10; 
+            let tab2X = w/2 - tabW/2; 
+            let tab3X = w/2 + tabW/2 + 10;
             
-            ctx.fillStyle = this.shopTab === 'GARAGE' ? "#3498db" : "#7f8c8d";
-            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(tabGarageX, h*0.2, tabW, tabH, 10); ctx.fill(); } else { ctx.fillRect(tabGarageX, h*0.2, tabW, tabH); }
-            ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Russo One'"; ctx.fillText("MINHA GARAGEM", tabGarageX + tabW/2, h*0.2 + 25);
-            this.shopHitboxes.push({ x: tabGarageX, y: h*0.2, w: tabW, h: tabH, action: 'tab_garage' });
+            const drawTab = (x, text, isActive, actionId) => {
+                ctx.fillStyle = isActive ? "#3498db" : "#7f8c8d";
+                if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, h*0.2, tabW, tabH, 10); ctx.fill(); } else { ctx.fillRect(x, h*0.2, tabW, tabH); }
+                ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Russo One'"; ctx.fillText(text, x + tabW/2, h*0.2 + 25);
+                this.shopHitboxes.push({ x: x, y: h*0.2, w: tabW, h: tabH, action: actionId });
+            };
 
-            ctx.fillStyle = this.shopTab === 'SHOP' ? "#3498db" : "#7f8c8d";
-            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(tabShopX, h*0.2, tabW, tabH, 10); ctx.fill(); } else { ctx.fillRect(tabShopX, h*0.2, tabW, tabH); }
-            ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Russo One'"; ctx.fillText("LOJA DE KARTS", tabShopX + tabW/2, h*0.2 + 25);
-            this.shopHitboxes.push({ x: tabShopX, y: h*0.2, w: tabW, h: tabH, action: 'tab_shop' });
+            drawTab(tab1X, "LOJA", this.shopTab === 'SHOP', 'tab_shop');
+            drawTab(tab2X, "GARAGEM", this.shopTab === 'GARAGE', 'tab_garage');
+            drawTab(tab3X, "PEÇAS", this.shopTab === 'PARTS', 'tab_parts');
 
-            const startY = h * 0.32;
-            const gap = h * 0.02;
-            const rowH = Math.min(80, h * 0.15);
-            const boxW = Math.min(600, w * 0.9);
-            const boxX = w/2 - boxW/2;
+            const cx = w/2; const cy = h*0.55;
 
-            if (this.shopTab === 'GARAGE') {
-                this.garage.forEach((gKart, index) => {
-                    let model = KART_MODELS[gKart.modelId];
-                    let y = startY + index * (rowH + gap);
-                    ctx.fillStyle = "rgba(255,255,255,0.05)"; 
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 15); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
-                    
-                    // DESENHO DO KART NA LOJA GIGANTE PARA VER BEM
-                    let charColor = CHARACTERS[this.selectedChar].color;
-                    this.drawKartSprite(ctx, boxX + 45, y + rowH/2 + 5, w * 0.0018, 0, 0, 0, charColor, this.selectedChar, model.id);
-                    
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(16px, 3vw, 20px) 'Russo One'";
-                    ctx.fillText(model.name, boxX + 90, y + rowH * 0.4);
-                    ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
-                    ctx.fillText(model.desc, boxX + 90, y + rowH * 0.7);
+            if (this.shopTab === 'SHOP' || this.shopTab === 'GARAGE') {
+                let maxIdx = this.shopTab === 'SHOP' ? KART_MODELS.length - 1 : this.garage.length - 1;
+                if (this.shopCarouselIdx > maxIdx) this.shopCarouselIdx = 0;
+                
+                let currentItem = this.shopTab === 'SHOP' ? KART_MODELS[this.shopCarouselIdx] : KART_MODELS[this.garage[this.shopCarouselIdx].modelId];
 
-                    let btnW = boxW * 0.22; let btnH = rowH * 0.6;
-                    
-                    // Botão Equipar
-                    let equipX = boxX + boxW - btnW - 10; let btnY = y + rowH/2 - btnH/2;
-                    let isEquipped = (this.activeKartIdx === index);
-                    ctx.fillStyle = isEquipped ? "#27ae60" : "#7f8c8d";
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(equipX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(equipX, btnY, btnW, btnH); }
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold clamp(10px, 2vw, 14px) 'Russo One'";
-                    ctx.fillText(isEquipped ? "EQUIPADO" : "EQUIPAR", equipX + btnW/2, btnY + btnH/2 + 5);
-                    if (!isEquipped) this.shopHitboxes.push({ x: equipX, y: btnY, w: btnW, h: btnH, action: 'equip', index: index });
+                // Fundo do Carrossel
+                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - 250, cy - 120, 500, 240, 20); ctx.fill(); } else { ctx.fillRect(cx - 250, cy - 120, 500, 240); }
 
-                    // Botão Vender
-                    if (this.garage.length > 1) {
-                        let sellX = equipX - btnW - 10;
-                        let refund = Math.floor(model.price * 0.5);
-                        ctx.fillStyle = "#e74c3c";
-                        if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(sellX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(sellX, btnY, btnW, btnH); }
-                        ctx.fillStyle = "#fff"; ctx.fillText(`VENDER`, sellX + btnW/2, btnY + btnH*0.4);
-                        ctx.fillStyle = "#f1c40f"; ctx.font = "bold clamp(10px, 2vw, 12px) 'Russo One'"; ctx.fillText(`+ R$${refund}`, sellX + btnW/2, btnY + btnH*0.8);
-                        this.shopHitboxes.push({ x: sellX, y: btnY, w: btnW, h: btnH, action: 'sell', index: index });
+                // Setas
+                ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial";
+                ctx.fillText("<", cx - 200, cy); this.shopHitboxes.push({ x: cx - 230, y: cy - 40, w: 60, h: 80, action: 'prev' });
+                ctx.fillText(">", cx + 200, cy); this.shopHitboxes.push({ x: cx + 170, y: cy - 40, w: 60, h: 80, action: 'next' });
+
+                // Desenho Central do Kart
+                let charColor = CHARACTERS[this.selectedChar].color;
+                this.drawKartSprite(ctx, cx, cy - 10, w * 0.003, 0, 0, 0, charColor, this.selectedChar, currentItem.id);
+
+                // Textos
+                ctx.fillStyle = "#fff"; ctx.font = "bold 24px 'Russo One'"; ctx.fillText(currentItem.name, cx, cy + 60);
+                ctx.fillStyle = "#aaa"; ctx.font = "14px Arial"; ctx.fillText(currentItem.desc, cx, cy + 85);
+
+                // Botões de Ação
+                let btnW = 180; let btnH = 45; let btnY = cy + 100;
+                
+                if (this.shopTab === 'SHOP') {
+                    if (currentItem.id === 0) {
+                        ctx.fillStyle = "#2ecc71"; ctx.fillText("JÁ VEM DE FÁBRICA", cx, btnY + 25);
+                    } else {
+                        let canBuy = coins >= currentItem.price;
+                        ctx.fillStyle = canBuy ? "#9b59b6" : "#7f8c8d";
+                        if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - btnW/2, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(cx - btnW/2, btnY, btnW, btnH); }
+                        ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Russo One'"; ctx.fillText(`COMPRAR R$${currentItem.price}`, cx, btnY + 28);
+                        this.shopHitboxes.push({ x: cx - btnW/2, y: btnY, w: btnW, h: btnH, action: 'buy_kart', modelId: currentItem.id });
                     }
-                });
+                } 
+                else if (this.shopTab === 'GARAGE') {
+                    let isEquipped = (this.activeKartIdx === this.shopCarouselIdx);
+                    ctx.fillStyle = isEquipped ? "#27ae60" : "#34495e";
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - btnW - 5, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(cx - btnW - 5, btnY, btnW, btnH); }
+                    ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Russo One'"; ctx.fillText(isEquipped ? "EQUIPADO" : "EQUIPAR", cx - btnW/2 - 5, btnY + 28);
+                    if (!isEquipped) this.shopHitboxes.push({ x: cx - btnW - 5, y: btnY, w: btnW, h: btnH, action: 'equip' });
 
-                // UPGRADES (MOTOR, PNEUS E SUSPENSÃO) PARA O KART EQUIPADO
+                    if (this.garage.length > 1) {
+                        ctx.fillStyle = "#e74c3c";
+                        if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx + 5, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(cx + 5, btnY, btnW, btnH); }
+                        let refund = Math.floor(currentItem.price * 0.5);
+                        ctx.fillStyle = "#fff"; ctx.fillText(`VENDER (+R$${refund})`, cx + btnW/2 + 5, btnY + 28);
+                        this.shopHitboxes.push({ x: cx + 5, y: btnY, w: btnW, h: btnH, action: 'sell' });
+                    }
+                }
+            }
+            else if (this.shopTab === 'PARTS') {
                 const upgradesList = [
-                    { id: 'engine', name: '⚙️ MOTOR', desc: 'Aceleração/Velocidade', levels: [0, 1500, 4000] },
-                    { id: 'tires', name: '🛞 PNEUS', desc: 'Curvas / Menos Drag na Terra', levels: [0, 1200, 3000] },
-                    { id: 'suspension', name: '🏎️ SUSPENSÃO', desc: 'Menos vibração e saltos menores', levels: [0, 2000, 5000] }
+                    { id: 'engine', name: '⚙️ MOTOR DE CORRIDA', desc: 'Aceleração/Velocidade Extra', levels: [0, 1500, 4000] },
+                    { id: 'tires', name: '🛞 PNEUS ESPECIAIS', desc: 'Curvas / Menos Lento na Terra', levels: [0, 1200, 3000] },
+                    { id: 'suspension', name: '🏎️ SUSPENSÃO PESADA', desc: 'Não voa quando é atingido', levels: [0, 2000, 5000] }
                 ];
 
-                let upgStartY = startY + 3 * (rowH + gap) + 10;
-                ctx.fillStyle = "#f1c40f"; ctx.textAlign = "center"; ctx.font = "bold 20px 'Russo One'";
-                ctx.fillText("PEÇAS PARA MEU KART", w/2, upgStartY - 15);
-
+                const rowH = 60; const gap = 15; const boxW = Math.min(500, w * 0.8); const boxX = w/2 - boxW/2;
+                
                 upgradesList.forEach((upg, i) => {
                     let currentLvl = this.kartUpgrades[upg.id] || 1;
                     let nextCost = upg.levels[currentLvl]; 
                     
-                    let y = upgStartY + i * (rowH * 0.8 + gap);
-                    ctx.fillStyle = "rgba(0,0,0,0.4)"; 
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH * 0.8, 10); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH * 0.8); }
+                    let y = h*0.35 + i * (rowH + gap);
+                    ctx.fillStyle = "rgba(0,0,0,0.5)"; 
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 10); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
                     
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(14px, 3vw, 18px) 'Russo One'";
-                    ctx.fillText(`${upg.name} (LVL ${currentLvl})`, boxX + 15, y + rowH * 0.35);
-                    ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
-                    ctx.fillText(upg.desc, boxX + 15, y + rowH * 0.65);
+                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold 18px 'Russo One'";
+                    ctx.fillText(`${upg.name} (LVL ${currentLvl})`, boxX + 15, y + 25);
+                    ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText(upg.desc, boxX + 15, y + 45);
 
                     if (currentLvl < 3) {
-                        let btnW = boxW * 0.25; let btnH = rowH * 0.5;
-                        let btnX = boxX + boxW - btnW - 15; let btnY = y + (rowH*0.8)/2 - btnH/2;
+                        let btnW = 120; let btnH = 40;
+                        let btnX = boxX + boxW - btnW - 10; let btnY = y + 10;
                         let canBuy = coins >= nextCost;
                         
                         ctx.fillStyle = canBuy ? "#f39c12" : "#7f8c8d";
                         if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(btnX, btnY, btnW, btnH); }
-                        ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold clamp(12px, 2.5vw, 16px) 'Russo One'";
-                        ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + btnH/2 + 5);
-
+                        ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 14px 'Russo One'";
+                        ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + 25);
                         this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy_upgrade', type: upg.id, targetLvl: currentLvl + 1, cost: nextCost });
                     } else {
-                        ctx.fillStyle = "#2ecc71"; ctx.textAlign = "right"; ctx.font = "bold clamp(14px, 3vw, 18px) 'Russo One'";
-                        ctx.fillText("MÁXIMO", boxX + boxW - 15, y + (rowH*0.8)/2 + 6);
+                        ctx.fillStyle = "#2ecc71"; ctx.textAlign = "right"; ctx.font = "bold 18px 'Russo One'"; ctx.fillText("MÁXIMO", boxX + boxW - 15, y + 35);
                     }
-                });
-
-            } 
-            else if (this.shopTab === 'SHOP') {
-                let displayIndex = 0;
-                KART_MODELS.forEach((model) => {
-                    if (model.id === 0) return; // Kart padrão já vem na garagem
-                    let y = startY + displayIndex * (rowH + gap); displayIndex++;
-                    
-                    ctx.fillStyle = "rgba(255,255,255,0.05)"; 
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 15); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
-                    
-                    // DESENHO DO KART NA LOJA (Sprite Renderizado Gigante)
-                    let charColor = CHARACTERS[this.selectedChar].color;
-                    this.drawKartSprite(ctx, boxX + 45, y + rowH/2 + 5, w * 0.0018, 0, 0, 0, charColor, this.selectedChar, model.id);
-                    
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold clamp(16px, 3vw, 20px) 'Russo One'";
-                    ctx.fillText(model.name, boxX + 90, y + rowH * 0.4);
-                    ctx.fillStyle = "#aaa"; ctx.font = "clamp(10px, 2vw, 12px) Arial";
-                    ctx.fillText(model.desc, boxX + 90, y + rowH * 0.7);
-
-                    let btnW = boxW * 0.25; let btnH = rowH * 0.6;
-                    let btnX = boxX + boxW - btnW - 15; let btnY = y + rowH/2 - btnH/2;
-                    let canBuy = coins >= model.price && this.garage.length < 3;
-                    
-                    ctx.fillStyle = canBuy ? "#9b59b6" : "#7f8c8d";
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(btnX, btnY, btnW, btnH); }
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold clamp(12px, 2.5vw, 16px) 'Russo One'";
-                    ctx.fillText(`R$ ${model.price}`, btnX + btnW/2, btnY + btnH/2 + 5);
-
-                    if (this.garage.length >= 3) {
-                        ctx.fillStyle = "#e74c3c"; ctx.font = "10px Arial"; ctx.fillText("GARAGEM CHEIA", btnX + btnW/2, btnY + btnH + 12);
-                    }
-
-                    this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy_kart', modelId: model.id });
                 });
             }
 
-            // Botão Voltar
-            let backW = 220; let backH = 50;
-            let backX = w/2 - backW/2; let backY = h * 0.90;
+            // Botão Voltar da Loja
+            let backW = 200; let backH = 45;
+            let backX = w/2 - backW/2; let backY = h * 0.88;
             ctx.fillStyle = "#c0392b"; 
-            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(backX, backY, backW, backH, 25); ctx.fill(); } else { ctx.fillRect(backX, backY, backW, backH); }
+            if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(backX, backY, backW, backH, 20); ctx.fill(); } else { ctx.fillRect(backX, backY, backW, backH); }
             ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px 'Russo One'";
-            ctx.fillText("VOLTAR AO LOBBY", w/2, backY + 30);
+            ctx.fillText("VOLTAR", w/2, backY + 28);
             this.shopHitboxes.push({ x: backX, y: backY, w: backW, h: backH, action: 'back' });
         },
 
@@ -1256,7 +1209,6 @@
 
         renderLobby: function(ctx, w, h) {
             ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, w, h); const char = CHARACTERS[this.selectedChar];
-            
             this.lobbyHitboxes = []; 
 
             ctx.fillStyle = char.color; ctx.beginPath(); ctx.arc(w/2, h*0.2, 45, 0, Math.PI*2); ctx.fill();
