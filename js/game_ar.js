@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V25 - TRULY ULTIMATE)
-// FIX: MOVENET DINÂMICO (PALITINHOS CORRETOS) E RECONHECIMENTO GLOBAL DE TOYS
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V26 - PRECISION FIX)
+// RESOLUÇÃO DE ESCALA DE BOUNDING BOX E ATIVAÇÃO FORÇADA DO MOVENET FRONT
 // =============================================================================
 
 (function() {
@@ -79,7 +79,7 @@
             this.hoveredBtn = null;
         },
 
-        update: function(ctx, w, h, dt, gameState, rawPose) {
+        update: function(ctx, w, h, dt, gameState, rawPose, drawX, drawY, scaleCanvas) {
             if (!this.isActive) return;
 
             const cx = w / 2; const cy = h / 2;
@@ -96,19 +96,15 @@
             ctx.fillStyle = "rgba(0, 15, 30, 0.85)"; ctx.fillRect(0, 0, w, h);
             
             // ========================================================
-            // PROCESSAMENTO MOVENET - ESCALA DINÂMICA
+            // PROCESSAMENTO MOVENET - ESCALA PERFEITA (COVER)
             // ========================================================
             this.cursor.active = false;
             let kps = [];
             
             if (rawPose) {
-                if (Array.isArray(rawPose) && rawPose.length > 0) {
-                    kps = rawPose[0].keypoints ? rawPose[0].keypoints : rawPose;
-                } else if (rawPose.keypoints) {
-                    kps = rawPose.keypoints;
-                } else if (rawPose.pose && rawPose.pose.keypoints) {
-                    kps = rawPose.pose.keypoints;
-                }
+                if (Array.isArray(rawPose) && rawPose.length > 0) { kps = rawPose[0].keypoints ? rawPose[0].keypoints : rawPose; } 
+                else if (rawPose.keypoints) { kps = rawPose.keypoints; } 
+                else if (rawPose.pose && rawPose.pose.keypoints) { kps = rawPose.pose.keypoints; }
             }
             
             if (kps && kps.length > 0) {
@@ -116,16 +112,16 @@
                 ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
                 ctx.fillStyle = "#fff";
 
-                // Pega o tamanho real do vídeo para espelhar e escalar corretamente os palitinhos
-                const vW = window.System?.video?.videoWidth || 640;
-                const vH = window.System?.video?.videoHeight || 480;
+                // Espelhamento na câmera frontal (w - x)
+                const mapKpx = (valX) => w - (drawX + (valX * scaleCanvas));
+                const mapKpy = (valY) => drawY + (valY * scaleCanvas);
 
                 const drawBone = (p1Name, p2Name) => {
                     const kp1 = kps.find(k => k.name === p1Name);
                     const kp2 = kps.find(k => k.name === p2Name);
-                    if (kp1 && kp2 && kp1.score > 0.15 && kp2.score > 0.15) {
-                        const x1 = ((vW - kp1.x) / vW) * w; const y1 = (kp1.y / vH) * h;
-                        const x2 = ((vW - kp2.x) / vW) * w; const y2 = (kp2.y / vH) * h;
+                    if (kp1 && kp2 && kp1.score > 0.25 && kp2.score > 0.25) {
+                        const x1 = mapKpx(kp1.x); const y1 = mapKpy(kp1.y);
+                        const x2 = mapKpx(kp2.x); const y2 = mapKpy(kp2.y);
                         if(Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
                             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
                             ctx.beginPath(); ctx.arc(x1, y1, 6, 0, Math.PI*2); ctx.fill();
@@ -142,13 +138,13 @@
                 const lw = kps.find(k => k.name === 'left_wrist');
                 let domWrist = null;
                 
-                if (rw && rw.score > 0.15 && lw && lw.score > 0.15) { domWrist = rw.y < lw.y ? rw : lw; } 
-                else if (rw && rw.score > 0.15) { domWrist = rw; } 
-                else if (lw && lw.score > 0.15) { domWrist = lw; }
+                if (rw && rw.score > 0.25 && lw && lw.score > 0.25) { domWrist = rw.y < lw.y ? rw : lw; } 
+                else if (rw && rw.score > 0.25) { domWrist = rw; } 
+                else if (lw && lw.score > 0.25) { domWrist = lw; }
 
                 if (domWrist) {
-                    const cxW = ((vW - domWrist.x) / vW) * w;
-                    const cyW = (domWrist.y / vH) * h;
+                    const cxW = mapKpx(domWrist.x);
+                    const cyW = mapKpy(domWrist.y);
                     if(Number.isFinite(cxW) && Number.isFinite(cyW)) {
                         this.cursor.x = cxW;
                         this.cursor.y = cyW;
@@ -205,7 +201,7 @@
                 }
             } else {
                 ctx.fillStyle = "#aaa"; ctx.font = "14px Arial"; ctx.textAlign = "center"; 
-                ctx.fillText("LEVANTE A MÃO PARA A CÂMERA CONTROLAR (OU TOQUE)", cx, h - 20);
+                ctx.fillText("APAREÇA NA CÂMERA E LEVANTE A MÃO (OU TOQUE)", cx, h - 20);
             }
         },
 
@@ -223,10 +219,12 @@
         _deviceOrientationHandler: null, _deviceMotionHandler: null, _sensorsReady: false,
         
         objectModel: null, detectedItems: [], lastAiTime: 0, aiIntervalMs: 500, aiIntervalId: null, aiProcessing: false,
-        floorColor: { r: 0, g: 0, b: 0 }, targetColor: { r: 0, g: 0, b: 0 },
         activeAnomaly: null, anomalies: [], spawnTimer: 0,
         
         isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
+        
+        // Poses internas geradas no game_ar para sobrepor a restrição do core.js
+        currentPose: null, isEstimatingPose: false,
         
         displayMoney: 0, displayFuel: 100, collectGlow: 0, collectZoom: 0, baseFlash: 0,
         currentMission: { type: 'NORMAL', goal: 3, progress: 0, timer: 0, active: false },
@@ -241,6 +239,7 @@
             this.health = 100; this.fuel = this.stats.maxFuel; this.wear = { motor: 0, wheels: 0 }; this.displayFuel = this.fuel;
             this.money = 0; this.displayMoney = 0; this.xp = 0; this.level = 1; this.cargo = []; this.anomalies = [];
             this.isExtracting = false; this.pickupTimer = 0; this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
+            this.currentPose = null; this.isEstimatingPose = false;
             
             this.generateMission(); this.setupSensors(); this.setupInput(); 
             
@@ -363,7 +362,7 @@
                 } catch (e) { this.objectModel = null; resolve(); }
             });
 
-            await Promise.race([loadPromise, new Promise(res => setTimeout(res, 3000))]);
+            await Promise.race([loadPromise, new Promise(res => setTimeout(res, 5000))]);
             this.changeState('CALIBRATION');
         },
 
@@ -386,12 +385,19 @@
             this.aiProcessing = false;
         },
 
-        update: function(ctx, w, h, inputOrPose) {
+        update: function(ctx, w, h, globalPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
 
-            // Extrai a pose de forma segura para o Minority Report
-            let rawPose = inputOrPose;
-            if (inputOrPose && inputOrPose.pose) rawPose = inputOrPose.pose;
+            // FORÇANDO O MOVENET A RODAR SE O CORE.JS TIVER DESLIGADO NA CÂMARA FRONTAL
+            if (this.state === 'FRONT_AR_OFFICE' && window.System?.detector && window.System.video?.readyState === 4) {
+                if (!this.isEstimatingPose) {
+                    this.isEstimatingPose = true;
+                    window.System.detector.estimatePoses(window.System.video, {flipHorizontal: false}).then(p => {
+                        if (p && p.length > 0) this.currentPose = p[0];
+                        this.isEstimatingPose = false;
+                    }).catch(() => { this.isEstimatingPose = false; });
+                }
+            }
 
             if (isNaN(this.displayMoney)) this.displayMoney = 0; if (isNaN(this.displayFuel)) this.displayFuel = 100;
             this.displayMoney += (this.money - this.displayMoney) * 10 * dt; this.displayFuel += (this.fuel - this.displayFuel) * 5 * dt;
@@ -399,19 +405,24 @@
             let fps = 1 / dt; let newInterval = (fps < 20) ? 1000 : 500;
             if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') { this.startAILoop(); } }
 
-            // RENDERIZAÇÃO DA CÂMARA DE FUNDO
+            // RESOLUÇÃO DE ESCALAS PARA PROJEÇÃO
+            const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
+            const videoRatio = vW / vH; const canvasRatio = w / h; 
+            let drawW = w, drawH = h, drawX = 0, drawY = 0;
+            if (videoRatio > canvasRatio) { drawW = h * videoRatio; drawX = (w - drawW) / 2; } 
+            else { drawH = w / videoRatio; drawY = (h - drawH) / 2; }
+            const scaleCanvas = drawW / vW; // Fundamental para mapear caixas com a tela
+
+            // RENDERIZAÇÃO DA CÂMARA DE FUNDO (EXCETO NA OFICINA)
             if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
-                if (this.virtualSpeed > 0.1 && this.state === 'PLAY_REAR_AR') {
+                if (this.virtualSpeed > 0.1 && !this.isExtracting) {
                     let susY = Math.sin(this.timeTotal * this.virtualSpeed * 1.5) * (this.virtualSpeed / this.stats.baseSpeed) * 3; ctx.translate(0, susY);
                 }
                 if (this.collectZoom > 0) {
                     let z = 1 + (this.collectZoom * 0.03); ctx.translate(w/2, h/2); ctx.scale(z, z); ctx.translate(-w/2, -h/2); this.collectZoom -= dt * 2;
                 }
                 if (window.System?.video && window.System.video.readyState === 4) {
-                    const vW = window.System.video.videoWidth || w; const vH = window.System.video.videoHeight || h;
-                    const videoRatio = vW / vH; const canvasRatio = w / h; let drawW = w, drawH = h, drawX = 0, drawY = 0;
-                    if (videoRatio > canvasRatio) { drawW = h * videoRatio; drawX = (w - drawW) / 2; } else { drawH = w / videoRatio; drawY = (h - drawH) / 2; }
                     ctx.drawImage(window.System.video, drawX, drawY, drawW, drawH);
                 } else { ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h); }
                 
@@ -427,16 +438,13 @@
                 case 'PLAY_REAR_AR':
                 case 'WAITING_PICKUP':
                 case 'TOW_MODE':
-                    this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt); this.drawHUD(ctx, w, h); break;
+                    this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt, drawX, drawY, scaleCanvas); this.drawHUD(ctx, w, h); break;
                 case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startFrontCamera', 'FRONT_AR_OFFICE'); break;
                 case 'FRONT_AR_OFFICE':
                     if (window.System?.video && window.System.video.readyState === 4) {
-                        const vW = window.System.video.videoWidth || w; const vH = window.System.video.videoHeight || h;
-                        const vr = vW / vH; const cr = w / h; let dw = w, dh = h, dx = 0, dy = 0;
-                        if (vr > cr) { dw = h * vr; dx = (w - dw) / 2; } else { dh = w / vr; dy = (h - dh) / 2; }
-                        ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -dx, dy, dw, dh); ctx.restore();
+                        ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -drawX, drawY, drawW, drawH); ctx.restore();
                     }
-                    GestureOffice.update(ctx, w, h, dt, this, rawPose); break;
+                    GestureOffice.update(ctx, w, h, dt, this, this.currentPose || globalPose, drawX, drawY, scaleCanvas); break;
                 case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startRearCamera', 'PLAY_REAR_AR'); break;
                 case 'GAME_OVER': this.drawOverlay(ctx, w, h, "FIM DE JOGO", "Calculando pontuação..."); break;
             }
@@ -454,7 +462,7 @@
                     } else { this.transitionPhase = 'FADE_IN'; }
                 }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR HOLOGRAMA...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0;
                 if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
@@ -526,16 +534,7 @@
             this.anomalies.forEach(a => { if (a.life < 999) a.life -= dt; }); this.anomalies = this.anomalies.filter(a => a.life > 0);
         },
 
-        getAverageColor: function(ctx, x, y, w, h) {
-            try {
-                if (w <= 0 || h <= 0) return {r:0,g:0,b:0};
-                const data = ctx.getImageData(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h)).data;
-                let r=0, g=0, b=0; for (let i=0; i<data.length; i+=4) { r+=data[i]; g+=data[i+1]; b+=data[i+2]; }
-                let c = data.length/4; if (c === 0) return {r:0, g:0, b:0}; return {r:r/c, g:g/c, b:b/c};
-            } catch(e) { return {r:0,g:0,b:0}; }
-        },
-
-        processAR: function(ctx, w, h, dt) {
+        processAR: function(ctx, w, h, dt, drawX, drawY, scaleCanvas) {
             if (this.state === 'TOW_MODE') { this.isExtracting = false; return; }
 
             const cx = w / 2; const cy = h / 2;
@@ -543,41 +542,30 @@
             this.anomalies.forEach(ano => { let d = Math.hypot(ano.x - this.vPos.x, ano.y - this.vPos.y); if (d < nearestDist) { nearestDist = d; this.activeAnomaly = ano; } });
 
             let visualFound = false; let foundBox = null;
-            const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
-            const sX = w / vW; const sY = h / vH;
 
-            // 1) RECONHECIMENTO GLOBAL (Qualquer Brinquedo em Qualquer Lugar)
-            const ignoredClasses = ['person', 'bed', 'sofa', 'tv', 'refrigerator', 'door', 'dining table', 'chair', 'couch', 'potted plant'];
+            // 1) RECONHECIMENTO GLOBAL (Qualquer Brinquedo Real) - Sem filtro exagerado, confiando apenas no COCO-SSD
+            const allowedClasses = ['car', 'truck', 'bus', 'train', 'mouse', 'remote', 'cell phone', 'bottle', 'cup'];
             
             this.detectedItems.forEach(item => {
-                if (ignoredClasses.includes(item.class) || item.score < 0.20) return;
+                if (!allowedClasses.includes(item.class) || item.score < 0.20) return;
                 
-                const bW = item.bbox[2]*sX; const bH = item.bbox[3]*sY;
-                if (bW > w * 0.5 || bW < w * 0.05) return; // Tem que ter tamanho de brinquedo na tela
+                // Mapeamento EXATO para o Canvas
+                const bW = item.bbox[2] * scaleCanvas; 
+                const bH = item.bbox[3] * scaleCanvas;
+                const cX = drawX + (item.bbox[0] * scaleCanvas) + bW/2; 
+                const cY = drawY + (item.bbox[1] * scaleCanvas) + bH/2;
                 
-                const cX = (item.bbox[0]*sX) + bW/2; const cY = (item.bbox[1]*sY) + bH/2;
-                let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.3;
+                let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4;
                 
-                ctx.strokeStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.6)"; ctx.lineWidth = isCentered ? 4 : 2;
-                ctx.strokeRect(item.bbox[0]*sX, item.bbox[1]*sY, bW, bH);
-                ctx.fillStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.6)"; ctx.font = "bold 12px Arial";
-                ctx.fillText(item.class.toUpperCase(), item.bbox[0]*sX, item.bbox[1]*sY - 5);
+                ctx.strokeStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.8)"; ctx.lineWidth = isCentered ? 4 : 2;
+                ctx.strokeRect(drawX + (item.bbox[0] * scaleCanvas), drawY + (item.bbox[1] * scaleCanvas), bW, bH);
+                ctx.fillStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.8)"; ctx.font = "bold 14px Arial";
+                ctx.fillText(item.class.toUpperCase(), drawX + (item.bbox[0] * scaleCanvas), drawY + (item.bbox[1] * scaleCanvas) - 5);
 
                 if (isCentered) {
-                    visualFound = true; foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: item.class };
+                    visualFound = true; foundBox = { x: drawX + (item.bbox[0] * scaleCanvas), y: drawY + (item.bbox[1] * scaleCanvas), w: bW, h: bH, label: item.class };
                 }
             });
-
-            // 2) Fallback Óptico (Cor) - Permite achar "brinquedos" que a IA não entende
-            if (!visualFound) {
-                let floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 30);
-                let targetColor = this.getAverageColor(ctx, cx - 30, cy - 30, 60, 60);
-                let diff = Math.abs(floorColor.r - targetColor.r) + Math.abs(floorColor.g - targetColor.g) + Math.abs(floorColor.b - targetColor.b);
-                
-                if (diff > 80) { 
-                    visualFound = true; foundBox = { x: cx - 30, y: cy - 30, w: 60, h: 60, label: "CONTRASTE" };
-                }
-            }
 
             if (this.state === 'PLAY_REAR_AR') {
                 if (visualFound && this.cargo.length < this.stats.maxCargo && this.cooldown <= 0) {
@@ -591,15 +579,15 @@
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 20px) Arial";
                 ctx.fillText("PARE O CAMINHÃO E REMOVA COM A MÃO!", cx, uiY - 15);
 
-                // O GRANDE TRUQUE: Se sumiu da visão, a mão pegou!
+                // O GRANDE TRUQUE: Se sumiu da visão (porque a mão escondeu/removeu), o jogador pegou!
                 if (!visualFound) {
                     this.pickupTimer += dt;
                     ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 20);
-                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.5)*(w*0.8), 20);
+                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.0)*(w*0.8), 20); // 1.0s para pegar
                     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY + 10, w*0.8, 20);
                     
-                    if (this.pickupTimer > 1.5) { 
-                        let val = (this.activeAnomaly && nearestDist < 40) ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
+                    if (this.pickupTimer > 1.0) { 
+                        let val = (this.activeAnomaly && nearestDist < 30) ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
                         this.cargo.push(val); this.score += val / 10;
                         window.System.msg("BRINQUEDO NA CAÇAMBA!");
                         
@@ -607,7 +595,7 @@
                             this.currentMission.progress++;
                             if (this.currentMission.progress >= this.currentMission.goal) this.completeMission();
                         }
-                        if (this.activeAnomaly && nearestDist < 40) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
+                        if (this.activeAnomaly && nearestDist < 30) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
 
                         this.changeState('PLAY_REAR_AR'); this.cooldown = 3.0; 
                         if(window.Gfx && typeof window.Gfx.shakeScreen === 'function') window.Gfx.shakeScreen(20);
