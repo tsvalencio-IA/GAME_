@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V26 - PRECISION FIX)
-// RESOLUÇÃO DE ESCALA DE BOUNDING BOX E ATIVAÇÃO FORÇADA DO MOVENET FRONT
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V27 - TRUE NAVIGATION)
+// FIX DEFINITIVO: MATEMÁTICA DE BÚSSOLA CORRIGIDA, RADAR PERFEITO E ODOMETRIA
 // =============================================================================
 
 (function() {
@@ -223,7 +223,6 @@
         
         isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
         
-        // Poses internas geradas no game_ar para sobrepor a restrição do core.js
         currentPose: null, isEstimatingPose: false,
         
         displayMoney: 0, displayFuel: 100, collectGlow: 0, collectZoom: 0, baseFlash: 0,
@@ -292,7 +291,16 @@
         },
 
         setupSensors: function() {
-            if (!this._deviceOrientationHandler) { this._deviceOrientationHandler = (e) => { this.currentHeading = e.alpha || 0; }; }
+            if (!this._deviceOrientationHandler) { 
+                this._deviceOrientationHandler = (e) => { 
+                    // Normalização para lidar perfeitamente com Android e iOS
+                    if (e.webkitCompassHeading !== undefined) {
+                        this.currentHeading = 360 - e.webkitCompassHeading;
+                    } else {
+                        this.currentHeading = e.alpha || 0;
+                    }
+                }; 
+            }
             if (!this._deviceMotionHandler) {
                 this._deviceMotionHandler = (e) => {
                     if (this.state === 'ENTER_BASE_TRANSITION' || this.state === 'EXIT_BASE_TRANSITION') return;
@@ -325,7 +333,9 @@
                 const r = canvas.getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; const w = r.width; const h = r.height;
 
                 if (this.state === 'CALIBRATION') {
-                    this.baseHeading = this.currentHeading; this.vPos = { x: 0, y: 0 }; this.changeState('PLAY_REAR_AR');
+                    this.baseHeading = this.currentHeading; 
+                    this.vPos = { x: 0, y: 0 }; 
+                    this.changeState('PLAY_REAR_AR');
                 }
                 else if (this.state === 'PLAY_REAR_AR' || this.state === 'TOW_MODE') {
                     let distToBase = Math.hypot(this.vPos.x, this.vPos.y);
@@ -388,7 +398,6 @@
         update: function(ctx, w, h, globalPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
 
-            // FORÇANDO O MOVENET A RODAR SE O CORE.JS TIVER DESLIGADO NA CÂMARA FRONTAL
             if (this.state === 'FRONT_AR_OFFICE' && window.System?.detector && window.System.video?.readyState === 4) {
                 if (!this.isEstimatingPose) {
                     this.isEstimatingPose = true;
@@ -405,15 +414,13 @@
             let fps = 1 / dt; let newInterval = (fps < 20) ? 1000 : 500;
             if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') { this.startAILoop(); } }
 
-            // RESOLUÇÃO DE ESCALAS PARA PROJEÇÃO
             const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
             const videoRatio = vW / vH; const canvasRatio = w / h; 
             let drawW = w, drawH = h, drawX = 0, drawY = 0;
             if (videoRatio > canvasRatio) { drawW = h * videoRatio; drawX = (w - drawW) / 2; } 
             else { drawH = w / videoRatio; drawY = (h - drawH) / 2; }
-            const scaleCanvas = drawW / vW; // Fundamental para mapear caixas com a tela
+            const scaleCanvas = drawW / vW; 
 
-            // RENDERIZAÇÃO DA CÂMARA DE FUNDO (EXCETO NA OFICINA)
             if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
                 if (this.virtualSpeed > 0.1 && !this.isExtracting) {
@@ -462,7 +469,7 @@
                     } else { this.transitionPhase = 'FADE_IN'; }
                 }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR HOLOGRAMA...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0;
                 if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
@@ -493,8 +500,11 @@
             if (isMoving) {
                 let speedMod = 1.0; if (this.currentEvent === 'STORM') speedMod *= 0.5; 
                 let currentSpeed = this.virtualSpeed * speedMod;
+                
+                // CÁLCULO DE NAVEGAÇÃO CORRIGIDO: Y+ é PARA FRENTE.
                 let rad = (this.currentHeading - this.baseHeading) * (Math.PI / 180);
-                this.vPos.x += Math.sin(rad) * currentSpeed * dt; this.vPos.y -= Math.cos(rad) * currentSpeed * dt; 
+                this.vPos.x += -Math.sin(rad) * currentSpeed * dt; 
+                this.vPos.y += Math.cos(rad) * currentSpeed * dt; 
 
                 let wearMod = 1.0 - ((this.upgrades.truck?.lvl || 1) * 0.05);
                 this.wear.motor = Math.min(100, this.wear.motor + (this.stats.wearRate * wearMod * dt));
@@ -543,15 +553,15 @@
 
             let visualFound = false; let foundBox = null;
 
-            // 1) RECONHECIMENTO GLOBAL (Qualquer Brinquedo Real) - Sem filtro exagerado, confiando apenas no COCO-SSD
             const allowedClasses = ['car', 'truck', 'bus', 'train', 'mouse', 'remote', 'cell phone', 'bottle', 'cup'];
             
             this.detectedItems.forEach(item => {
                 if (!allowedClasses.includes(item.class) || item.score < 0.20) return;
                 
-                // Mapeamento EXATO para o Canvas
                 const bW = item.bbox[2] * scaleCanvas; 
                 const bH = item.bbox[3] * scaleCanvas;
+                if (bW > w * 0.8 || bW < w * 0.05) return; 
+                
                 const cX = drawX + (item.bbox[0] * scaleCanvas) + bW/2; 
                 const cY = drawY + (item.bbox[1] * scaleCanvas) + bH/2;
                 
@@ -579,11 +589,10 @@
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 20px) Arial";
                 ctx.fillText("PARE O CAMINHÃO E REMOVA COM A MÃO!", cx, uiY - 15);
 
-                // O GRANDE TRUQUE: Se sumiu da visão (porque a mão escondeu/removeu), o jogador pegou!
                 if (!visualFound) {
                     this.pickupTimer += dt;
                     ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 20);
-                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.0)*(w*0.8), 20); // 1.0s para pegar
+                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.0)*(w*0.8), 20); 
                     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY + 10, w*0.8, 20);
                     
                     if (this.pickupTimer > 1.0) { 
@@ -619,20 +628,27 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // AR WAYPOINTS (NAVEGAÇÃO REAL PARA A BASE 3D)
+            // AR WAYPOINTS E RADAR CÁLCULO ABSOLUTO
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
-                let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
-                let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
-                let fwdAngle = Math.atan2(Math.sin(angle), Math.cos(angle)); 
-                let fov = Math.PI / 2.5; 
+                let dx = worldX - this.vPos.x; 
+                let dy = worldY - this.vPos.y; 
+                let dist = Math.hypot(dx, dy);
                 
-                if (Math.abs(fwdAngle) < fov) {
-                    let projX = (w/2) + (fwdAngle / fov) * (w/2); let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
+                let worldAngle = Math.atan2(dy, dx); 
+                let playerForwardAngle = (Math.PI / 2) + radHead; 
+                let relAngle = worldAngle - playerForwardAngle;
+                relAngle = Math.atan2(Math.sin(relAngle), Math.cos(relAngle)); 
+                
+                let fovHalf = Math.PI / 4; 
+                
+                if (Math.abs(relAngle) < fovHalf) {
+                    let projX = (w/2) - (relAngle / fovHalf) * (w/2); 
+                    let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
                     ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(projX, projY - 25); ctx.lineTo(projX + 15, projY); ctx.lineTo(projX, projY + 25); ctx.lineTo(projX - 15, projY); ctx.fill();
                     ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Russo One'"; ctx.textAlign = "center"; ctx.fillText(label, projX, projY - 35);
                     ctx.font = "bold 12px Arial"; ctx.fillText(Math.floor(dist) + "m", projX, projY + 45);
                 } else {
-                    let isRight = fwdAngle > 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
+                    let isRight = relAngle < 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
                     ctx.fillStyle = isBase ? this.colors.success : color; ctx.beginPath();
                     if (isRight) { ctx.moveTo(edgeX-20, edgeY - 30); ctx.lineTo(edgeX + 20, edgeY); ctx.lineTo(edgeX-20, edgeY + 30); } 
                     else { ctx.moveTo(edgeX+20, edgeY - 30); ctx.lineTo(edgeX - 20, edgeY); ctx.lineTo(edgeX+20, edgeY + 30); }
@@ -681,8 +697,13 @@
                 let dx = wX - this.vPos.x; let dy = wY - this.vPos.y; let dist = Math.hypot(dx, dy);
                 if (dist < this.stats.radarRange) {
                     if (isBlinking && Math.sin(this.timeTotal * 15) > 0) return;
-                    let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2); let sD = (dist / this.stats.radarRange) * rR;
-                    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rCx + Math.cos(angle)*sD, rCy + Math.sin(angle)*sD, sz, 0, Math.PI*2); ctx.fill();
+                    let worldAngle = Math.atan2(dy, dx);
+                    let playerForwardAngle = (Math.PI / 2) + radHead;
+                    let relAngle = worldAngle - playerForwardAngle;
+                    let canvasAngle = -relAngle - Math.PI/2; 
+                    
+                    let sD = (dist / this.stats.radarRange) * rR;
+                    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rCx + Math.cos(canvasAngle)*sD, rCy + Math.sin(canvasAngle)*sD, sz, 0, Math.PI*2); ctx.fill();
                 }
             };
             drawBlip(0, 0, this.colors.success, 5, false);
