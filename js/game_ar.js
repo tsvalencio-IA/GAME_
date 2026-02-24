@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V27 - TRUE NAVIGATION)
-// FIX DEFINITIVO: MATEMÁTICA DE BÚSSOLA CORRIGIDA, RADAR PERFEITO E ODOMETRIA
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V28 - MODERN UI)
+// OFICINA MINORITY REPORT TOTALMENTE REDESENHADA: ÍCONES, BADGES E LAYOUT V-X
 // =============================================================================
 
 (function() {
@@ -51,8 +51,17 @@
         startFrontCamera: async function() { return await this.safeSwitch('user'); }
     };
 
+    // FUNÇÃO AUXILIAR PARA DESENHAR RETÂNGULOS ARREDONDADOS NO CANVAS
+    function roundRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath(); ctx.moveTo(x + radius, y); ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius); ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height); ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius); ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y); ctx.closePath();
+    }
+
     // =========================================================================
-    // 2) FRONT_AR_OFFICE (MINORITY REPORT COM MOVENET NATIVO)
+    // 2) FRONT_AR_OFFICE (MINORITY REPORT UI MODERNA)
     // =========================================================================
     const GestureOffice = {
         isActive: false, 
@@ -62,13 +71,13 @@
         eventCallback: null,
         
         buttons: [
-            { id: 'REFUEL', label: 'ABASTECER BATERIA', x: 0, y: 0, w: 200, h: 60, color: '#f39c12' },
-            { id: 'REPAIR', label: 'REPARAR MOTOR', x: 0, y: 0, w: 200, h: 60, color: '#e74c3c' },
-            { id: 'UPG_ENGINE', label: 'UPGRADE MOTOR', x: 0, y: 0, w: 200, h: 60, color: '#3498db' },
-            { id: 'UPG_TANK', label: 'UPGRADE TANQUE', x: 0, y: 0, w: 200, h: 60, color: '#9b59b6' },
-            { id: 'UPG_RADAR', label: 'UPGRADE RADAR', x: 0, y: 0, w: 200, h: 60, color: '#00ffff' },
-            { id: 'UPG_TRUCK', label: 'UPGRADE CHASSI', x: 0, y: 0, w: 200, h: 60, color: '#f1c40f' },
-            { id: 'EXIT', label: 'SAIR DA BASE', x: 0, y: 0, w: 280, h: 60, color: '#00ff66' }
+            { id: 'REFUEL', icon: '⛽', label: 'BATERIA', w: 0, h: 0, color: '#f39c12' },
+            { id: 'REPAIR', icon: '🔧', label: 'REPAROS', w: 0, h: 0, color: '#e74c3c' },
+            { id: 'UPG_ENGINE', icon: '⚙️', label: 'MOTOR', w: 0, h: 0, color: '#3498db' },
+            { id: 'UPG_TANK', icon: '🔋', label: 'TANQUE', w: 0, h: 0, color: '#9b59b6' },
+            { id: 'UPG_RADAR', icon: '📡', label: 'RADAR', w: 0, h: 0, color: '#00ffff' },
+            { id: 'UPG_TRUCK', icon: '🚜', label: 'CHASSI', w: 0, h: 0, color: '#f1c40f' },
+            { id: 'EXIT', icon: '🚀', label: 'VOLTAR À PATRULHA', w: 0, h: 0, color: '#00ff66', isWide: true }
         ],
 
         init: function(callback) {
@@ -82,21 +91,31 @@
         update: function(ctx, w, h, dt, gameState, rawPose, drawX, drawY, scaleCanvas) {
             if (!this.isActive) return;
 
-            const cx = w / 2; const cy = h / 2;
-            const gap = 15; const btnW = Math.min(200, (w/2) - 20);
+            const cx = w / 2;
+            const gap = Math.min(15, w * 0.03); 
+            const btnW = Math.min(160, (w * 0.45));
+            const btnH = Math.min(110, h * 0.16);
             
-            this.buttons[0].x = cx - btnW - gap; this.buttons[0].y = cy - 100;  this.buttons[0].w = btnW;
-            this.buttons[1].x = cx + gap;        this.buttons[1].y = cy - 100;  this.buttons[1].w = btnW;
-            this.buttons[2].x = cx - btnW - gap; this.buttons[2].y = cy - 20;   this.buttons[2].w = btnW;
-            this.buttons[3].x = cx + gap;        this.buttons[3].y = cy - 20;   this.buttons[3].w = btnW;
-            this.buttons[4].x = cx - btnW - gap; this.buttons[4].y = cy + 60;   this.buttons[4].w = btnW;
-            this.buttons[5].x = cx + gap;        this.buttons[5].y = cy + 60;   this.buttons[5].w = btnW;
-            this.buttons[6].x = cx - 140;        this.buttons[6].y = cy + 150;  this.buttons[6].w = 280;
+            // Grid Layout Dinâmico e Moderno (3 linhas x 2 colunas)
+            const startY = Math.max(140, h * 0.22);
+            
+            this.buttons[0].x = cx - btnW - gap/2; this.buttons[0].y = startY;                     this.buttons[0].w = btnW; this.buttons[0].h = btnH;
+            this.buttons[1].x = cx + gap/2;        this.buttons[1].y = startY;                     this.buttons[1].w = btnW; this.buttons[1].h = btnH;
+            this.buttons[2].x = cx - btnW - gap/2; this.buttons[2].y = startY + btnH + gap;        this.buttons[2].w = btnW; this.buttons[2].h = btnH;
+            this.buttons[3].x = cx + gap/2;        this.buttons[3].y = startY + btnH + gap;        this.buttons[3].w = btnW; this.buttons[3].h = btnH;
+            this.buttons[4].x = cx - btnW - gap/2; this.buttons[4].y = startY + (btnH + gap)*2;    this.buttons[4].w = btnW; this.buttons[4].h = btnH;
+            this.buttons[5].x = cx + gap/2;        this.buttons[5].y = startY + (btnH + gap)*2;    this.buttons[5].w = btnW; this.buttons[5].h = btnH;
+            
+            // Botão de Saída (Largo)
+            const exitBtn = this.buttons[6];
+            exitBtn.w = (btnW * 2) + gap; exitBtn.h = Math.min(70, btnH * 0.8);
+            exitBtn.x = cx - exitBtn.w / 2; exitBtn.y = startY + (btnH + gap)*3;
 
-            ctx.fillStyle = "rgba(0, 15, 30, 0.85)"; ctx.fillRect(0, 0, w, h);
+            // Fundo da Oficina (Escuro, tecnológico)
+            ctx.fillStyle = "rgba(5, 10, 20, 0.85)"; ctx.fillRect(0, 0, w, h);
             
             // ========================================================
-            // PROCESSAMENTO MOVENET - ESCALA PERFEITA (COVER)
+            // PROCESSAMENTO MOVENET (BRAÇOS HOLO)
             // ========================================================
             this.cursor.active = false;
             let kps = [];
@@ -108,11 +127,10 @@
             }
             
             if (kps && kps.length > 0) {
-                ctx.lineWidth = 5;
-                ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "rgba(0, 255, 255, 0.5)";
                 ctx.fillStyle = "#fff";
 
-                // Espelhamento na câmera frontal (w - x)
                 const mapKpx = (valX) => w - (drawX + (valX * scaleCanvas));
                 const mapKpy = (valY) => drawY + (valY * scaleCanvas);
 
@@ -124,8 +142,8 @@
                         const x2 = mapKpx(kp2.x); const y2 = mapKpy(kp2.y);
                         if(Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
                             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-                            ctx.beginPath(); ctx.arc(x1, y1, 6, 0, Math.PI*2); ctx.fill();
-                            ctx.beginPath(); ctx.arc(x2, y2, 6, 0, Math.PI*2); ctx.fill();
+                            ctx.beginPath(); ctx.arc(x1, y1, 4, 0, Math.PI*2); ctx.fill();
+                            ctx.beginPath(); ctx.arc(x2, y2, 4, 0, Math.PI*2); ctx.fill();
                         }
                     }
                 };
@@ -146,19 +164,20 @@
                     const cxW = mapKpx(domWrist.x);
                     const cyW = mapKpy(domWrist.y);
                     if(Number.isFinite(cxW) && Number.isFinite(cyW)) {
-                        this.cursor.x = cxW;
-                        this.cursor.y = cyW;
-                        this.cursor.active = true;
+                        this.cursor.x = cxW; this.cursor.y = cyW; this.cursor.active = true;
                     }
                 }
             }
 
-            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.font = "bold clamp(24px, 6vw, 40px) 'Russo One'"; ctx.fillText("OFICINA HOLOGRÁFICA", cx, Math.max(40, cy - 180));
-            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(70, cy - 150));
-            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | BATERIA: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(90, cy - 125));
+            // TEXTOS E STATUS NO TOPO
+            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+            ctx.font = "bold clamp(22px, 5vw, 36px) 'Russo One'"; ctx.fillText("OFICINA USR", cx, Math.max(30, startY - 90));
+            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(60, startY - 55));
+            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 14px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | BATERIA: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(80, startY - 30));
 
             let currentlyHovering = null;
 
+            // RENDERIZANDO OS CARDS DE BOTÕES
             this.buttons.forEach(btn => {
                 let isHover = false;
                 if (this.cursor.active) {
@@ -167,21 +186,81 @@
                     }
                 }
                 
-                ctx.fillStyle = isHover ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.6)"; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-                ctx.strokeStyle = btn.color; ctx.lineWidth = isHover ? 4 : 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+                // Variáveis Lógicas do Botão
+                let badgeText = ""; let costText = ""; let costVal = 0; let isClickable = true;
                 
-                ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Chakra Petch'"; ctx.textAlign = "center"; ctx.fillText(btn.label, btn.x + btn.w/2, btn.y + btn.h/2 + 2);
-                ctx.font = "12px Arial"; ctx.fillStyle = btn.color; let costTxt = "";
+                if(btn.id==='REFUEL') {
+                    costVal = Math.floor((gameState.stats.maxFuel - gameState.fuel)*2);
+                    badgeText = "BATERIA"; costText = costVal > 0 ? `R$ ${costVal}` : "CHEIO";
+                    isClickable = costVal > 0 && gameState.money >= costVal;
+                }
+                else if(btn.id==='REPAIR') {
+                    costVal = Math.floor((100 - gameState.health)*5);
+                    badgeText = "CHASSI"; costText = costVal > 0 ? `R$ ${costVal}` : "NOVO";
+                    isClickable = costVal > 0 && gameState.money >= costVal;
+                }
+                else if(btn.id.startsWith('UPG_')) {
+                    let uKey = btn.id.replace('UPG_', '').toLowerCase();
+                    let u = gameState.upgrades[uKey];
+                    if(u.lvl < u.max) {
+                        badgeText = `V${u.lvl} ▶ V${u.lvl+1}`; costText = `R$ ${u.cost}`; costVal = u.cost;
+                        isClickable = gameState.money >= u.cost;
+                    } else {
+                        badgeText = `V${u.max}`; costText = "MÁXIMO"; costVal = 0; isClickable = false;
+                    }
+                }
+                else if(btn.id === 'EXIT') {
+                    isClickable = true;
+                }
+
+                // Corpo do Botão (Glassmorphism)
+                ctx.fillStyle = isHover ? "rgba(255, 255, 255, 0.15)" : "rgba(25, 35, 50, 0.9)";
+                roundRect(ctx, btn.x, btn.y, btn.w, btn.h, 15); ctx.fill();
                 
-                if(btn.id==='REFUEL') costTxt = `R$ ${Math.floor((gameState.stats.maxFuel - gameState.fuel)*2)}`;
-                if(btn.id==='REPAIR') costTxt = `R$ ${Math.floor((100 - gameState.health)*5)}`;
-                if(btn.id==='UPG_ENGINE') costTxt = gameState.upgrades.engine.lvl < gameState.upgrades.engine.max ? `R$ ${gameState.upgrades.engine.cost}` : 'MÁX';
-                if(btn.id==='UPG_TANK') costTxt = gameState.upgrades.tank.lvl < gameState.upgrades.tank.max ? `R$ ${gameState.upgrades.tank.cost}` : 'MÁX';
-                if(btn.id==='UPG_RADAR') costTxt = gameState.upgrades.radar.lvl < gameState.upgrades.radar.max ? `R$ ${gameState.upgrades.radar.cost}` : 'MÁX';
-                if(btn.id==='UPG_TRUCK') costTxt = gameState.upgrades.truck.lvl < gameState.upgrades.truck.max ? `R$ ${gameState.upgrades.truck.cost}` : 'MÁX';
-                if(costTxt) ctx.fillText(costTxt, btn.x + btn.w/2, btn.y + btn.h - 8);
+                ctx.strokeStyle = isHover ? btn.color : "rgba(255, 255, 255, 0.1)";
+                ctx.lineWidth = isHover ? 3 : 1; 
+                if(!isClickable && btn.id !== 'EXIT' && costText !== "CHEIO" && costText !== "NOVO" && costText !== "MÁXIMO") ctx.strokeStyle = "#e74c3c"; // Vermelho se não tiver grana
+                ctx.stroke();
+
+                // Efeito Brilho Interno no Hover
+                if (isHover) {
+                    ctx.shadowColor = btn.color; ctx.shadowBlur = 15;
+                    ctx.strokeStyle = btn.color; ctx.stroke();
+                    ctx.shadowBlur = 0; // reset
+                }
+
+                // Ícone Gigante no Centro
+                ctx.font = isHover ? "clamp(35px, 8vw, 45px) Arial" : "clamp(30px, 7vw, 40px) Arial";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                let iconY = btn.isWide ? btn.y + btn.h/2 : btn.y + btn.h/2 - 10;
+                ctx.fillText(btn.icon, btn.x + btn.w/2, iconY);
+
+                // Label (Abaixo do Ícone)
+                ctx.fillStyle = "#fff"; ctx.font = "bold clamp(10px, 2.5vw, 12px) 'Chakra Petch'"; ctx.textBaseline = "alphabetic";
+                let labelY = btn.isWide ? btn.y + btn.h/2 + 5 : btn.y + btn.h - 22;
+                if(btn.isWide) ctx.fillText(`${btn.icon} ${btn.label} ${btn.icon}`, btn.x + btn.w/2, btn.y + btn.h/2 + 5);
+                else ctx.fillText(btn.label, btn.x + btn.w/2, labelY);
+
+                // Texto de Custo (Rodapé do Card)
+                if(!btn.isWide) {
+                    ctx.fillStyle = isClickable || costText === "MÁXIMO" || costText === "CHEIO" || costText === "NOVO" ? btn.color : "#e74c3c";
+                    ctx.font = "bold clamp(12px, 3vw, 14px) 'Russo One'";
+                    ctx.fillText(costText, btn.x + btn.w/2, btn.y + btn.h - 6);
+                }
+
+                // Sêlo Flutuante (Badge V1 -> V2)
+                if (badgeText && !btn.isWide) {
+                    ctx.fillStyle = btn.color;
+                    let badgeW = ctx.measureText(badgeText).width + 16;
+                    roundRect(ctx, btn.x - 5, btn.y - 10, badgeW, 20, 8); ctx.fill();
+                    ctx.fillStyle = "#000"; ctx.font = "bold 10px Arial"; ctx.textBaseline = "middle";
+                    ctx.fillText(badgeText, btn.x - 5 + badgeW/2, btn.y);
+                }
             });
 
+            ctx.textBaseline = "alphabetic"; // Reset p/ não bugar outras telas
+
+            // LÓGICA DE CLIQUE GESTUAL HOLOGRÁFICA (Preenche no centro do botão)
             if (currentlyHovering) {
                 if (this.hoveredBtn === currentlyHovering) {
                     this.hoverTime += dt;
@@ -193,15 +272,21 @@
                 } else { this.hoveredBtn = currentlyHovering; this.hoverTime = 0; }
             } else { this.hoveredBtn = null; this.hoverTime = 0; }
 
+            // DESENHA O CURSOR DO JOGADOR
             if (this.cursor.active) {
-                ctx.fillStyle = "rgba(0, 255, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 12, 0, Math.PI*2); ctx.fill();
-                if (this.hoverTime > 0) {
-                    ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 5; 
-                    ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 25, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke();
+                ctx.fillStyle = "rgba(0, 255, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 10, 0, Math.PI*2); ctx.fill();
+                
+                // Anel de Carregamento Fica no Centro do Botão se estiver no Hover!
+                if (this.hoverTime > 0 && this.hoveredBtn) {
+                    let targetBtn = this.buttons.find(b => b.id === this.hoveredBtn);
+                    if (targetBtn) {
+                        ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 6; 
+                        ctx.beginPath(); ctx.arc(targetBtn.x + targetBtn.w/2, targetBtn.y + targetBtn.h/2, 35, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke();
+                    }
                 }
             } else {
-                ctx.fillStyle = "#aaa"; ctx.font = "14px Arial"; ctx.textAlign = "center"; 
-                ctx.fillText("APAREÇA NA CÂMERA E LEVANTE A MÃO (OU TOQUE)", cx, h - 20);
+                ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "bold 12px Arial"; ctx.textAlign = "center"; 
+                ctx.fillText("APAREÇA NA CÂMERA E LEVANTE A MÃO PARA CONTROLAR (OU TOQUE)", cx, h - 20);
             }
         },
 
@@ -219,6 +304,7 @@
         _deviceOrientationHandler: null, _deviceMotionHandler: null, _sensorsReady: false,
         
         objectModel: null, detectedItems: [], lastAiTime: 0, aiIntervalMs: 500, aiIntervalId: null, aiProcessing: false,
+        floorColor: { r: 0, g: 0, b: 0 }, targetColor: { r: 0, g: 0, b: 0 },
         activeAnomaly: null, anomalies: [], spawnTimer: 0,
         
         isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
@@ -293,12 +379,8 @@
         setupSensors: function() {
             if (!this._deviceOrientationHandler) { 
                 this._deviceOrientationHandler = (e) => { 
-                    // Normalização para lidar perfeitamente com Android e iOS
-                    if (e.webkitCompassHeading !== undefined) {
-                        this.currentHeading = 360 - e.webkitCompassHeading;
-                    } else {
-                        this.currentHeading = e.alpha || 0;
-                    }
+                    if (e.webkitCompassHeading !== undefined) { this.currentHeading = 360 - e.webkitCompassHeading; } 
+                    else { this.currentHeading = e.alpha || 0; }
                 }; 
             }
             if (!this._deviceMotionHandler) {
@@ -469,7 +551,7 @@
                     } else { this.transitionPhase = 'FADE_IN'; }
                 }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR HOLOGRAMA...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0;
                 if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
@@ -501,7 +583,6 @@
                 let speedMod = 1.0; if (this.currentEvent === 'STORM') speedMod *= 0.5; 
                 let currentSpeed = this.virtualSpeed * speedMod;
                 
-                // CÁLCULO DE NAVEGAÇÃO CORRIGIDO: Y+ é PARA FRENTE.
                 let rad = (this.currentHeading - this.baseHeading) * (Math.PI / 180);
                 this.vPos.x += -Math.sin(rad) * currentSpeed * dt; 
                 this.vPos.y += Math.cos(rad) * currentSpeed * dt; 
@@ -628,7 +709,6 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // AR WAYPOINTS E RADAR CÁLCULO ABSOLUTO
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
                 let dx = worldX - this.vPos.x; 
                 let dy = worldY - this.vPos.y; 
