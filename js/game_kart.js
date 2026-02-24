@@ -1,7 +1,7 @@
 // =============================================================================
-// KART LEGENDS: TITANIUM MASTER FINAL V19 (ULTIMATE COMBAT, CAROUSEL SHOP & HD KARTS)
+// KART LEGENDS: TITANIUM MASTER FINAL V20 (ULTIMATE COMBAT, CAROUSEL SHOP & HD KARTS)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. MODELOS VISUAIS HD, EXPLOSÕES REAIS, IA APRIMORADA, FÍSICA CORRIGIDA.
+// STATUS: 100% COMPLETO. MODELOS VISUAIS HD, EXPLOSÕES REAIS, IA APRIMORADA, FÍSICA CORRIGIDA E CARROSSEL.
 // =============================================================================
 
 (function() {
@@ -203,7 +203,6 @@
                             } else { this.toggleReady(); }
                         } else { this.startRace(this.currentFase.trackId !== undefined ? this.currentFase.trackId : this.selectedTrack); }
                     } else {
-                        // VERIFICAÇÃO EXATA POR HITBOX
                         if (this.lobbyHitboxes) {
                             let clicked = this.lobbyHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
                             if (clicked) {
@@ -376,7 +375,7 @@
                     this.localBots.push({
                         id: 'cpu' + i, charId: cfg.char, pos: 0, x: (i % 2 === 0 ? -0.5 : 0.5) * (1 + i*0.2), speed: 0, lap: 1, status: 'RACING', finishTime: 0, name: cfg.name, color: CHARACTERS[cfg.char].color,
                         ai_speedMult: diff.speedMult + (Math.random() * 0.1), ai_accelMult: diff.accelMult, ai_reaction: diff.reaction, ai_lookAhead: diff.lookAhead, ai_targetLane: (i % 2 === 0 ? -0.5 : 0.5), ai_laneTimer: 0,
-                        item: null, useItemTimer: 0, kartId: 0 // Bots sempre usam o standard
+                        item: null, useItemTimer: 0, kartId: 0 
                     });
                 });
                 if(!this.isOnline) { this.rivals = this.localBots; } 
@@ -446,23 +445,19 @@
         updatePhysics: function(w, h, pose) {
             const d = Logic; 
             
-            // --- APLICAÇÃO DOS BÓNUS DO KART PERSONALIZADO (PROJETADO NA FÍSICA) ---
+            // --- APLICAÇÃO DOS BÓNUS DA LOJA NA FÍSICA ---
             let char = { ...CHARACTERS[this.selectedChar] }; 
             let activeKart = KART_MODELS[0];
             
             if (this.useCustomKart && this.garage && this.garage[this.activeKartIdx]) {
                 let kId = this.garage[this.activeKartIdx].modelId;
                 activeKart = KART_MODELS.find(k => k.id === kId) || KART_MODELS[0];
-                
                 const upg = this.kartUpgrades || { engine: 1, tires: 1, suspension: 1 };
                 
-                char.speedInfo += activeKart.speedBonus;
-                char.turnInfo += activeKart.turnBonus;
-                char.weight += activeKart.weightBonus;
-
-                char.speedInfo += (upg.engine - 1) * 0.08; 
+                char.speedInfo += activeKart.speedBonus + (upg.engine - 1) * 0.08;
                 char.accel += (upg.engine - 1) * 0.005; 
-                char.turnInfo += (upg.tires - 1) * 0.10; 
+                char.turnInfo += activeKart.turnBonus + (upg.tires - 1) * 0.10;
+                char.weight += activeKart.weightBonus;
                 
                 char.tireLevel = upg.tires || 1;
                 char.suspensionLevel = upg.suspension || 1;
@@ -476,10 +471,8 @@
 
             if (d.status === 'FINISHED') {
                 let futureSeg = getSegment((d.pos + 300) / CONF.SEGMENT_LENGTH);
-                d.targetSteer = 0;
-                d.steer += (-futureSeg.curve * 0.05 - d.steer) * 0.1; 
-                d.speed = MathCore.lerp(d.speed, 130, 0.05); 
-                d.playerX *= 0.95; 
+                d.targetSteer = 0; d.steer += (-futureSeg.curve * 0.05 - d.steer) * 0.1; 
+                d.speed = MathCore.lerp(d.speed, 130, 0.05); d.playerX *= 0.95; 
             } else {
                 if(pose && pose.keypoints) {
                     const map = (pt) => ({ x: (1 - pt.x/640)*w, y: (pt.y/480)*h });
@@ -510,22 +503,20 @@
             const carScaleGlobal = w * 0.0022;
             const partY = (h * 0.80) + (15 * carScaleGlobal) + 5; 
             
-            // FÍSICA APLICADA: TANQUE e TRATOR lidam melhor com Offroad
+            // TRATOR e TANQUE são Reis do Offroad!
             let offroadDrag = CONF.OFFROAD_DECEL;
             if (activeKart.type === 'monster') offroadDrag = 0.95;
             if (activeKart.type === 'tractor') offroadDrag = 0.96;
-            if (activeKart.type === 'tank') offroadDrag = 0.97; // Ignora quase todo offroad
+            if (activeKart.type === 'tank') offroadDrag = 0.97; 
 
             if (char.tireLevel > 1) { offroadDrag += (char.tireLevel - 1) * 0.015; }
             if (offroadDrag > CONF.FRICTION) offroadDrag = CONF.FRICTION;
 
             if (absX > 1.45) { 
-                currentGrip = PHYSICS.gripOffroad; currentDrag = offroadDrag; 
-                d.vibration = 5; 
+                currentGrip = PHYSICS.gripOffroad; currentDrag = offroadDrag; d.vibration = 5; 
                 if (char.suspensionLevel > 1) d.vibration -= (char.suspensionLevel - 1) * 1.5; 
                 if(d.speed > 50) d.speed *= 0.98; if(d.speed > 10) this.spawnParticle(w/2 + (Math.random()-0.5)*40, partY, 'dust'); 
-            } 
-            else if (absX > 1.0) { currentGrip = PHYSICS.gripZebra; d.vibration = 2; }
+            } else if (absX > 1.0) { currentGrip = PHYSICS.gripZebra; d.vibration = 2; }
 
             let max = CONF.MAX_SPEED * char.speedInfo;
             if (d.turboLock) {
@@ -537,15 +528,15 @@
             if(d.status === 'RACING' && d.spinTimer <= 0 && isAccelerating) { d.speed += (max - d.speed) * char.accel; } else if (d.status !== 'FINISHED') { d.speed *= 0.96; }
             d.speed *= currentDrag;
 
-            // FIX: RECUPERAÇÃO DO GIRO (Não fica mais capotado para sempre!)
+            // FIX ABSOLUTO: O Kart RECUPERA após capotar (Giro de 360 Graus Perfeito!)
             if (d.spinTimer > 0) { 
                 d.spinTimer--; 
-                d.spinAngle += 0.4; 
+                d.spinAngle += (Math.PI * 2) / 40; // Rotação exata de 360º nos 40 frames
                 d.speed *= 0.95; 
-                d.bounce *= 0.85; // A gravidade puxa de volta
+                d.bounce *= 0.85; 
             } else {
-                d.spinAngle = 0; // Volta a ficar de pé
-                d.bounce = (Math.random() - 0.5) * d.vibration; // Vibração normal da pista
+                d.spinAngle = 0; // Crava no chão
+                d.bounce = (Math.random() - 0.5) * d.vibration; 
             }
 
             if (Math.abs(d.targetSteer) > 0.5 && d.speed > 100 && absX < 1.3 && d.spinTimer <= 0) {
@@ -613,9 +604,7 @@
                 if (p.pos >= trackLength) p.pos -= trackLength; 
                 if (p.life <= 0) p.active = false;
 
-                let target = null;
-                let minDist = 3000;
-                
+                let target = null; let minDist = 3000;
                 if (p.owner !== 'player' && d.status === 'RACING') {
                     let distToPlayer = d.pos - p.pos;
                     if (distToPlayer < 0) distToPlayer += trackLength;
@@ -634,17 +623,13 @@
                     let distZPlayer = Math.abs(p.pos - d.pos);
                     if (distZPlayer < 250 && Math.abs(p.x - d.playerX) < 1.0) { 
                         d.speed *= 0.2; d.spinTimer = 40; 
-                        
                         let baseBounce = char.weight > 1.4 ? -40 : -80; 
                         if (activeKart.type === 'tank') baseBounce = -10; 
-                        
                         if (char.suspensionLevel > 1) baseBounce *= (1 - (char.suspensionLevel - 1) * 0.25);
-                        d.bounce = baseBounce; // Salto UP!
+                        d.bounce = baseBounce; 
                         
-                        p.active = false;
-                        window.Sfx.error(); window.Gfx.shakeScreen(30);
-                        this.pushMsg("ATINGIDO!", "#f00", 50);
-                        this.spawnParticle(w/2, h*0.8, 'explosion'); // EFEITO MÁXIMO
+                        p.active = false; window.Sfx.error(); window.Gfx.shakeScreen(30); this.pushMsg("ATINGIDO!", "#f00", 50);
+                        this.spawnParticle(w/2, h*0.8, 'explosion'); // MEGA EXPLOSÃO
                     }
                 }
 
@@ -652,9 +637,9 @@
                     if (r.status === 'FINISHED' || p.owner === r.id) return;
                     let distZ = Math.abs(p.pos - r.pos);
                     if (distZ < 250 && Math.abs(p.x - r.x) < 1.0) {
-                        r.speed *= 0.2; r.spinTimer = 40; p.active = false;
-                        window.Sfx.play(200, 'square', 0.2, 0.2); 
+                        r.speed *= 0.2; r.spinTimer = 40; p.active = false; window.Sfx.play(200, 'square', 0.2, 0.2); 
                         // IA sofre explosão!
+                        this.spawnParticle(w/2 + (r.x - d.playerX)*w/2, h*0.6, 'explosion');
                     }
                 });
             });
@@ -694,32 +679,22 @@
                                     o.collected = true;
                                     r.item = ['mushroom', 'banana', 'shell'][Math.floor(Math.random() * 3)];
                                     r.useItemTimer = 60 + Math.floor(Math.random() * 120); 
-                                } else if (o.type === 'banana') {
-                                    o.collected = true; r.speed *= 0.2; r.spinTimer = 40;
-                                }
+                                } else if (o.type === 'banana') { o.collected = true; r.speed *= 0.2; r.spinTimer = 40; }
                             }
                         });
                     }
 
-                    // IA COMBATE AVANÇADO (Mira antes de atirar)
                     if (r.item === 'shell') {
                         let botTarget = d.rivals.concat([{pos: d.pos, x: d.playerX}]).find(x => x.pos > r.pos && x.pos - r.pos < 1000);
-                        if (botTarget) {
-                            r.ai_targetLane = botTarget.x; // Tenta alinhar para o tiro fatal
-                            if (Math.abs(r.x - botTarget.x) < 0.5) r.useItemTimer = 1;
-                        }
+                        if (botTarget) { r.ai_targetLane = botTarget.x; if (Math.abs(r.x - botTarget.x) < 0.5) r.useItemTimer = 1; }
                     }
 
                     if (r.item && r.useItemTimer > 0) {
                         r.useItemTimer--;
                         if (r.useItemTimer <= 0) {
-                            if (r.item === 'mushroom') {
-                                r.speed = Math.min(CONF.TURBO_MAX_SPEED + 50, r.speed + 150);
-                            } else if (r.item === 'banana') {
-                                botSeg.obs.push({ type: 'banana', x: r.x, collected: false });
-                            } else if (r.item === 'shell') {
-                                d.projectiles.push({ pos: r.pos + 200, x: r.x, speed: Math.max(r.speed, 200) + 150, active: true, life: 250, owner: r.id });
-                            }
+                            if (r.item === 'mushroom') { r.speed = Math.min(CONF.TURBO_MAX_SPEED + 50, r.speed + 150); } 
+                            else if (r.item === 'banana') { botSeg.obs.push({ type: 'banana', x: r.x, collected: false }); } 
+                            else if (r.item === 'shell') { d.projectiles.push({ pos: r.pos + 200, x: r.x, speed: Math.max(r.speed, 200) + 150, active: true, life: 250, owner: r.id }); }
                             r.item = null;
                         }
                     }
@@ -732,7 +707,7 @@
                     }
                     if (futureSeg.curve > 2) r.ai_targetLane = -0.8; else if (futureSeg.curve < -2) r.ai_targetLane = 0.8; 
 
-                    // IA ERRA A CURVA (Tornando-a realista)
+                    // IA ERRA A CURVA (Combate Realista)
                     if (Math.random() < diff.errorRate * 0.05) { r.ai_targetLane = (Math.random() > 0.5 ? 1.6 : -1.6); }
 
                     let moveX = (r.ai_targetLane - r.x) * r.ai_reaction; moveX -= (getSegment(r.pos / CONF.SEGMENT_LENGTH).curve * 0.04); 
@@ -781,9 +756,9 @@
             if (type === 'drift_yellow') { particles.push({ x, y, vx: (Math.random()-0.5)*8, vy: -Math.random()*5, l: 15, maxL: 15, c: '#f1c40f', isDrift: true }); return; }
             if (type === 'drift_blue') { particles.push({ x, y, vx: (Math.random()-0.5)*12, vy: -Math.random()*8, l: 20, maxL: 20, c: '#00d2d3', isDrift: true }); return; }
             if (type === 'wind') { particles.push({ x, y, vx: 0, vy: 15 + Math.random()*15, l: 10, maxL: 10, c: 'rgba(255,255,255,0.6)', isLine: true }); return; }
-            // Efeito explosão estilo Mario Kart
+            // EFEITOS ESPECIAIS DE EXPLOSÃO (CASCOS)
             if (type === 'explosion') {
-                for(let i=0; i<8; i++) { particles.push({ x, y, vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15, l: 30, maxL: 30, c: ['#ff0000', '#ff9900', '#ffff00'][Math.floor(Math.random()*3)], isExplosion: true }); }
+                for(let i=0; i<10; i++) { particles.push({ x, y, vx: (Math.random()-0.5)*18, vy: (Math.random()-0.5)*18, l: 30, maxL: 30, c: ['#ff0000', '#ff9900', '#ffff00'][Math.floor(Math.random()*3)], isExplosion: true }); }
                 return;
             }
             if(Math.random() > 0.5) return;
@@ -902,7 +877,7 @@
 
         drawKartSprite: function(ctx, cx, y, carScale, steer, tilt, spinAngle, color, charId, kartModelId = 0) {
             ctx.save(); ctx.translate(cx, y); ctx.scale(carScale, carScale); 
-            ctx.rotate(tilt * 0.03 + spinAngle); // Aqui o spinAngle é zero se estiver curado
+            ctx.rotate(tilt * 0.03 + spinAngle); 
             
             const stats = CHARACTERS[charId] || CHARACTERS[0]; const n = stats.name; const w = stats.weight;
             const kartModel = KART_MODELS[kartModelId] || KART_MODELS[0];
@@ -926,56 +901,68 @@
                 } 
                 else if (kartModel.type === 'luxury') {
                     drawWheels(25, 35, '#222', 10);
-                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.roundRect(-30, -40, 60, 65, 10); ctx.fill();
-                    ctx.fillStyle = '#000'; ctx.fillRect(-25, -20, 50, 30); // Teto
-                    ctx.fillStyle = '#f1c40f'; ctx.fillRect(-20, -42, 10, 5); ctx.fillRect(10, -42, 10, 5); // Faróis
+                    let grad = ctx.createLinearGradient(0, -40, 0, 25); grad.addColorStop(0, kartModel.color); grad.addColorStop(1, '#000');
+                    ctx.fillStyle = grad;
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-28, -40, 56, 75, 15); ctx.fill(); } else { ctx.fillRect(-28, -40, 56, 75); }
+                    ctx.fillStyle = '#111'; if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-22, -15, 44, 30, 5); ctx.fill(); } else { ctx.fillRect(-22, -15, 44, 30); } // Teto Escuro
+                    ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.arc(-18, -35, 4, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(18, -35, 4, 0, Math.PI*2); ctx.fill(); // Faróis
+                    ctx.fillStyle = '#e74c3c'; ctx.fillRect(-22, 32, 12, 3); ctx.fillRect(10, 32, 12, 3); // Lanternas
                 }
                 else if (kartModel.type === 'moto') {
-                    const dwMoto = (wx, wy, isFront) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-10, -20, 20, 40); ctx.restore(); };
-                    dwMoto(0, 30, false); dwMoto(0, -40, true);
-                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -5, 15, 35, 0, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = '#7f8c8d'; ctx.fillRect(-25, -25, 50, 5); // Guiador
+                    ctx.fillStyle = '#111'; 
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-6, -45, 12, 30, 4); ctx.fill(); ctx.beginPath(); ctx.roundRect(-8, 20, 16, 35, 4); ctx.fill(); } 
+                    else { ctx.fillRect(-6, -45, 12, 30); ctx.fillRect(-8, 20, 16, 35); }
+                    ctx.fillStyle = kartModel.color;
+                    ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-12, 10); ctx.lineTo(12, 10); ctx.fill(); // Carenagem Fina
+                    ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-20, -25, 40, 4); // Guidão
                 }
                 else if (kartModel.type === 'tractor') {
-                    const dwTrac = (wx, wy, isFront, wW, wH) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-wW/2, -wH/2, wW, wH); ctx.fillStyle='#555'; ctx.fillRect(-wW/2+4, -wH/2+4, wW-8, wH-8); ctx.restore(); };
-                    dwTrac(-40, 15, false, 30, 50); dwTrac(40, 15, false, 30, 50); // Rodas gigantes traseiras
-                    dwTrac(-30, -35, true, 20, 30); dwTrac(30, -35, true, 20, 30); // Rodas pequenas dianteiras
-                    ctx.fillStyle = kartModel.color; ctx.fillRect(-25, -40, 50, 60); // Capô
-                    ctx.fillStyle = '#333'; ctx.fillRect(-35, 0, 70, 30); // Cabine
-                    ctx.fillStyle = '#ecf0f1'; ctx.beginPath(); ctx.arc(15, -30, 5, 0, Math.PI*2); ctx.fill(); // Tubo Escape
+                    // Pneus Gigantes Traseiros com sulcos
+                    ctx.fillStyle = '#111'; 
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-45, 0, 25, 40, 4); ctx.fill(); ctx.beginPath(); ctx.roundRect(20, 0, 25, 40, 4); ctx.fill(); } else { ctx.fillRect(-45, 0, 25, 40); ctx.fillRect(20, 0, 25, 40); }
+                    ctx.fillStyle = '#000'; for(let i=4; i<36; i+=8) { ctx.fillRect(-45, i, 25, 3); ctx.fillRect(20, i, 25, 3); }
+                    // Pneus Pequenos Dianteiros
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-30, -45, 15, 25, 3); ctx.fill(); ctx.beginPath(); ctx.roundRect(15, -45, 15, 25, 3); ctx.fill(); } else { ctx.fillRect(-30, -45, 15, 25); ctx.fillRect(15, -45, 15, 25); }
+                    
+                    ctx.fillStyle = kartModel.color; ctx.fillRect(-15, -40, 30, 50); // Capô Trator
+                    ctx.fillStyle = '#333'; ctx.fillRect(-20, 0, 40, 30); // Cabine Alta
+                    ctx.fillStyle = '#7f8c8d'; ctx.fillRect(10, -35, 4, 15); // Escapamento Vertical
                 }
                 else if (kartModel.type === 'tank') {
-                    ctx.fillStyle = '#2d3436'; ctx.fillRect(-55, -40, 25, 80); ctx.fillRect(30, -40, 25, 80); // Esteiras
-                    ctx.fillStyle = '#636e72'; for(let i=-35; i<40; i+=10) { ctx.fillRect(-55, i, 25, 3); ctx.fillRect(30, i, 25, 3); } 
-                    ctx.fillStyle = kartModel.color; ctx.fillRect(-30, -35, 60, 70); // Blindagem
-                    ctx.fillStyle = '#2d3436'; ctx.beginPath(); ctx.arc(0, -5, 20, 0, Math.PI*2); ctx.fill(); // Torre
-                    ctx.save(); ctx.rotate(steer * 0.5); ctx.fillStyle = '#111'; ctx.fillRect(-6, -55, 12, 50); ctx.restore(); // Canhão
+                    ctx.fillStyle = '#2d3436'; 
+                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-45, -35, 20, 70, 5); ctx.fill(); ctx.beginPath(); ctx.roundRect(25, -35, 20, 70, 5); ctx.fill(); } else { ctx.fillRect(-45, -35, 20, 70); ctx.fillRect(25, -35, 20, 70); }
+                    ctx.fillStyle = '#000'; for(let i=-30; i<35; i+=8) { ctx.fillRect(-45, i, 20, 3); ctx.fillRect(25, i, 20, 3); } // Esteiras
+                    
+                    ctx.fillStyle = kartModel.color; ctx.fillRect(-25, -30, 50, 60); // Blindagem
+                    ctx.fillStyle = '#111'; ctx.fillRect(-4, -60, 8, 40); // Canhão Gigante
+                    ctx.fillStyle = '#34495e'; ctx.beginPath(); ctx.arc(0, -10, 18, 0, Math.PI*2); ctx.fill(); // Torre
                 }
                 else if (kartModel.type === 'plane') {
-                    const dwPlane = (wx, wy, isFront) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-6, -10, 12, 20); ctx.restore(); };
-                    dwPlane(-15, 20, false); dwPlane(15, 20, false); dwPlane(0, -40, true);
-                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -10, 20, 50, 0, 0, Math.PI*2); ctx.fill(); // Fuselagem
-                    ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-70, 0); ctx.lineTo(70, 0); ctx.lineTo(0, -20); ctx.fill(); // Asas
-                    ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(-30, 35); ctx.lineTo(30, 35); ctx.lineTo(0, 25); ctx.fill(); // Cauda
-                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-25, -3, 50, 6); ctx.restore(); // Hélice animada
+                    ctx.fillStyle = '#111'; ctx.fillRect(-12, 10, 6, 12); ctx.fillRect(6, 10, 6, 12); ctx.fillRect(-3, -40, 6, 12); // Trens
+                    ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -10, 18, 50, 0, 0, Math.PI*2); ctx.fill(); // Fuselagem Jato
+                    ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-60, 5); ctx.lineTo(60, 5); ctx.lineTo(0, -15); ctx.fill(); // Asas
+                    ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(-25, 35); ctx.lineTo(25, 35); ctx.lineTo(0, 20); ctx.fill(); // Cauda
+                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-20, -2, 40, 4); ctx.restore(); // Hélice
                 }
                 else if (kartModel.type === 'sport') {
                     drawWheels(18, 28, '#2c3e50', 5);
                     ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, 0, 35, 45, 0, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-10, -40); ctx.lineTo(10, -40); ctx.lineTo(0, 20); ctx.fill(); 
+                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-10, -40); ctx.lineTo(10, -40); ctx.lineTo(0, 20); ctx.fill(); // Faixa corrida
                 }
 
-                // Cabeça do Piloto (No Custom Kart)
+                // Cabeça do Piloto (Adaptada à Posição do Kart Customizado)
                 ctx.save(); 
                 let headY = -10;
-                if (kartModel.type === 'moto') headY = 5;
-                else if (kartModel.type === 'f1' || kartModel.type === 'tank') headY = 0;
-                else if (kartModel.type === 'tractor') headY = 5;
+                if (kartModel.type === 'moto') { headY = 10; ctx.translate(steer * -15, 0); } // Moto inclina o corpo
+                else if (kartModel.type === 'f1') headY = 0;
+                else if (kartModel.type === 'tank') headY = 5;
+                else if (kartModel.type === 'tractor') headY = 15; // Piloto alto na cabine
                 else if (kartModel.type === 'plane') headY = -5;
+                else if (kartModel.type === 'luxury') headY = -10; // Preso dentro do carro
 
                 ctx.translate(0, headY); ctx.rotate(steer * 0.3);
                 ctx.fillStyle = stats.color; ctx.beginPath(); ctx.ellipse(0, -15, 18, 20, 0, 0, Math.PI*2); ctx.fill(); 
-                ctx.fillStyle = '#ffccaa'; ctx.beginPath(); ctx.ellipse(0, -15, 12, 10, 0, 0, Math.PI*2); ctx.fill(); // Rosto
+                ctx.fillStyle = '#ffccaa'; ctx.beginPath(); ctx.ellipse(0, -15, 12, 10, 0, 0, Math.PI*2); ctx.fill(); // Rosto Humanoide Base
                 ctx.fillStyle = stats.hat; ctx.beginPath(); ctx.ellipse(0, -35, 18, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -30, 22, 6, 0, 0, Math.PI*2); ctx.fill(); 
                 ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText(n[0], 0, -10); 
                 ctx.restore();
@@ -1083,7 +1070,7 @@
             this.shopHitboxes = [];
             
             // Abas Superiores
-            let tabW = Math.min(w * 0.3, 200); let tabH = 40;
+            let tabW = Math.min(w * 0.28, 180); let tabH = 40;
             let tab1X = w/2 - tabW*1.5 - 10; 
             let tab2X = w/2 - tabW/2; 
             let tab3X = w/2 + tabW/2 + 10;
@@ -1107,18 +1094,21 @@
                 
                 let currentItem = this.shopTab === 'SHOP' ? KART_MODELS[this.shopCarouselIdx] : KART_MODELS[this.garage[this.shopCarouselIdx].modelId];
 
-                // Fundo do Carrossel
+                // Fundo do Carrossel Dinâmico
+                let carW = Math.min(450, w * 0.85);
                 ctx.fillStyle = "rgba(0,0,0,0.5)";
-                if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - 250, cy - 120, 500, 240, 20); ctx.fill(); } else { ctx.fillRect(cx - 250, cy - 120, 500, 240); }
+                if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - carW/2, cy - 120, carW, 240, 20); ctx.fill(); } else { ctx.fillRect(cx - carW/2, cy - 120, carW, 240); }
 
-                // Setas
+                // Setas exatas no tamanho do carrossel
                 ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial";
-                ctx.fillText("<", cx - 200, cy); this.shopHitboxes.push({ x: cx - 230, y: cy - 40, w: 60, h: 80, action: 'prev' });
-                ctx.fillText(">", cx + 200, cy); this.shopHitboxes.push({ x: cx + 170, y: cy - 40, w: 60, h: 80, action: 'next' });
+                ctx.fillText("<", cx - carW/2 + 30, cy); 
+                this.shopHitboxes.push({ x: cx - carW/2, y: cy - 40, w: 60, h: 80, action: 'prev' });
+                ctx.fillText(">", cx + carW/2 - 30, cy); 
+                this.shopHitboxes.push({ x: cx + carW/2 - 60, y: cy - 40, w: 60, h: 80, action: 'next' });
 
                 // Desenho Central do Kart
                 let charColor = CHARACTERS[this.selectedChar].color;
-                this.drawKartSprite(ctx, cx, cy - 10, w * 0.003, 0, 0, 0, charColor, this.selectedChar, currentItem.id);
+                this.drawKartSprite(ctx, cx, cy - 10, w * 0.0035, 0, 0, 0, charColor, this.selectedChar, currentItem.id);
 
                 // Textos
                 ctx.fillStyle = "#fff"; ctx.font = "bold 24px 'Russo One'"; ctx.fillText(currentItem.name, cx, cy + 60);
@@ -1158,35 +1148,37 @@
                 const upgradesList = [
                     { id: 'engine', name: '⚙️ MOTOR DE CORRIDA', desc: 'Aceleração/Velocidade Extra', levels: [0, 1500, 4000] },
                     { id: 'tires', name: '🛞 PNEUS ESPECIAIS', desc: 'Curvas / Menos Lento na Terra', levels: [0, 1200, 3000] },
-                    { id: 'suspension', name: '🏎️ SUSPENSÃO PESADA', desc: 'Não voa quando é atingido', levels: [0, 2000, 5000] }
+                    { id: 'suspension', name: '🏎️ SUSPENSÃO PESADA', desc: 'Amortece saltos de explosões', levels: [0, 2000, 5000] }
                 ];
 
-                const rowH = 60; const gap = 15; const boxW = Math.min(500, w * 0.8); const boxX = w/2 - boxW/2;
+                const rowH = Math.min(60, h * 0.12); const gap = Math.min(15, h * 0.02); 
+                const boxW = Math.min(500, w * 0.9); const boxX = w/2 - boxW/2;
+                const partStartY = h * 0.30;
                 
                 upgradesList.forEach((upg, i) => {
                     let currentLvl = this.kartUpgrades[upg.id] || 1;
                     let nextCost = upg.levels[currentLvl]; 
                     
-                    let y = h*0.35 + i * (rowH + gap);
+                    let y = partStartY + i * (rowH + gap);
                     ctx.fillStyle = "rgba(0,0,0,0.5)"; 
                     if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(boxX, y, boxW, rowH, 10); ctx.fill(); } else { ctx.fillRect(boxX, y, boxW, rowH); }
                     
-                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold 18px 'Russo One'";
-                    ctx.fillText(`${upg.name} (LVL ${currentLvl})`, boxX + 15, y + 25);
-                    ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText(upg.desc, boxX + 15, y + 45);
+                    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.font = "bold 16px 'Russo One'";
+                    ctx.fillText(`${upg.name} (LVL ${currentLvl})`, boxX + 15, y + rowH * 0.4);
+                    ctx.fillStyle = "#aaa"; ctx.font = "12px Arial"; ctx.fillText(upg.desc, boxX + 15, y + rowH * 0.7);
 
                     if (currentLvl < 3) {
-                        let btnW = 120; let btnH = 40;
-                        let btnX = boxX + boxW - btnW - 10; let btnY = y + 10;
+                        let btnW = boxW * 0.25; let btnH = rowH * 0.7;
+                        let btnX = boxX + boxW - btnW - 10; let btnY = y + rowH/2 - btnH/2;
                         let canBuy = coins >= nextCost;
                         
                         ctx.fillStyle = canBuy ? "#f39c12" : "#7f8c8d";
                         if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 8); ctx.fill(); } else { ctx.fillRect(btnX, btnY, btnW, btnH); }
                         ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 14px 'Russo One'";
-                        ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + 25);
+                        ctx.fillText(`R$ ${nextCost}`, btnX + btnW/2, btnY + btnH/2 + 5);
                         this.shopHitboxes.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'buy_upgrade', type: upg.id, targetLvl: currentLvl + 1, cost: nextCost });
                     } else {
-                        ctx.fillStyle = "#2ecc71"; ctx.textAlign = "right"; ctx.font = "bold 18px 'Russo One'"; ctx.fillText("MÁXIMO", boxX + boxW - 15, y + 35);
+                        ctx.fillStyle = "#2ecc71"; ctx.textAlign = "right"; ctx.font = "bold 18px 'Russo One'"; ctx.fillText("MÁXIMO", boxX + boxW - 15, y + rowH/2 + 6);
                     }
                 });
             }
@@ -1197,7 +1189,7 @@
             ctx.fillStyle = "#c0392b"; 
             if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(backX, backY, backW, backH, 20); ctx.fill(); } else { ctx.fillRect(backX, backY, backW, backH); }
             ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px 'Russo One'";
-            ctx.fillText("VOLTAR", w/2, backY + 28);
+            ctx.fillText("VOLTAR AO LOBBY", w/2, backY + 28);
             this.shopHitboxes.push({ x: backX, y: backY, w: backW, h: backH, action: 'back' });
         },
 
