@@ -108,7 +108,7 @@
         .xp-bar-fill { height: 100%; background: var(--xp-color); width: 0%; transition: width 0.5s ease-out; }
         .coin-box { 
             display: flex; align-items: center; gap: 5px; font-family: 'Russo One'; 
-            color: #f39c12; font-size: clamp(0.9rem, 2.5vw, 1.2rem); 
+            color: #2ecc71; font-size: clamp(0.9rem, 2.5vw, 1.2rem); 
             margin-left: clamp(5px, 1vw, 10px); border-left: 1px solid #ddd; padding-left: clamp(5px, 2vw, 15px); 
         }
 
@@ -219,7 +219,16 @@
         .signature-badge { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); font-family: 'Chakra Petch', sans-serif; font-size: 0.65rem; color: #888; letter-spacing: 1px; text-transform: uppercase; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
         .signature-badge span { color: var(--wii-blue); font-weight: 700; }
 
-        /* Estilos do Painel Admin */
+        /* Estilos do Modal Inicial (Cadastro) */
+        #name-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+        .name-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,176,240,0.3); }
+        .name-box h2 { font-family: 'Russo One'; color: #333; margin-bottom: 10px; font-size: 1.5rem; }
+        .name-input { width: 100%; padding: 15px; font-size: 1.2rem; border: 2px solid #ccc; border-radius: 10px; margin-bottom: 20px; text-align: center; font-family: 'Chakra Petch'; box-sizing: border-box;}
+        .name-input:focus { border-color: var(--wii-blue); outline: none; }
+        .name-btn { background: #00b0f0; color: white; border: none; padding: 15px 30px; font-size: 1.2rem; border-radius: 10px; font-family: 'Russo One'; cursor: pointer; width: 100%; transition: transform 0.2s; }
+        .name-btn:active { transform: scale(0.95); }
+
+        /* Estilos do Painel de Administração */
         #admin-screen { background: #0f172a; color: white; overflow-y: auto; padding: 20px; z-index: 1000; position: absolute; inset: 0;}
         .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #1e293b; padding-bottom: 10px; }
         .admin-title { font-family: 'Russo One'; font-size: clamp(1.2rem, 4vw, 1.8rem); color: #fff; }
@@ -231,15 +240,6 @@
         .delete-btn { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid #e74c3c; border-radius: 8px; padding: 8px 15px; font-weight: bold; cursor: pointer; transition: all 0.2s; font-family: 'Chakra Petch'; }
         .delete-btn:hover { background: #e74c3c; color: white; }
 
-        /* Modal Inicial de Nome */
-        #name-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-        .name-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,176,240,0.3); }
-        .name-box h2 { font-family: 'Russo One'; color: #333; margin-bottom: 10px; font-size: 1.5rem; }
-        .name-input { width: 100%; padding: 15px; font-size: 1.2rem; border: 2px solid #ccc; border-radius: 10px; margin-bottom: 20px; text-align: center; font-family: 'Chakra Petch'; box-sizing: border-box;}
-        .name-input:focus { border-color: var(--wii-blue); outline: none; }
-        .name-btn { background: #00b0f0; color: white; border: none; padding: 15px 30px; font-size: 1.2rem; border-radius: 10px; font-family: 'Russo One'; cursor: pointer; width: 100%; transition: transform 0.2s; }
-        .name-btn:active { transform: scale(0.95); }
-
     </style>
 </head>
 <body>
@@ -248,7 +248,7 @@
     <div class="crt-overlay"></div>
     <canvas id="game-canvas"></canvas>
 
-    <!-- Modal de Login Inicial -->
+    <!-- Modal de Cadastro Inicial -->
     <div id="name-modal" class="hidden">
         <div class="name-box">
             <h2>BEM-VINDO PILOTO</h2>
@@ -271,6 +271,7 @@
                 <div class="wii-title" id="display-player-name">Piloto <span>Wii</span></div>
                 <div class="net-info">
                     REDE: <span id="net-status" style="color: #e74c3c;">CONECTANDO...</span>
+                    <!-- Botão Admin (Engrenagem) -->
                     <button class="admin-btn" onclick="window.Admin.open()" title="Painel do Gestor">⚙️</button>
                 </div>
             </div>
@@ -343,8 +344,8 @@
         <button class="wii-oval-btn" onclick="window.System.home()" style="margin-top: clamp(20px, 5vh, 40px); font-size: clamp(1rem, 3vw, 1.4rem);">CONTINUAR E SALVAR</button>
     </div>
 
+    <!-- INICIALIZAÇÃO FIREBASE -->
     <script>
-        // CONFIGURAÇÃO DO BANCO DE DADOS FIREBASE (Tempo Real)
         const firebaseConfig = {
             apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk", authDomain: "thiaguinhowii.firebaseapp.com",
             databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com", projectId: "thiaguinhowii",
