@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V22 - THE ULTIMATE HYBRID)
-// OFICINA MINORITY REPORT (PALITINHOS), NAVEGAÇÃO AR REAL E COLETA FÍSICA
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V24 - THE ULTIMATE HYBRID)
+// FIX DEFINITIVO: EXTRAÇÃO DE POSE (MINORITY REPORT), RADAR DE BRINQUEDOS ATIVO
 // =============================================================================
 
 (function() {
@@ -10,26 +10,51 @@
     // 1) CAMERA MANAGER (INTEGRADO COM O CORE.JS)
     // =========================================================================
     const CameraManager = {
-        safeSwitch: async function(mode) {
-            // Usa a função nativa do core.js para trocar a câmera sem quebrar a IA
-            if (window.System && typeof window.System.switchCamera === 'function') {
-                try {
-                    await window.System.switchCamera(mode);
-                    window.System.currentCameraMode = mode;
-                    return true;
-                } catch(e) {
-                    console.error("Erro ao trocar câmera", e);
-                    return false;
-                }
+        isSwitching: false,
+        stopCurrentStream: function() {
+            const video = window.System?.video;
+            if (video && video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => { track.stop(); });
+                video.srcObject = null;
             }
-            return false;
+        },
+        safeSwitch: async function(mode) {
+            if (this.isSwitching) return false;
+            this.isSwitching = true;
+            
+            try {
+                // Tenta usar a função nativa do core.js primeiro
+                if (window.System && typeof window.System.switchCamera === 'function') {
+                    await window.System.switchCamera(mode);
+                } else {
+                    // Fallback manual caso o core.js não responda
+                    this.stopCurrentStream();
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: { ideal: mode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    });
+                    const video = window.System?.video;
+                    if (video) {
+                        video.srcObject = stream;
+                        video.style.transform = mode === 'user' ? "scaleX(-1)" : "none";
+                        await video.play();
+                    }
+                }
+                if (window.System) window.System.currentCameraMode = mode;
+                this.isSwitching = false;
+                return true;
+            } catch(e) {
+                this.isSwitching = false;
+                return false;
+            }
         },
         startRearCamera: async function() { return await this.safeSwitch('environment'); },
         startFrontCamera: async function() { return await this.safeSwitch('user'); }
     };
 
     // =========================================================================
-    // 2) FRONT_AR_OFFICE (MINORITY REPORT COM MOVENET)
+    // 2) FRONT_AR_OFFICE (MINORITY REPORT COM MOVENET NATIVO)
     // =========================================================================
     const GestureOffice = {
         isActive: false, 
@@ -39,13 +64,13 @@
         eventCallback: null,
         
         buttons: [
-            { id: 'REFUEL', label: 'ABASTECER', x: 0, y: 0, w: 160, h: 60, color: '#f39c12' },
-            { id: 'REPAIR', label: 'REPARAR', x: 0, y: 0, w: 160, h: 60, color: '#e74c3c' },
-            { id: 'UPG_ENGINE', label: 'UPG MOTOR', x: 0, y: 0, w: 160, h: 60, color: '#3498db' },
-            { id: 'UPG_TANK', label: 'UPG TANQUE', x: 0, y: 0, w: 160, h: 60, color: '#9b59b6' },
-            { id: 'UPG_RADAR', label: 'UPG RADAR', x: 0, y: 0, w: 160, h: 60, color: '#00ffff' },
-            { id: 'UPG_TRUCK', label: 'UPG CHASSI', x: 0, y: 0, w: 160, h: 60, color: '#f1c40f' },
-            { id: 'EXIT', label: 'SAIR DA BASE', x: 0, y: 0, w: 260, h: 60, color: '#00ff66' }
+            { id: 'REFUEL', label: 'ABASTECER BATERIA', x: 0, y: 0, w: 200, h: 60, color: '#f39c12' },
+            { id: 'REPAIR', label: 'REPARAR MOTOR', x: 0, y: 0, w: 200, h: 60, color: '#e74c3c' },
+            { id: 'UPG_ENGINE', label: 'UPGRADE MOTOR', x: 0, y: 0, w: 200, h: 60, color: '#3498db' },
+            { id: 'UPG_TANK', label: 'UPGRADE TANQUE', x: 0, y: 0, w: 200, h: 60, color: '#9b59b6' },
+            { id: 'UPG_RADAR', label: 'UPGRADE RADAR', x: 0, y: 0, w: 200, h: 60, color: '#00ffff' },
+            { id: 'UPG_TRUCK', label: 'UPGRADE CHASSI', x: 0, y: 0, w: 200, h: 60, color: '#f1c40f' },
+            { id: 'EXIT', label: 'SAIR DA BASE', x: 0, y: 0, w: 280, h: 60, color: '#00ff66' }
         ],
 
         init: function(callback) {
@@ -56,73 +81,99 @@
             this.hoveredBtn = null;
         },
 
-        update: function(ctx, w, h, dt, gameState, pose) {
+        update: function(ctx, w, h, dt, gameState, rawPose) {
             if (!this.isActive) return;
 
             const cx = w / 2; const cy = h / 2;
-            const gap = 10; const btnW = Math.min(160, (w/2) - 20);
+            const gap = 15; const btnW = Math.min(200, (w/2) - 20);
             
-            // Posicionamento responsivo dos botões
-            this.buttons[0].x = cx - btnW - gap; this.buttons[0].y = cy - 80;  this.buttons[0].w = btnW;
-            this.buttons[1].x = cx + gap;        this.buttons[1].y = cy - 80;  this.buttons[1].w = btnW;
-            this.buttons[2].x = cx - btnW - gap; this.buttons[2].y = cy - 10;  this.buttons[2].w = btnW;
-            this.buttons[3].x = cx + gap;        this.buttons[3].y = cy - 10;  this.buttons[3].w = btnW;
-            this.buttons[4].x = cx - btnW - gap; this.buttons[4].y = cy + 60;  this.buttons[4].w = btnW;
-            this.buttons[5].x = cx + gap;        this.buttons[5].y = cy + 60;  this.buttons[5].w = btnW;
-            this.buttons[6].x = cx - 130;        this.buttons[6].y = cy + 140; this.buttons[6].w = 260;
+            this.buttons[0].x = cx - btnW - gap; this.buttons[0].y = cy - 100;  this.buttons[0].w = btnW;
+            this.buttons[1].x = cx + gap;        this.buttons[1].y = cy - 100;  this.buttons[1].w = btnW;
+            this.buttons[2].x = cx - btnW - gap; this.buttons[2].y = cy - 20;   this.buttons[2].w = btnW;
+            this.buttons[3].x = cx + gap;        this.buttons[3].y = cy - 20;   this.buttons[3].w = btnW;
+            this.buttons[4].x = cx - btnW - gap; this.buttons[4].y = cy + 60;   this.buttons[4].w = btnW;
+            this.buttons[5].x = cx + gap;        this.buttons[5].y = cy + 60;   this.buttons[5].w = btnW;
+            this.buttons[6].x = cx - 140;        this.buttons[6].y = cy + 150;  this.buttons[6].w = 280;
 
-            // Fundo escuro sobre a câmera frontal
             ctx.fillStyle = "rgba(0, 15, 30, 0.85)"; ctx.fillRect(0, 0, w, h);
             
-            // PROCESSAMENTO MOVENET (OS BRAÇOS EM PALITINHO - MINORITY REPORT)
+            // ========================================================
+            // PROCESSAMENTO MOVENET - FIX DEFINITIVO DE ARRAY
+            // ========================================================
             this.cursor.active = false;
-            if (pose && pose.length > 0) {
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+            let kps = [];
+            
+            // Extração à prova de falhas para o MoveNet do core.js
+            if (rawPose) {
+                if (Array.isArray(rawPose) && rawPose.length > 0) {
+                    kps = rawPose[0].keypoints ? rawPose[0].keypoints : rawPose;
+                } else if (rawPose.keypoints) {
+                    kps = rawPose.keypoints;
+                } else if (rawPose.pose && rawPose.pose.keypoints) {
+                    kps = rawPose.pose.keypoints;
+                }
+            }
+            
+            if (kps && kps.length > 0) {
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = "rgba(0, 255, 255, 0.7)";
                 ctx.fillStyle = "#fff";
 
+                // Desenha a cabeça (nariz) para provar que a IA está a ver o utilizador
+                const nose = kps.find(k => k.name === 'nose');
+                if (nose && nose.score > 0.15) {
+                    const nx = ((640 - nose.x) / 640) * w; const ny = (nose.y / 480) * h;
+                    if(Number.isFinite(nx) && Number.isFinite(ny)) {
+                        ctx.fillStyle = "rgba(0, 255, 0, 0.6)";
+                        ctx.beginPath(); ctx.arc(nx, ny, 12, 0, Math.PI*2); ctx.fill();
+                    }
+                }
+
+                // Desenha os braços (Mirror X: 640 - x)
                 const drawBone = (p1Name, p2Name) => {
-                    const kp1 = pose.find(k => k.name === p1Name);
-                    const kp2 = pose.find(k => k.name === p2Name);
-                    if (kp1 && kp2 && kp1.score > 0.3 && kp2.score > 0.3) {
-                        // 640x480 é a resolução base do core.js. Espelhamos o X para câmera frontal.
+                    const kp1 = kps.find(k => k.name === p1Name);
+                    const kp2 = kps.find(k => k.name === p2Name);
+                    if (kp1 && kp2 && kp1.score > 0.15 && kp2.score > 0.15) {
                         const x1 = ((640 - kp1.x) / 640) * w; const y1 = (kp1.y / 480) * h;
                         const x2 = ((640 - kp2.x) / 640) * w; const y2 = (kp2.y / 480) * h;
-                        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-                        ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI*2); ctx.fill();
-                        ctx.beginPath(); ctx.arc(x2, y2, 5, 0, Math.PI*2); ctx.fill();
+                        if(Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
+                            ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+                            ctx.beginPath(); ctx.arc(x1, y1, 6, 0, Math.PI*2); ctx.fill();
+                            ctx.beginPath(); ctx.arc(x2, y2, 6, 0, Math.PI*2); ctx.fill();
+                        }
                     }
                 };
 
-                // Desenha os braços
+                drawBone('left_shoulder', 'right_shoulder');
                 drawBone('left_shoulder', 'left_elbow'); drawBone('left_elbow', 'left_wrist');
                 drawBone('right_shoulder', 'right_elbow'); drawBone('right_elbow', 'right_wrist');
 
-                // Define o pulso dominante (o mais alto na tela) como o cursor
-                const rw = pose.find(k => k.name === 'right_wrist');
-                const lw = pose.find(k => k.name === 'left_wrist');
+                // Define o pulso dominante (o mais alto) como cursor
+                const rw = kps.find(k => k.name === 'right_wrist');
+                const lw = kps.find(k => k.name === 'left_wrist');
                 let domWrist = null;
                 
-                if (rw && rw.score > 0.3 && lw && lw.score > 0.3) {
-                    domWrist = rw.y < lw.y ? rw : lw;
-                } else if (rw && rw.score > 0.3) { domWrist = rw; } 
-                else if (lw && lw.score > 0.3) { domWrist = lw; }
+                if (rw && rw.score > 0.15 && lw && lw.score > 0.15) { domWrist = rw.y < lw.y ? rw : lw; } 
+                else if (rw && rw.score > 0.15) { domWrist = rw; } 
+                else if (lw && lw.score > 0.15) { domWrist = lw; }
 
                 if (domWrist) {
-                    this.cursor.x = ((640 - domWrist.x) / 640) * w;
-                    this.cursor.y = (domWrist.y / 480) * h;
-                    this.cursor.active = true;
+                    const cxW = ((640 - domWrist.x) / 640) * w;
+                    const cyW = (domWrist.y / 480) * h;
+                    if(Number.isFinite(cxW) && Number.isFinite(cyW)) {
+                        this.cursor.x = cxW;
+                        this.cursor.y = cyW;
+                        this.cursor.active = true;
+                    }
                 }
             }
 
-            // HUD da Oficina
-            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.font = "bold clamp(24px, 6vw, 40px) 'Russo One'"; ctx.fillText("OFICINA HOLOGRÁFICA", cx, Math.max(40, cy - 160));
-            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(70, cy - 130));
-            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | COMB: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(90, cy - 110));
+            ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.font = "bold clamp(24px, 6vw, 40px) 'Russo One'"; ctx.fillText("OFICINA HOLOGRÁFICA", cx, Math.max(40, cy - 180));
+            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(70, cy - 150));
+            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | BATERIA: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(90, cy - 125));
 
             let currentlyHovering = null;
 
-            // Renderiza e verifica hover dos botões
             this.buttons.forEach(btn => {
                 let isHover = false;
                 if (this.cursor.active) {
@@ -146,23 +197,22 @@
                 if(costTxt) ctx.fillText(costTxt, btn.x + btn.w/2, btn.y + btn.h - 8);
             });
 
-            // Lógica do Clique Gestual (Hover por 1 segundo)
             if (currentlyHovering) {
                 if (this.hoveredBtn === currentlyHovering) {
                     this.hoverTime += dt;
-                    if (this.hoverTime >= 1.0) { 
+                    if (this.hoverTime >= 1.5) { 
                         if (this.eventCallback) this.eventCallback(this.hoveredBtn); 
                         this.hoverTime = 0; 
+                        this.hoveredBtn = null;
                     }
                 } else { this.hoveredBtn = currentlyHovering; this.hoverTime = 0; }
             } else { this.hoveredBtn = null; this.hoverTime = 0; }
 
-            // Desenha Cursor
             if (this.cursor.active) {
-                ctx.fillStyle = "rgba(0, 255, 255, 0.8)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 10, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = "rgba(0, 255, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 12, 0, Math.PI*2); ctx.fill();
                 if (this.hoverTime > 0) {
-                    ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 4; 
-                    ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 25, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.0)*(Math.PI*2)); ctx.stroke();
+                    ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 5; 
+                    ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 25, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke();
                 }
             } else {
                 ctx.fillStyle = "#aaa"; ctx.font = "14px Arial"; ctx.textAlign = "center"; 
@@ -174,7 +224,7 @@
     };
 
     // =========================================================================
-    // 3) ARQUITETURA GLOBAL (MÁQUINA DE ESTADOS)
+    // 3) ARQUITETURA GLOBAL DA ENGINE AR
     // =========================================================================
     let particles = [];
     
@@ -187,10 +237,8 @@
         floorColor: { r: 0, g: 0, b: 0 }, targetColor: { r: 0, g: 0, b: 0 },
         activeAnomaly: null, anomalies: [], spawnTimer: 0,
         
-        // INTERAÇÃO FÍSICA DE COLETA
-        pickupTimer: 0, cooldown: 0,
+        isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
         
-        currentEvent: null, eventTimer: 0,
         displayMoney: 0, displayFuel: 100, collectGlow: 0, collectZoom: 0, baseFlash: 0,
         currentMission: { type: 'NORMAL', goal: 3, progress: 0, timer: 0, active: false },
         
@@ -203,9 +251,13 @@
             this.state = 'INIT'; this.lastTime = performance.now(); this.timeTotal = 0; this.score = 0;
             this.health = 100; this.fuel = this.stats.maxFuel; this.wear = { motor: 0, wheels: 0 }; this.displayFuel = this.fuel;
             this.money = 0; this.displayMoney = 0; this.xp = 0; this.level = 1; this.cargo = []; this.anomalies = [];
-            this.pickupTimer = 0; this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
+            this.isExtracting = false; this.pickupTimer = 0; this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
             
-            this.generateMission(); this.setupSensors(); this.setupInput(); this.changeState('BOOT');
+            this.generateMission(); this.setupSensors(); this.setupInput(); 
+            
+            CameraManager.startRearCamera().then(() => {
+                this.loadAIModel();
+            });
         },
 
         generateMission: function() {
@@ -225,8 +277,9 @@
             this.state = newState;
             
             switch(newState) {
-                case 'BOOT': this.loadAIModel(); break;
-                case 'CALIBRATION': window.System.msg("SISTEMAS ONLINE."); break;
+                case 'CALIBRATION': 
+                    window.System.msg("SISTEMAS ONLINE."); 
+                    break;
                 case 'PLAY_REAR_AR':
                     this.startAILoop();
                     if (!this.currentMission.active) this.generateMission();
@@ -236,7 +289,7 @@
                     if(window.Sfx) window.Sfx.play(800, 'square', 0.2, 0.2);
                     break;
                 case 'ENTER_BASE_TRANSITION':
-                    this.stopAILoop(); this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.virtualSpeed = 0; this.manualAccelerate = false;
+                    this.stopAILoop(); this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.virtualSpeed = 0; this.isExtracting = false; this.manualAccelerate = false;
                     break;
                 case 'FRONT_AR_OFFICE':
                     this.virtualSpeed = 0; this.deliverCargo(); this.baseFlash = 1.0; GestureOffice.init(this.handleOfficeAction.bind(this));
@@ -245,10 +298,7 @@
                     this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.manualAccelerate = false;
                     break;
                 case 'TOW_MODE':
-                    window.System.msg("SISTEMAS CRÍTICOS! VOLTANDO À BASE.");
-                    break;
-                case 'GAME_OVER':
-                    if(window.System && typeof window.System.gameOver === 'function') { window.System.gameOver(this.score, true, this.money); }
+                    this.isExtracting = false; window.System.msg("SISTEMAS CRÍTICOS! VOLTANDO À BASE.");
                     break;
             }
         },
@@ -292,7 +342,7 @@
                 else if (this.state === 'PLAY_REAR_AR' || this.state === 'TOW_MODE') {
                     let distToBase = Math.hypot(this.vPos.x, this.vPos.y);
                     const btnS = Math.min(50, w * 0.15);
-                    // Botão da Garagem
+                    
                     if (y > 60 && y < 60 + btnS && x > w - btnS - 10 && x < w - 10) {
                         if (distToBase < 30) {
                             this.pendingCamPromise = CameraManager.startFrontCamera(); this.changeState('ENTER_BASE_TRANSITION');
@@ -302,7 +352,6 @@
                     if (x < 30 + accR*2 && y > h - 80 - accR*2 && this.state !== 'TOW_MODE') { this.manualAccelerate = true; }
                 }
                 else if (this.state === 'FRONT_AR_OFFICE') {
-                    // Fallback Touch se o Minority Report não detetar
                     GestureOffice.buttons.forEach(btn => { if (x > btn.x && x < btn.x + btn.w && y > btn.y && y < btn.y + btn.h) { if (GestureOffice.eventCallback) GestureOffice.eventCallback(btn.id); } });
                 }
             };
@@ -310,17 +359,22 @@
         },
 
         loadAIModel: async function() {
-            const loadTask = new Promise((resolve) => {
+            const loadPromise = new Promise((resolve) => {
                 try {
                     if (typeof cocoSsd === 'undefined') {
                         const script = document.createElement('script'); script.src = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd";
-                        script.onload = async () => { if (typeof cocoSsd !== 'undefined') { this.objectModel = await cocoSsd.load().catch(() => null); } resolve(); };
-                        script.onerror = () => { this.objectModel = null; resolve(); }; document.head.appendChild(script);
-                    } else { cocoSsd.load().then(model => { this.objectModel = model; resolve(); }).catch(() => { this.objectModel = null; resolve(); }); }
+                        script.onload = () => { 
+                            if (typeof cocoSsd !== 'undefined') cocoSsd.load().then(m => { this.objectModel = m; resolve(); }).catch(() => resolve());
+                            else resolve();
+                        };
+                        script.onerror = () => resolve(); document.head.appendChild(script);
+                    } else {
+                        cocoSsd.load().then(m => { this.objectModel = m; resolve(); }).catch(() => resolve());
+                    }
                 } catch (e) { this.objectModel = null; resolve(); }
             });
-            const timeoutTask = new Promise(resolve => setTimeout(resolve, 5000));
-            await Promise.race([loadTask, timeoutTask]);
+
+            await Promise.race([loadPromise, new Promise(res => setTimeout(res, 3000))]);
             this.changeState('CALIBRATION');
         },
 
@@ -328,11 +382,12 @@
             if (this.aiIntervalId !== null) { clearInterval(this.aiIntervalId); this.aiIntervalId = null; }
             this.aiIntervalId = setInterval(async () => {
                 if (this.aiProcessing) return;
-                // A IA roda quando está procurando ou quando já pediu para tirar o objeto
                 if ((this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') && this.objectModel && window.System?.video && window.System.video.readyState === 4) {
                     this.aiProcessing = true;
-                    try { const preds = await this.objectModel.detect(window.System.video); this.detectedItems = preds || []; } 
-                    catch(e) { this.detectedItems = []; } finally { this.aiProcessing = false; }
+                    try {
+                        const preds = await this.objectModel.detect(window.System.video);
+                        this.detectedItems = preds || [];
+                    } catch(e) { this.detectedItems = []; } finally { this.aiProcessing = false; }
                 }
             }, this.aiIntervalMs);
         },
@@ -342,15 +397,20 @@
             this.aiProcessing = false;
         },
 
-        update: function(ctx, w, h, pose) {
+        update: function(ctx, w, h, inputOrPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
+
+            // Extrai a pose de forma segura para o Minority Report (suporta assinaturas antigas e novas do core.js)
+            let rawPose = inputOrPose;
+            if (inputOrPose && inputOrPose.pose) rawPose = inputOrPose.pose;
 
             if (isNaN(this.displayMoney)) this.displayMoney = 0; if (isNaN(this.displayFuel)) this.displayFuel = 100;
             this.displayMoney += (this.money - this.displayMoney) * 10 * dt; this.displayFuel += (this.fuel - this.displayFuel) * 5 * dt;
 
-            let fps = 1 / dt; let newInterval = (fps < 25) ? 1000 : 500;
+            let fps = 1 / dt; let newInterval = (fps < 20) ? 1000 : 500;
             if (this.aiIntervalMs !== newInterval) { this.aiIntervalMs = newInterval; if (this.state === 'PLAY_REAR_AR' || this.state === 'WAITING_PICKUP') { this.startAILoop(); } }
 
+            // RENDERIZAÇÃO DA CÂMARA DE FUNDO (EXCETO NA OFICINA)
             if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
                 if (this.virtualSpeed > 0.1 && this.state === 'PLAY_REAR_AR') {
@@ -373,13 +433,13 @@
             }
 
             switch (this.state) {
-                case 'BOOT': this.drawOverlay(ctx, w, h, "INICIALIZANDO", "Carregando Engine Premium..."); break;
-                case 'CALIBRATION': this.drawOverlay(ctx, w, h, "PONTO ZERO", "Aponte o caminhão para a pista e TOQUE"); break;
+                case 'BOOT': case 'INIT': this.drawOverlay(ctx, w, h, "INICIALIZANDO", "Carregando Engine Premium..."); break;
+                case 'CALIBRATION': this.drawOverlay(ctx, w, h, "PONTO ZERO", "Coloque o caminhão na Base e TOQUE NA TELA"); break;
                 case 'PLAY_REAR_AR':
                 case 'WAITING_PICKUP':
                 case 'TOW_MODE':
                     this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt); this.drawHUD(ctx, w, h); break;
-                case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startFrontCamera', 'FRONT_AR_OFFICE'); break;
+                case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'FRONT_AR_OFFICE'); break;
                 case 'FRONT_AR_OFFICE':
                     if (window.System?.video && window.System.video.readyState === 4) {
                         const vW = window.System.video.videoWidth || w; const vH = window.System.video.videoHeight || h;
@@ -387,15 +447,15 @@
                         if (vr > cr) { dw = h * vr; dx = (w - dw) / 2; } else { dh = w / vr; dy = (h - dh) / 2; }
                         ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -dx, dy, dw, dh); ctx.restore();
                     }
-                    GestureOffice.update(ctx, w, h, dt, this, pose); break;
-                case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'startRearCamera', 'PLAY_REAR_AR'); break;
+                    GestureOffice.update(ctx, w, h, dt, this, rawPose); break;
+                case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'PLAY_REAR_AR'); break;
                 case 'GAME_OVER': this.drawOverlay(ctx, w, h, "FIM DE JOGO", "Calculando pontuação..."); break;
             }
 
             this.updateParticles(ctx, dt, w, h); return this.score || 0; 
         },
 
-        processTransition: function(ctx, w, h, dt, camFunc, nextState) {
+        processTransition: function(ctx, w, h, dt, nextState) {
             if (this.transitionPhase === 'FADE_OUT') {
                 this.transitionAlpha += dt * 3.0; 
                 if (this.transitionAlpha >= 1) {
@@ -405,7 +465,7 @@
                     } else { this.transitionPhase = 'FADE_IN'; }
                 }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("SISTEMAS REINICIANDO...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR HOLOGRAMA...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0;
                 if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
@@ -470,7 +530,6 @@
         spawnAnomalies: function(dt) {
             if (this.state === 'TOW_MODE') return;
             this.spawnTimer += dt;
-            // Gera anomalias que dão bónus de dinheiro se encontradas no radar virtual, mas NÃO são obrigatórias para achar brinquedos.
             if (this.anomalies.length < 5 && this.spawnTimer > 2.0) {
                 this.spawnTimer = 0; let isRare = Math.random() < 0.15; let dist = 40 + Math.random() * (100 + this.level * 20); let ang = Math.random() * Math.PI * 2;
                 this.anomalies.push({ id: Math.random().toString(36), x: this.vPos.x + Math.cos(ang) * dist, y: this.vPos.y + Math.sin(ang) * dist, type: isRare ? 'RARE' : 'NORMAL', val: isRare ? 5000 : (500 + Math.floor(Math.random()*500)), life: isRare ? 25 : 999 });
@@ -488,30 +547,41 @@
         },
 
         processAR: function(ctx, w, h, dt) {
-            if (this.state === 'TOW_MODE') return; 
+            if (this.state === 'TOW_MODE') { this.isExtracting = false; return; }
 
             const cx = w / 2; const cy = h / 2;
+            let nearestDist = 9999; this.activeAnomaly = null;
+            this.anomalies.forEach(ano => { let d = Math.hypot(ano.x - this.vPos.x, ano.y - this.vPos.y); if (d < nearestDist) { nearestDist = d; this.activeAnomaly = ano; } });
+
             let visualFound = false; let foundBox = null;
             const vW = window.System?.video?.videoWidth || w; const vH = window.System?.video?.videoHeight || h;
             const sX = w / vW; const sY = h / vH;
 
             // 1) RECONHECIMENTO LIVRE DE BRINQUEDOS (IA)
-            // A câmara deteta brinquedos em qualquer lugar, não precisa de estar perto de "anomalias" virtuais
-            const allowedClasses = ['car', 'truck', 'bus', 'train', 'mouse', 'remote', 'cell phone'];
+            // Agora usa "Blacklist" para detetar qualquer coisa pequena que pareça um brinquedo
+            const ignoredClasses = ['person', 'bed', 'sofa', 'tv', 'refrigerator', 'door', 'dining table', 'chair'];
             
             this.detectedItems.forEach(item => {
-                if (!allowedClasses.includes(item.class) || item.score < 0.25) return;
+                if (ignoredClasses.includes(item.class) || item.score < 0.20) return;
+                
                 const bW = item.bbox[2]*sX; const bH = item.bbox[3]*sY;
-                // FILTRO DE TAMANHO (Impede de ler coisas gigantes na casa)
-                if (bW < w * 0.05 || bW > w * 0.6) return; 
+                if (bW > w * 0.8) return; // Se for gigante (uma parede), ignora. Retiramos o limite mínimo para ler carrinhos pequenos!
                 
                 const cX = (item.bbox[0]*sX) + bW/2; const cY = (item.bbox[1]*sY) + bH/2;
-                if (Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4) {
-                    visualFound = true; foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: "BRINQUEDO" };
+                
+                let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.35;
+                
+                ctx.strokeStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.6)"; ctx.lineWidth = isCentered ? 4 : 2;
+                ctx.strokeRect(item.bbox[0]*sX, item.bbox[1]*sY, bW, bH);
+                ctx.fillStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.6)"; ctx.font = "bold 12px Arial";
+                ctx.fillText(item.class.toUpperCase(), item.bbox[0]*sX, item.bbox[1]*sY - 5);
+
+                if (isCentered) {
+                    visualFound = true; foundBox = { x: item.bbox[0]*sX, y: item.bbox[1]*sY, w: bW, h: bH, label: item.class };
                 }
             });
 
-            // Fallback Óptico (Cor) para garantir que sempre acha algo mesmo sem IA
+            // 2) Fallback Óptico (Cor) Global: Se a IA não vir nada, mas o chão mudar de cor drasticamente à frente do camião
             if (!visualFound) {
                 this.floorColor = this.getAverageColor(ctx, cx - 50, h * 0.85, 100, 40);
                 this.targetColor = this.getAverageColor(ctx, cx - 40, cy - 40, 80, 80);
@@ -523,10 +593,6 @@
                 if (visualFound && this.cargo.length < this.stats.maxCargo && this.cooldown <= 0) {
                     this.changeState('WAITING_PICKUP');
                 }
-
-                if (foundBox) {
-                    ctx.strokeStyle = "rgba(0, 255, 255, 0.8)"; ctx.lineWidth = 3; ctx.strokeRect(foundBox.x, foundBox.y, foundBox.w, foundBox.h);
-                }
             } 
             else if (this.state === 'WAITING_PICKUP') {
                 const uiY = h - 140;
@@ -535,21 +601,15 @@
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 20px) Arial";
                 ctx.fillText("PARE O CAMINHÃO E REMOVA COM A MÃO!", cx, uiY - 15);
 
-                if (foundBox) { ctx.strokeStyle = this.colors.danger; ctx.lineWidth = 4; ctx.strokeRect(foundBox.x, foundBox.y, foundBox.w, foundBox.h); }
-
-                // O GRANDE SEGREDO FÍSICO: Se a câmara deixou de ver, é porque a mão tirou!
+                // Se sumiu da visão, a mão pegou!
                 if (!visualFound) {
                     this.pickupTimer += dt;
                     ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 20);
-                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.0)*(w*0.8), 20);
+                    ctx.fillStyle = this.colors.success; ctx.fillRect(w*0.1, uiY + 10, (this.pickupTimer/1.5)*(w*0.8), 20);
                     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, uiY + 10, w*0.8, 20);
                     
-                    if (this.pickupTimer > 1.0) { // Ficou 1 segundo sem ver o objeto
-                        // Se estiver perto de uma anomalia virtual, ganha o valor dela, senão ganha o padrão.
-                        let nearestDist = 9999; let activeAnomaly = null;
-                        this.anomalies.forEach(ano => { let d = Math.hypot(ano.x - this.vPos.x, ano.y - this.vPos.y); if (d < nearestDist) { nearestDist = d; activeAnomaly = ano; } });
-                        
-                        let val = (activeAnomaly && nearestDist < 30) ? activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
+                    if (this.pickupTimer > 1.5) { 
+                        let val = (this.activeAnomaly && nearestDist < 30) ? this.activeAnomaly.val : (500 + Math.floor(Math.random() * 500));
                         this.cargo.push(val); this.score += val / 10;
                         window.System.msg("BRINQUEDO NA CAÇAMBA!");
                         
@@ -557,7 +617,7 @@
                             this.currentMission.progress++;
                             if (this.currentMission.progress >= this.currentMission.goal) this.completeMission();
                         }
-                        if (activeAnomaly && nearestDist < 30) this.anomalies = this.anomalies.filter(a => a.id !== activeAnomaly.id);
+                        if (this.activeAnomaly && nearestDist < 30) this.anomalies = this.anomalies.filter(a => a.id !== this.activeAnomaly.id);
 
                         this.changeState('PLAY_REAR_AR'); this.cooldown = 3.0; 
                         if(window.Gfx && typeof window.Gfx.shakeScreen === 'function') window.Gfx.shakeScreen(20);
@@ -565,10 +625,12 @@
                         this.collectGlow = 1.0; this.collectZoom = 1.0; this.spawnParticles(cx, cy, 40, this.colors.main);
                     }
                 } else {
-                    this.pickupTimer = Math.max(0, this.pickupTimer - dt); // Reseta se o brinquedo voltar para a câmara
+                    this.pickupTimer = Math.max(0, this.pickupTimer - (dt * 0.5));
                 }
 
-                if (this.virtualSpeed > 10) { this.changeState('PLAY_REAR_AR'); window.System.msg("ALVO ABANDONADO"); }
+                if (this.virtualSpeed > 10) {
+                    this.changeState('PLAY_REAR_AR'); window.System.msg("ALVO ABANDONADO");
+                }
             }
         },
 
@@ -579,11 +641,11 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // AR WAYPOINTS (NAVEGAÇÃO REAL PARA A BASE)
+            // NAVEGAÇÃO REAL PARA A BASE 3D
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
                 let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
                 let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
-                let fwdAngle = Math.atan2(Math.sin(angle + Math.PI/2), Math.cos(angle + Math.PI/2)); 
+                let fwdAngle = Math.atan2(Math.sin(angle), Math.cos(angle)); 
                 let fov = Math.PI / 2.5; 
                 
                 if (Math.abs(fwdAngle) < fov) {
@@ -592,7 +654,6 @@
                     ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Russo One'"; ctx.textAlign = "center"; ctx.fillText(label, projX, projY - 35);
                     ctx.font = "bold 12px Arial"; ctx.fillText(Math.floor(dist) + "m", projX, projY + 45);
                 } else {
-                    // Setas indicando para onde virar o caminhão real
                     let isRight = fwdAngle > 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
                     ctx.fillStyle = isBase ? this.colors.success : color; ctx.beginPath();
                     if (isRight) { ctx.moveTo(edgeX-20, edgeY - 30); ctx.lineTo(edgeX + 20, edgeY); ctx.lineTo(edgeX-20, edgeY + 30); } 
@@ -646,9 +707,9 @@
                     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rCx + Math.cos(angle)*sD, rCy + Math.sin(angle)*sD, sz, 0, Math.PI*2); ctx.fill();
                 }
             };
-            drawBlip(0, 0, this.colors.success, 5, false); // Base
+            drawBlip(0, 0, this.colors.success, 5, false);
             if(!isFull) this.anomalies.forEach(a => drawBlip(a.x, a.y, a.type==='RARE'?this.colors.rare:this.colors.warn, 3, a.type==='RARE'));
-            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(rCx, rCy - 6); ctx.lineTo(rCx+4, rCy+4); ctx.lineTo(rCx-4, rCy+4); ctx.fill(); // Player
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(rCx, rCy - 6); ctx.lineTo(rCx+4, rCy+4); ctx.lineTo(rCx-4, rCy+4); ctx.fill();
 
             const botH = 60; const botY = h - botH;
             ctx.fillStyle = this.colors.panel; ctx.fillRect(0, botY, w, botH); ctx.strokeStyle = this.colors.main; ctx.beginPath(); ctx.moveTo(0, botY); ctx.lineTo(w, botY); ctx.stroke();
