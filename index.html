@@ -189,10 +189,11 @@
             background: rgba(0,0,0,0.5); backdrop-filter: blur(8px); 
             padding: clamp(4px, 1vh, 10px) clamp(12px, 4vw, 30px); border-radius: 30px; 
             border: 1px solid rgba(255,255,255,0.3); display: flex; align-items: center; gap: 10px; 
+            z-index: 100;
         }
         #hud-score { color: #f1c40f; font-family: 'Russo One'; font-size: clamp(1.5rem, 5vw, 2.5rem); }
         
-        #game-msg { position: fixed; top: 35%; left: 50%; transform: translate(-50%, -50%); font-family: 'Russo One'; font-size: clamp(2rem, 10vw, 70px); color: #fff; text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,176,240,0.8); width: 100%; text-align: center; pointer-events: none; }
+        #game-msg { position: fixed; top: 35%; left: 50%; transform: translate(-50%, -50%); font-family: 'Russo One'; font-size: clamp(2rem, 10vw, 70px); color: #fff; text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,176,240,0.8); width: 100%; text-align: center; pointer-events: none; z-index: 200;}
         
         .home-btn { 
             position: fixed; top: clamp(10px, 3vh, 25px); right: clamp(10px, 3vw, 25px); 
@@ -219,23 +220,25 @@
         .signature-badge span { color: var(--wii-blue); font-weight: 700; }
 
         /* Estilos do Painel Admin */
-        #admin-screen { background: #0f172a; color: white; overflow-y: auto; padding: 20px; }
+        #admin-screen { background: #0f172a; color: white; overflow-y: auto; padding: 20px; z-index: 1000; position: absolute; inset: 0;}
         .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #1e293b; padding-bottom: 10px; }
-        .admin-title { font-family: 'Russo One'; font-size: 1.8rem; color: #fff; }
-        .user-card { background: #1e293b; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;}
-        .user-info h3 { font-family: 'Chakra Petch'; font-size: 1.2rem; margin: 0; color: #00b0f0; display: flex; align-items: center; gap: 10px;}
-        .online-dot { width: 10px; height: 10px; border-radius: 50%; background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
-        .offline-dot { width: 10px; height: 10px; border-radius: 50%; background: #e74c3c; }
+        .admin-title { font-family: 'Russo One'; font-size: clamp(1.2rem, 4vw, 1.8rem); color: #fff; }
+        .user-card { background: #1e293b; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;}
+        .user-info h3 { font-family: 'Chakra Petch'; font-size: clamp(1rem, 3vw, 1.2rem); margin: 0; color: #00b0f0; display: flex; align-items: center; gap: 10px;}
+        .online-dot { width: 12px; height: 12px; border-radius: 50%; background: #2ecc71; box-shadow: 0 0 10px #2ecc71; }
+        .offline-dot { width: 12px; height: 12px; border-radius: 50%; background: #e74c3c; }
         .user-stats { font-size: 0.9rem; color: #94a3b8; margin-top: 5px; }
-        .delete-btn { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid #e74c3c; border-radius: 8px; padding: 8px 15px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .delete-btn { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid #e74c3c; border-radius: 8px; padding: 8px 15px; font-weight: bold; cursor: pointer; transition: all 0.2s; font-family: 'Chakra Petch'; }
         .delete-btn:hover { background: #e74c3c; color: white; }
 
         /* Modal Inicial de Nome */
-        #name-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-        .name-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 400px; }
-        .name-box h2 { font-family: 'Russo One'; color: #333; margin-bottom: 15px; font-size: 1.5rem; }
-        .name-input { width: 100%; padding: 15px; font-size: 1.2rem; border: 2px solid #ccc; border-radius: 10px; margin-bottom: 20px; text-align: center; font-family: 'Chakra Petch'; }
-        .name-btn { background: #00b0f0; color: white; border: none; padding: 15px 30px; font-size: 1.2rem; border-radius: 10px; font-family: 'Russo One'; cursor: pointer; width: 100%; }
+        #name-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+        .name-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,176,240,0.3); }
+        .name-box h2 { font-family: 'Russo One'; color: #333; margin-bottom: 10px; font-size: 1.5rem; }
+        .name-input { width: 100%; padding: 15px; font-size: 1.2rem; border: 2px solid #ccc; border-radius: 10px; margin-bottom: 20px; text-align: center; font-family: 'Chakra Petch'; box-sizing: border-box;}
+        .name-input:focus { border-color: var(--wii-blue); outline: none; }
+        .name-btn { background: #00b0f0; color: white; border: none; padding: 15px 30px; font-size: 1.2rem; border-radius: 10px; font-family: 'Russo One'; cursor: pointer; width: 100%; transition: transform 0.2s; }
+        .name-btn:active { transform: scale(0.95); }
 
     </style>
 </head>
@@ -248,10 +251,10 @@
     <!-- Modal de Login Inicial -->
     <div id="name-modal" class="hidden">
         <div class="name-box">
-            <h2>BEM-VINDO AO THIAGUINHO OS</h2>
-            <p style="color: #666; margin-bottom: 15px;">Qual é o seu nome de piloto?</p>
-            <input type="text" id="player-name-input" class="name-input" placeholder="Seu Nome..." autocomplete="off">
-            <button class="name-btn" onclick="window.System.registerName()">COMEÇAR AVENTURA</button>
+            <h2>BEM-VINDO PILOTO</h2>
+            <p style="color: #666; margin-bottom: 15px; font-family: 'Chakra Petch';">Identifique-se para salvar o seu progresso na nuvem!</p>
+            <input type="text" id="player-name-input" class="name-input" placeholder="Seu Nome de Piloto" autocomplete="off" maxlength="15">
+            <button class="name-btn" onclick="window.System.registerName()">INICIAR MOTORES</button>
         </div>
     </div>
 
@@ -265,9 +268,9 @@
     <div id="menu-screen" class="wii-container hidden">
         <div class="wii-header">
             <div class="header-top-row">
-                <div class="wii-title" id="display-player-name">ThIAguinho <span>Wii</span></div>
+                <div class="wii-title" id="display-player-name">Piloto <span>Wii</span></div>
                 <div class="net-info">
-                    REDE: <span id="net-status" style="color: #999;">OFFLINE</span>
+                    REDE: <span id="net-status" style="color: #e74c3c;">CONECTANDO...</span>
                     <button class="admin-btn" onclick="window.Admin.open()" title="Painel do Gestor">⚙️</button>
                 </div>
             </div>
@@ -282,11 +285,10 @@
             </div>
         </div>
 
-        <!-- Onde os jogos são renderizados dinamicamente pelo JS -->
         <div class="channel-grid" id="channel-grid"></div>
 
         <div class="wii-footer">
-            <div class="wii-oval-btn" onclick="window.System.msg('Em Breve: Loja')">Loja</div>
+            <div class="wii-oval-btn" onclick="window.System.msg('A nuvem salva automaticamente!')">Salvar</div>
             <div class="clock" id="clock">12:00</div>
             <div class="wii-oval-btn" onclick="location.reload()">Reset</div>
         </div>
@@ -295,26 +297,24 @@
     </div>
 
     <!-- PAINEL DE ADMINISTRAÇÃO (GESTOR) -->
-    <div id="admin-screen" class="wii-container hidden" style="display: block;">
+    <div id="admin-screen" class="hidden">
         <div class="admin-header">
-            <div class="admin-title">PAINEL DO GESTOR</div>
-            <button class="wii-oval-btn" onclick="window.Admin.close()">VOLTAR</button>
+            <div class="admin-title">PAINEL DO GESTOR DA FROTA</div>
+            <button class="wii-oval-btn" onclick="window.Admin.close()">VOLTAR AO MENU</button>
         </div>
         <div id="admin-user-list">
-            <!-- Usuários injetados aqui -->
+            <div style="text-align:center; color:#94a3b8; font-family:'Chakra Petch'; padding: 20px;">Carregando dados da nuvem...</div>
         </div>
     </div>
 
     <!-- MODO CARREIRA (TELA DE FASES) -->
     <div id="phase-screen" class="wii-container hidden" style="justify-content: center;">
-        <h1 id="phase-title" style="font-family: 'Russo One'; font-size: clamp(2rem, 8vw, 3.5rem); color: #fff; margin-bottom: clamp(15px, 4vh, 40px); text-shadow: 0 0 15px rgba(0,176,240,0.8); text-align: center;">KART LEGENDS</h1>
-        <div class="mission-grid" id="phase-grid">
-            <!-- Missões Injetadas pelo core.js -->
-        </div>
+        <h1 id="phase-title" style="font-family: 'Russo One'; font-size: clamp(2rem, 8vw, 3.5rem); color: #fff; margin-bottom: clamp(15px, 4vh, 40px); text-shadow: 0 0 15px rgba(0,176,240,0.8); text-align: center;">JOGO</h1>
+        <div class="mission-grid" id="phase-grid"></div>
         <button class="wii-oval-btn" onclick="document.getElementById('phase-screen').classList.add('hidden'); document.getElementById('menu-screen').classList.remove('hidden');" style="margin-top: clamp(20px, 5vh, 40px);">VOLTAR AO MENU</button>
     </div>
 
-    <!-- HUD DO JOGO -->
+    <!-- HUD DO JOGO (Para jogos tradicionais) -->
     <div id="game-ui" class="hidden">
         <div class="hud-score-box">
             <span style="color: #fff; font-size: clamp(0.7rem, 2vw, 1rem); font-weight: 800; letter-spacing: 1px;">SCORE</span>
@@ -325,7 +325,7 @@
     </div>
 
     <!-- TELA DE RESULTADOS -->
-    <div id="screen-over" class="wii-container hidden" style="justify-content: center;">
+    <div id="screen-over" class="wii-container hidden" style="justify-content: center; z-index: 1000;">
         <h1 style="font-family: 'Russo One'; font-size: clamp(2rem, 6vw, 3rem); color: #fff; margin-bottom: 15px; letter-spacing: 2px; text-align: center;" id="result-header">MISSÃO CONCLUÍDA!</h1>
         
         <div class="results-container">
@@ -336,14 +336,15 @@
                 <div class="stat-box"><div class="stat-title">Pontos</div><div class="stat-val" id="final-score">0</div></div>
                 <div class="stat-box"><div class="stat-title">Objetivo</div><div class="stat-val" style="color: #3498db" id="result-status">VITÓRIA</div></div>
                 <div class="stat-box"><div class="stat-title">XP Ganho</div><div class="stat-val" style="color: var(--xp-color);" id="result-xp">+0</div></div>
-                <div class="stat-box"><div class="stat-title">Moedas</div><div class="stat-val" style="color: #2ecc71" id="result-coins">+0</div></div>
+                <div class="stat-box"><div class="stat-title">Moedas Extras</div><div class="stat-val" style="color: #2ecc71" id="result-coins">+0</div></div>
             </div>
         </div>
         
-        <button class="wii-oval-btn" onclick="window.System.home()" style="margin-top: clamp(20px, 5vh, 40px); font-size: clamp(1rem, 3vw, 1.4rem);">CONTINUAR</button>
+        <button class="wii-oval-btn" onclick="window.System.home()" style="margin-top: clamp(20px, 5vh, 40px); font-size: clamp(1rem, 3vw, 1.4rem);">CONTINUAR E SALVAR</button>
     </div>
 
     <script>
+        // CONFIGURAÇÃO DO BANCO DE DADOS FIREBASE (Tempo Real)
         const firebaseConfig = {
             apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk", authDomain: "thiaguinhowii.firebaseapp.com",
             databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com", projectId: "thiaguinhowii",
@@ -351,20 +352,21 @@
         };
         try {
             if (typeof firebase !== 'undefined') {
-                firebase.initializeApp(firebaseConfig); window.DB = firebase.database();
-                const statusEl = document.getElementById('net-status');
-                if(statusEl) { statusEl.innerHTML = "ONLINE 🟢"; statusEl.style.color = "#2ecc71"; }
+                firebase.initializeApp(firebaseConfig); 
+                window.DB = firebase.database();
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn("Modo Offline Ativado (Sem internet ou Firebase bloqueado).");
+        }
     </script>
 
-    <!-- CARREGANDO O CORE E OS JOGOS MODULARMENTE -->
+    <!-- CARREGANDO O CORE E OS JOGOS -->
     <script src="js/core.js"></script>
     <script src="js/game_kart.js"></script>
     <script src="js/game_run.js"></script>
     <script src="js/game_box.js"></script>
     <script src="js/game_tennis.js"></script>
-    <script src="js/game_ar.js"></script> <!-- AQUI ESTÁ O NOVO JOGO -->
+    <script src="js/game_ar.js"></script>
 
     <script>setInterval(() => { const now = new Date(); const el = document.getElementById('clock'); if(el) el.innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }, 1000);</script>
 </body>
