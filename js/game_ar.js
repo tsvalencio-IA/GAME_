@@ -1,6 +1,6 @@
 // =============================================================================
 // AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V28 - MODERN UI)
-// OFICINA MINORITY REPORT TOTALMENTE REDESENHADA: ÍCONES, BADGES E LAYOUT V-X
+// OFICINA MINORITY REPORT TOTALMENTE REDESENHADA: SUB-MENUS, ADMIN E EVOLUÇÃO
 // =============================================================================
 
 (function() {
@@ -51,7 +51,7 @@
         startFrontCamera: async function() { return await this.safeSwitch('user'); }
     };
 
-    // FUNÇÃO AUXILIAR PARA DESENHAR RETÂNGULOS ARREDONDADOS NO CANVAS
+    // FUNÇÃO AUXILIAR: Desenhar Cartões com Bordas Arredondadas (Glassmorphism)
     function roundRect(ctx, x, y, width, height, radius) {
         ctx.beginPath(); ctx.moveTo(x + radius, y); ctx.lineTo(x + width - radius, y);
         ctx.quadraticCurveTo(x + width, y, x + width, y + radius); ctx.lineTo(x + width, y + height - radius);
@@ -61,7 +61,7 @@
     }
 
     // =========================================================================
-    // 2) FRONT_AR_OFFICE (MINORITY REPORT UI MODERNA)
+    // 2) FRONT_AR_OFFICE (MINORITY REPORT UI MODERNA E SUB-MENUS)
     // =========================================================================
     const GestureOffice = {
         isActive: false, 
@@ -70,19 +70,53 @@
         hoveredBtn: null, 
         eventCallback: null,
         
-        buttons: [
-            { id: 'REFUEL', icon: '⛽', label: 'BATERIA', w: 0, h: 0, color: '#f39c12' },
-            { id: 'REPAIR', icon: '🔧', label: 'REPAROS', w: 0, h: 0, color: '#e74c3c' },
-            { id: 'UPG_ENGINE', icon: '⚙️', label: 'MOTOR', w: 0, h: 0, color: '#3498db' },
-            { id: 'UPG_TANK', icon: '🔋', label: 'TANQUE', w: 0, h: 0, color: '#9b59b6' },
-            { id: 'UPG_RADAR', icon: '📡', label: 'RADAR', w: 0, h: 0, color: '#00ffff' },
-            { id: 'UPG_TRUCK', icon: '🚜', label: 'CHASSI', w: 0, h: 0, color: '#f1c40f' },
-            { id: 'EXIT', icon: '🚀', label: 'VOLTAR À PATRULHA', w: 0, h: 0, color: '#00ff66', isWide: true }
-        ],
+        // NOVO SISTEMA DE MENUS DE NAVEGAÇÃO
+        menuState: 'MAIN',
+        menus: {
+            MAIN: [
+                { id: 'MENU_BATTERY', icon: '🔋', label: 'BATERIAS', color: '#f39c12' },
+                { id: 'MENU_ENGINE', icon: '⚙️', label: 'MOTORES', color: '#3498db' },
+                { id: 'MENU_RADAR', icon: '📡', label: 'RADARES', color: '#00ffff' },
+                { id: 'MENU_CHASSIS', icon: '🚜', label: 'CHASSIS', color: '#f1c40f' },
+                { id: 'MENU_ADMIN', icon: '💼', label: 'ADMINISTRAÇÃO', color: '#9b59b6' },
+                { id: 'EXIT', icon: '🚀', label: 'VOLTAR À PATRULHA', color: '#00ff66', isWide: true }
+            ],
+            ENGINE: [
+                { id: 'BUY_ENG_1', type: 'engine', lvlReq: 1, icon: '⚙️', label: 'MOTOR V1', desc: 'Básico (Vel: 20)', cost: 0, color: '#3498db' },
+                { id: 'BUY_ENG_2', type: 'engine', lvlReq: 2, icon: '⚡', label: 'MOTOR V2', desc: 'Turbo (Vel: 35)', cost: 1500, color: '#3498db' },
+                { id: 'BUY_ENG_3', type: 'engine', lvlReq: 3, icon: '🔥', label: 'MOTOR V3', desc: 'Quantum (Vel: 55)', cost: 4000, color: '#3498db' },
+                { id: 'BACK', icon: '🔙', label: 'VOLTAR', color: '#aaaaaa', isWide: true }
+            ],
+            BATTERY: [
+                { id: 'BUY_BAT_1', type: 'battery', lvlReq: 1, icon: '🔋', label: 'BATERIA STD', desc: 'Capacidade: 100', cost: 0, color: '#f39c12' },
+                { id: 'BUY_BAT_2', type: 'battery', lvlReq: 2, icon: '⚡', label: 'BATERIA LIPO', desc: 'Capacidade: 250', cost: 1200, color: '#f39c12' },
+                { id: 'BUY_BAT_3', type: 'battery', lvlReq: 3, icon: '☢️', label: 'CÉLULA FUSÃO', desc: 'Capacidade: 600', cost: 3500, color: '#f39c12' },
+                { id: 'BACK', icon: '🔙', label: 'VOLTAR', color: '#aaaaaa', isWide: true }
+            ],
+            RADAR: [
+                { id: 'BUY_RAD_1', type: 'radar', lvlReq: 1, icon: '📡', label: 'RADAR BÁSICO', desc: 'Alcance: 150m', cost: 0, color: '#00ffff' },
+                { id: 'BUY_RAD_2', type: 'radar', lvlReq: 2, icon: '🔭', label: 'RADAR AVANÇADO', desc: 'Alcance: 300m', cost: 1800, color: '#00ffff' },
+                { id: 'BUY_RAD_3', type: 'radar', lvlReq: 3, icon: '🛰️', label: 'SATÉLITE USR', desc: 'Alcance: 600m', cost: 5000, color: '#00ffff' },
+                { id: 'BACK', icon: '🔙', label: 'VOLTAR', color: '#aaaaaa', isWide: true }
+            ],
+            CHASSIS: [
+                { id: 'BUY_CHA_1', type: 'chassis', lvlReq: 1, icon: '🛻', label: 'CHASSI PLÁSTICO', desc: 'Carga Máx: 3', cost: 0, color: '#f1c40f' },
+                { id: 'BUY_CHA_2', type: 'chassis', lvlReq: 2, icon: '🚜', label: 'CHASSI ALUMÍNIO', desc: 'Carga Máx: 6', cost: 2000, color: '#f1c40f' },
+                { id: 'BUY_CHA_3', type: 'chassis', lvlReq: 3, icon: '🚛', label: 'CHASSI TITÂNIO', desc: 'Carga Máx: 12', cost: 6000, color: '#f1c40f' },
+                { id: 'BACK', icon: '🔙', label: 'VOLTAR', color: '#aaaaaa', isWide: true }
+            ],
+            ADMIN: [
+                { id: 'ACT_REPAIR', action: 'repair', icon: '👨‍🔧', label: 'PAGAR MECÂNICO', desc: 'Restaura Vida 100%', cost: 500, color: '#e74c3c' },
+                { id: 'ACT_REFUEL', action: 'refuel', icon: '🔌', label: 'CARGA RÁPIDA', desc: 'Enche a Bateria', cost: 300, color: '#f39c12' },
+                { id: 'ACT_SCOUT',  action: 'scout', icon: '🕵️', label: 'CONTRATAR OLHEIRO', desc: '+ Chance Raros (Perm)', cost: 2500, color: '#9b59b6' },
+                { id: 'BACK', icon: '🔙', label: 'VOLTAR', color: '#aaaaaa', isWide: true }
+            ]
+        },
 
         init: function(callback) {
             this.eventCallback = callback; 
             this.isActive = true; 
+            this.menuState = 'MAIN';
             this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false }; 
             this.hoverTime = 0; 
             this.hoveredBtn = null;
@@ -93,26 +127,12 @@
 
             const cx = w / 2;
             const gap = Math.min(15, w * 0.03); 
-            const btnW = Math.min(160, (w * 0.45));
-            const btnH = Math.min(110, h * 0.16);
-            
-            // Grid Layout Dinâmico e Moderno (3 linhas x 2 colunas)
+            const btnW = Math.min(180, (w * 0.45));
+            const btnH = Math.min(100, h * 0.16);
             const startY = Math.max(140, h * 0.22);
             
-            this.buttons[0].x = cx - btnW - gap/2; this.buttons[0].y = startY;                     this.buttons[0].w = btnW; this.buttons[0].h = btnH;
-            this.buttons[1].x = cx + gap/2;        this.buttons[1].y = startY;                     this.buttons[1].w = btnW; this.buttons[1].h = btnH;
-            this.buttons[2].x = cx - btnW - gap/2; this.buttons[2].y = startY + btnH + gap;        this.buttons[2].w = btnW; this.buttons[2].h = btnH;
-            this.buttons[3].x = cx + gap/2;        this.buttons[3].y = startY + btnH + gap;        this.buttons[3].w = btnW; this.buttons[3].h = btnH;
-            this.buttons[4].x = cx - btnW - gap/2; this.buttons[4].y = startY + (btnH + gap)*2;    this.buttons[4].w = btnW; this.buttons[4].h = btnH;
-            this.buttons[5].x = cx + gap/2;        this.buttons[5].y = startY + (btnH + gap)*2;    this.buttons[5].w = btnW; this.buttons[5].h = btnH;
-            
-            // Botão de Saída (Largo)
-            const exitBtn = this.buttons[6];
-            exitBtn.w = (btnW * 2) + gap; exitBtn.h = Math.min(70, btnH * 0.8);
-            exitBtn.x = cx - exitBtn.w / 2; exitBtn.y = startY + (btnH + gap)*3;
-
             // Fundo da Oficina (Escuro, tecnológico)
-            ctx.fillStyle = "rgba(5, 10, 20, 0.85)"; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = "rgba(5, 10, 20, 0.9)"; ctx.fillRect(0, 0, w, h);
             
             // ========================================================
             // PROCESSAMENTO MOVENET (BRAÇOS HOLO)
@@ -171,117 +191,143 @@
 
             // TEXTOS E STATUS NO TOPO
             ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-            ctx.font = "bold clamp(22px, 5vw, 36px) 'Russo One'"; ctx.fillText("OFICINA USR", cx, Math.max(30, startY - 90));
-            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`SALDO: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(60, startY - 55));
-            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 14px) Arial"; ctx.fillText(`VIDA: ${Math.floor(gameState.health)}/100 | BATERIA: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(80, startY - 30));
+            ctx.font = "bold clamp(22px, 5vw, 36px) 'Russo One'"; ctx.fillText("EMPRESA USR", cx, Math.max(30, startY - 90));
+            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'"; ctx.fillText(`CAIXA: R$ ${Math.floor(gameState.displayMoney).toLocaleString()}`, cx, Math.max(60, startY - 55));
+            ctx.fillStyle = "#fff"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(`VIDA DO CAMINHÃO: ${Math.floor(gameState.health)}%`, cx, Math.max(80, startY - 30));
 
+            // RENDERIZAÇÃO DINÂMICA DO MENU ATUAL
+            const activeMenu = this.menus[this.menuState] || this.menus['MAIN'];
             let currentlyHovering = null;
 
-            // RENDERIZANDO OS CARDS DE BOTÕES
-            this.buttons.forEach(btn => {
+            activeMenu.forEach((btn, index) => {
+                // Cálculo dinâmico de Grid
+                let row = Math.floor(index / 2);
+                let col = index % 2;
+                
+                let bX = cx + (col === 0 ? -btnW - gap/2 : gap/2);
+                let bY = startY + row * (btnH + gap);
+                let bW = btnW;
+                let bH = btnH;
+
+                if (btn.isWide) {
+                    bX = cx - btnW - gap/2;
+                    bW = (btnW * 2) + gap;
+                    bH = Math.min(60, btnH * 0.8);
+                }
+
+                // Hitbox detection
                 let isHover = false;
-                if (this.cursor.active) {
-                    if (this.cursor.x > btn.x && this.cursor.x < btn.x + btn.w && this.cursor.y > btn.y && this.cursor.y < btn.y + btn.h) { 
-                        isHover = true; currentlyHovering = btn.id; 
-                    }
+                if (this.cursor.active && this.cursor.x > bX && this.cursor.x < bX + bW && this.cursor.y > bY && this.cursor.y < bY + bH) { 
+                    isHover = true; currentlyHovering = btn; 
                 }
-                
-                // Variáveis Lógicas do Botão
-                let badgeText = ""; let costText = ""; let costVal = 0; let isClickable = true;
-                
-                if(btn.id==='REFUEL') {
-                    costVal = Math.floor((gameState.stats.maxFuel - gameState.fuel)*2);
-                    badgeText = "BATERIA"; costText = costVal > 0 ? `R$ ${costVal}` : "CHEIO";
-                    isClickable = costVal > 0 && gameState.money >= costVal;
-                }
-                else if(btn.id==='REPAIR') {
-                    costVal = Math.floor((100 - gameState.health)*5);
-                    badgeText = "CHASSI"; costText = costVal > 0 ? `R$ ${costVal}` : "NOVO";
-                    isClickable = costVal > 0 && gameState.money >= costVal;
-                }
-                else if(btn.id.startsWith('UPG_')) {
-                    let uKey = btn.id.replace('UPG_', '').toLowerCase();
-                    let u = gameState.upgrades[uKey];
-                    if(u.lvl < u.max) {
-                        badgeText = `V${u.lvl} ▶ V${u.lvl+1}`; costText = `R$ ${u.cost}`; costVal = u.cost;
-                        isClickable = gameState.money >= u.cost;
+
+                // ==================== LÓGICA DE ESTADOS DOS BOTÕES ====================
+                let displayCost = btn.cost ? `R$ ${btn.cost}` : "";
+                let subDesc = btn.desc || "";
+                let isClickable = true;
+                let statusColor = btn.color;
+                let badgeTxt = null;
+
+                // Verificações para Menus de Upgrade (V1, V2, V3)
+                if (btn.id.startsWith('BUY_')) {
+                    const currentLvl = gameState.upgrades[btn.type];
+                    if (currentLvl >= btn.lvlReq) {
+                        displayCost = "EQUIPADO"; statusColor = "#2ecc71"; isClickable = false; badgeTxt = "✓ SEU";
+                    } else if (currentLvl === btn.lvlReq - 1) {
+                        isClickable = gameState.money >= btn.cost;
+                        if (!isClickable) { statusColor = "#e74c3c"; displayCost = "SEM SALDO"; }
                     } else {
-                        badgeText = `V${u.max}`; costText = "MÁXIMO"; costVal = 0; isClickable = false;
+                        displayCost = "BLOQUEADO"; statusColor = "#555555"; isClickable = false; badgeTxt = "🔒 REQ V" + (btn.lvlReq - 1);
                     }
-                }
-                else if(btn.id === 'EXIT') {
-                    isClickable = true;
+                } 
+                // Verificações para Menu de Administração
+                else if (btn.id.startsWith('ACT_')) {
+                    if (btn.action === 'repair' && gameState.health >= 100) { displayCost = "CHASSI OK"; isClickable = false; statusColor = "#555"; }
+                    else if (btn.action === 'refuel' && gameState.fuel >= gameState.stats.maxFuel) { displayCost = "BATERIA OK"; isClickable = false; statusColor = "#555"; }
+                    else if (btn.action === 'scout' && gameState.upgrades.scout) { displayCost = "CONTRATADO"; isClickable = false; statusColor = "#2ecc71"; badgeTxt = "✓ ATIVO"; }
+                    else {
+                        isClickable = gameState.money >= btn.cost;
+                        if (!isClickable) { statusColor = "#e74c3c"; displayCost = "SEM SALDO"; }
+                    }
                 }
 
                 // Corpo do Botão (Glassmorphism)
-                ctx.fillStyle = isHover ? "rgba(255, 255, 255, 0.15)" : "rgba(25, 35, 50, 0.9)";
-                roundRect(ctx, btn.x, btn.y, btn.w, btn.h, 15); ctx.fill();
+                ctx.fillStyle = isHover && isClickable ? "rgba(255, 255, 255, 0.15)" : "rgba(25, 35, 50, 0.9)";
+                roundRect(ctx, bX, bY, bW, bH, 15); ctx.fill();
                 
-                ctx.strokeStyle = isHover ? btn.color : "rgba(255, 255, 255, 0.1)";
-                ctx.lineWidth = isHover ? 3 : 1; 
-                if(!isClickable && btn.id !== 'EXIT' && costText !== "CHEIO" && costText !== "NOVO" && costText !== "MÁXIMO") ctx.strokeStyle = "#e74c3c"; // Vermelho se não tiver grana
+                ctx.strokeStyle = isHover && isClickable ? statusColor : "rgba(255, 255, 255, 0.1)";
+                ctx.lineWidth = isHover && isClickable ? 3 : 1; 
                 ctx.stroke();
 
-                // Efeito Brilho Interno no Hover
-                if (isHover) {
-                    ctx.shadowColor = btn.color; ctx.shadowBlur = 15;
-                    ctx.strokeStyle = btn.color; ctx.stroke();
-                    ctx.shadowBlur = 0; // reset
+                if (isHover && isClickable) {
+                    ctx.shadowColor = statusColor; ctx.shadowBlur = 15;
+                    ctx.strokeStyle = statusColor; ctx.stroke(); ctx.shadowBlur = 0;
                 }
 
-                // Ícone Gigante no Centro
-                ctx.font = isHover ? "clamp(35px, 8vw, 45px) Arial" : "clamp(30px, 7vw, 40px) Arial";
+                // Ícone e Textos
                 ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                let iconY = btn.isWide ? btn.y + btn.h/2 : btn.y + btn.h/2 - 10;
-                ctx.fillText(btn.icon, btn.x + btn.w/2, iconY);
+                if (btn.isWide) {
+                    ctx.font = "clamp(20px, 5vw, 25px) Arial";
+                    ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 3.5vw, 18px) 'Chakra Petch'";
+                    ctx.fillText(`${btn.icon} ${btn.label} ${btn.icon}`, bX + bW/2, bY + bH/2);
+                } else {
+                    ctx.font = isHover ? "clamp(35px, 8vw, 45px) Arial" : "clamp(30px, 7vw, 40px) Arial";
+                    ctx.fillText(btn.icon, bX + bW/2, bY + bH/2 - 15);
+                    
+                    ctx.fillStyle = "#fff"; ctx.font = "bold clamp(10px, 2.5vw, 12px) 'Chakra Petch'";
+                    ctx.fillText(btn.label, bX + bW/2, bY + bH - 30);
+                    
+                    if(subDesc) {
+                        ctx.fillStyle = "#aaa"; ctx.font = "10px Arial";
+                        ctx.fillText(subDesc, bX + bW/2, bY + bH - 18);
+                    }
 
-                // Label (Abaixo do Ícone)
-                ctx.fillStyle = "#fff"; ctx.font = "bold clamp(10px, 2.5vw, 12px) 'Chakra Petch'"; ctx.textBaseline = "alphabetic";
-                let labelY = btn.isWide ? btn.y + btn.h/2 + 5 : btn.y + btn.h - 22;
-                if(btn.isWide) ctx.fillText(`${btn.icon} ${btn.label} ${btn.icon}`, btn.x + btn.w/2, btn.y + btn.h/2 + 5);
-                else ctx.fillText(btn.label, btn.x + btn.w/2, labelY);
+                    // Preço no Rodapé
+                    if (displayCost) {
+                        ctx.fillStyle = statusColor; ctx.font = "bold clamp(12px, 3vw, 14px) 'Russo One'";
+                        ctx.fillText(displayCost, bX + bW/2, bY + bH - 6);
+                    }
 
-                // Texto de Custo (Rodapé do Card)
-                if(!btn.isWide) {
-                    ctx.fillStyle = isClickable || costText === "MÁXIMO" || costText === "CHEIO" || costText === "NOVO" ? btn.color : "#e74c3c";
-                    ctx.font = "bold clamp(12px, 3vw, 14px) 'Russo One'";
-                    ctx.fillText(costText, btn.x + btn.w/2, btn.y + btn.h - 6);
+                    // Badge (Se existir)
+                    if (badgeTxt) {
+                        ctx.fillStyle = statusColor;
+                        let badgeW = ctx.measureText(badgeTxt).width + 16;
+                        roundRect(ctx, bX - 5, bY - 10, badgeW, 20, 8); ctx.fill();
+                        ctx.fillStyle = "#000"; ctx.font = "bold 10px Arial";
+                        ctx.fillText(badgeTxt, bX - 5 + badgeW/2, bY);
+                    }
                 }
-
-                // Sêlo Flutuante (Badge V1 -> V2)
-                if (badgeText && !btn.isWide) {
-                    ctx.fillStyle = btn.color;
-                    let badgeW = ctx.measureText(badgeText).width + 16;
-                    roundRect(ctx, btn.x - 5, btn.y - 10, badgeW, 20, 8); ctx.fill();
-                    ctx.fillStyle = "#000"; ctx.font = "bold 10px Arial"; ctx.textBaseline = "middle";
-                    ctx.fillText(badgeText, btn.x - 5 + badgeW/2, btn.y);
-                }
+                
+                // Salva a hitbox real para a lógica do mouse magnético
+                btn.hitbox = { x: bX, y: bY, w: bW, h: bH };
             });
 
             ctx.textBaseline = "alphabetic"; // Reset p/ não bugar outras telas
 
             // LÓGICA DE CLIQUE GESTUAL HOLOGRÁFICA (Preenche no centro do botão)
             if (currentlyHovering) {
-                if (this.hoveredBtn === currentlyHovering) {
-                    this.hoverTime += dt;
-                    if (this.hoverTime >= 1.5) { 
-                        if (this.eventCallback) this.eventCallback(this.hoveredBtn); 
-                        this.hoverTime = 0; 
-                        this.hoveredBtn = null;
-                    }
-                } else { this.hoveredBtn = currentlyHovering; this.hoverTime = 0; }
+                // Se mudou de botão, reseta o timer
+                if (this.hoveredBtn && this.hoveredBtn.id !== currentlyHovering.id) this.hoverTime = 0;
+                
+                this.hoveredBtn = currentlyHovering;
+                this.hoverTime += dt;
+                if (this.hoverTime >= 1.5) { 
+                    if (this.eventCallback) this.eventCallback(this.hoveredBtn); 
+                    this.hoverTime = 0; 
+                    this.hoveredBtn = null;
+                }
             } else { this.hoveredBtn = null; this.hoverTime = 0; }
 
             // DESENHA O CURSOR DO JOGADOR
             if (this.cursor.active) {
                 ctx.fillStyle = "rgba(0, 255, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 10, 0, Math.PI*2); ctx.fill();
                 
-                // Anel de Carregamento Fica no Centro do Botão se estiver no Hover!
+                // Anel de Carregamento Magnético no Centro do Botão!
                 if (this.hoverTime > 0 && this.hoveredBtn) {
-                    let targetBtn = this.buttons.find(b => b.id === this.hoveredBtn);
-                    if (targetBtn) {
+                    let tb = this.hoveredBtn.hitbox;
+                    if (tb) {
                         ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 6; 
-                        ctx.beginPath(); ctx.arc(targetBtn.x + targetBtn.w/2, targetBtn.y + targetBtn.h/2, 35, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(tb.x + tb.w/2, tb.y + tb.h/2, 35, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke();
                     }
                 }
             } else {
@@ -304,7 +350,6 @@
         _deviceOrientationHandler: null, _deviceMotionHandler: null, _sensorsReady: false,
         
         objectModel: null, detectedItems: [], lastAiTime: 0, aiIntervalMs: 500, aiIntervalId: null, aiProcessing: false,
-        floorColor: { r: 0, g: 0, b: 0 }, targetColor: { r: 0, g: 0, b: 0 },
         activeAnomaly: null, anomalies: [], spawnTimer: 0,
         
         isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
@@ -316,11 +361,16 @@
         
         health: 100, fuel: 100, wear: { motor: 0, wheels: 0 }, money: 0, cargo: [], level: 1, xp: 0,
         stats: { maxFuel: 100, maxCargo: 3, baseSpeed: 20, scanPower: 1.0, radarRange: 150, wearRate: 0.3 },
-        upgrades: { engine: { lvl: 1, max: 5, cost: 1000 }, tank: { lvl: 1, max: 5, cost: 800 }, radar: { lvl: 1, max: 5, cost: 1200 }, truck: { lvl: 1, max: 5, cost: 1500 } },
+        
+        // SISTEMA DE UPGRADES INTEIROS (Para facilitar a evolução V1, V2, V3)
+        upgrades: { engine: 1, battery: 1, radar: 1, chassis: 1, scout: false },
+        
         colors: { main: '#00ffff', danger: '#ff003c', success: '#00ff66', warn: '#f1c40f', panel: 'rgba(0,15,30,0.85)', rare: '#ff00ff' },
 
         init: function() {
             this.state = 'INIT'; this.lastTime = performance.now(); this.timeTotal = 0; this.score = 0;
+            this.upgrades = { engine: 1, battery: 1, radar: 1, chassis: 1, scout: false };
+            this.applyStats();
             this.health = 100; this.fuel = this.stats.maxFuel; this.wear = { motor: 0, wheels: 0 }; this.displayFuel = this.fuel;
             this.money = 0; this.displayMoney = 0; this.xp = 0; this.level = 1; this.cargo = []; this.anomalies = [];
             this.isExtracting = false; this.pickupTimer = 0; this.collectGlow = 0; this.collectZoom = 0; this.baseFlash = 0; particles = [];
@@ -432,7 +482,14 @@
                     if (x < 30 + accR*2 && y > h - 80 - accR*2 && this.state !== 'TOW_MODE') { this.manualAccelerate = true; }
                 }
                 else if (this.state === 'FRONT_AR_OFFICE') {
-                    GestureOffice.buttons.forEach(btn => { if (x > btn.x && x < btn.x + btn.w && y > btn.y && y < btn.y + btn.h) { if (GestureOffice.eventCallback) GestureOffice.eventCallback(btn.id); } });
+                    // Touch Fallback para quando o Minority Report não detetar
+                    let foundHit = false;
+                    GestureOffice.buttons.forEach(btn => { 
+                        if (x > btn.x && x < btn.x + btn.w && y > btn.y && y < btn.y + btn.h) { 
+                            if (GestureOffice.eventCallback) GestureOffice.eventCallback(btn); 
+                            foundHit = true;
+                        } 
+                    });
                 }
             };
             canvas.onpointerup = () => { this.manualAccelerate = false; };
@@ -480,6 +537,7 @@
         update: function(ctx, w, h, globalPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
 
+            // FORÇANDO O MOVENET A RODAR NA CÂMARA FRONTAL
             if (this.state === 'FRONT_AR_OFFICE' && window.System?.detector && window.System.video?.readyState === 4) {
                 if (!this.isEstimatingPose) {
                     this.isEstimatingPose = true;
@@ -562,7 +620,7 @@
         updatePhysics: function(dt) {
             if (this.cooldown > 0) this.cooldown -= dt;
 
-            let accelInput = (this.manualAccelerate || this.deviceForce > 0.5) ? (5.0 + this.upgrades.engine.lvl) : 0;
+            let accelInput = (this.manualAccelerate || this.deviceForce > 0.5) ? (5.0 + (this.upgrades.engine * 2)) : 0;
             let drag = 0.05 * this.virtualSpeed * this.virtualSpeed; 
             
             if (accelInput > 0) {
@@ -587,7 +645,7 @@
                 this.vPos.x += -Math.sin(rad) * currentSpeed * dt; 
                 this.vPos.y += Math.cos(rad) * currentSpeed * dt; 
 
-                let wearMod = 1.0 - ((this.upgrades.truck?.lvl || 1) * 0.05);
+                let wearMod = 1.0 - (this.upgrades.chassis * 0.05);
                 this.wear.motor = Math.min(100, this.wear.motor + (this.stats.wearRate * wearMod * dt));
                 this.wear.wheels = Math.min(100, this.wear.wheels + (this.stats.wearRate * wearMod * 1.5 * dt));
 
@@ -619,7 +677,11 @@
             if (this.state === 'TOW_MODE') return;
             this.spawnTimer += dt;
             if (this.anomalies.length < 5 && this.spawnTimer > 2.0) {
-                this.spawnTimer = 0; let isRare = Math.random() < 0.15; let dist = 40 + Math.random() * (100 + this.level * 20); let ang = Math.random() * Math.PI * 2;
+                this.spawnTimer = 0; 
+                // Se contratou olheiros (scout), tem mais chance de rare
+                let rareChance = this.upgrades.scout ? 0.35 : 0.15;
+                let isRare = Math.random() < rareChance; 
+                let dist = 40 + Math.random() * (100 + this.level * 20); let ang = Math.random() * Math.PI * 2;
                 this.anomalies.push({ id: Math.random().toString(36), x: this.vPos.x + Math.cos(ang) * dist, y: this.vPos.y + Math.sin(ang) * dist, type: isRare ? 'RARE' : 'NORMAL', val: isRare ? 5000 : (500 + Math.floor(Math.random()*500)), life: isRare ? 25 : 999 });
             }
             this.anomalies.forEach(a => { if (a.life < 999) a.life -= dt; }); this.anomalies = this.anomalies.filter(a => a.life > 0);
@@ -709,26 +771,20 @@
             
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
+            // AR WAYPOINTS (NAVEGAÇÃO REAL PARA A BASE 3D)
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
-                let dx = worldX - this.vPos.x; 
-                let dy = worldY - this.vPos.y; 
-                let dist = Math.hypot(dx, dy);
+                let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
+                let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2);
+                let fwdAngle = Math.atan2(Math.sin(angle), Math.cos(angle)); 
+                let fov = Math.PI / 2.5; 
                 
-                let worldAngle = Math.atan2(dy, dx); 
-                let playerForwardAngle = (Math.PI / 2) + radHead; 
-                let relAngle = worldAngle - playerForwardAngle;
-                relAngle = Math.atan2(Math.sin(relAngle), Math.cos(relAngle)); 
-                
-                let fovHalf = Math.PI / 4; 
-                
-                if (Math.abs(relAngle) < fovHalf) {
-                    let projX = (w/2) - (relAngle / fovHalf) * (w/2); 
-                    let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
+                if (Math.abs(fwdAngle) < fov) {
+                    let projX = (w/2) + (fwdAngle / fov) * (w/2); let projY = h/2 + Math.sin(this.timeTotal * 4) * 10;
                     ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(projX, projY - 25); ctx.lineTo(projX + 15, projY); ctx.lineTo(projX, projY + 25); ctx.lineTo(projX - 15, projY); ctx.fill();
                     ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Russo One'"; ctx.textAlign = "center"; ctx.fillText(label, projX, projY - 35);
                     ctx.font = "bold 12px Arial"; ctx.fillText(Math.floor(dist) + "m", projX, projY + 45);
                 } else {
-                    let isRight = relAngle < 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
+                    let isRight = fwdAngle > 0; let edgeX = isRight ? w - 40 : 40; let edgeY = h / 2;
                     ctx.fillStyle = isBase ? this.colors.success : color; ctx.beginPath();
                     if (isRight) { ctx.moveTo(edgeX-20, edgeY - 30); ctx.lineTo(edgeX + 20, edgeY); ctx.lineTo(edgeX-20, edgeY + 30); } 
                     else { ctx.moveTo(edgeX+20, edgeY - 30); ctx.lineTo(edgeX - 20, edgeY); ctx.lineTo(edgeX+20, edgeY + 30); }
@@ -816,26 +872,56 @@
             }
         },
 
-        handleOfficeAction: function(actionId) {
+        // AQUI ESTÁ O NOVO GESTOR DO SISTEMA DE MENUS DA OFICINA
+        handleOfficeAction: function(btn) {
+            let id = btn.id || btn;
+
+            // NAVEGAÇÃO DE MENUS
+            if (id.startsWith('MENU_')) {
+                let newMenu = id.replace('MENU_', '');
+                GestureOffice.menuState = newMenu;
+                if(window.Sfx) window.Sfx.hover();
+                return;
+            }
+            if (id === 'BACK') {
+                GestureOffice.menuState = 'MAIN';
+                if(window.Sfx) window.Sfx.click();
+                return;
+            }
+
+            // AÇÕES DE COMPRA
             const buyObj = (cost, callback) => {
                 if (this.money >= cost && cost > 0) { this.money -= cost; callback(); if(window.Sfx && typeof window.Sfx.coin === 'function') window.Sfx.coin(); return true; }
                 if(window.Sfx && typeof window.Sfx.error === 'function') window.Sfx.error(); return false;
             };
 
-            let fuelCost = Math.floor((this.stats.maxFuel - this.fuel) * 2); let repCost = Math.floor((100 - this.health) * 5);
-            if (actionId === 'REFUEL') buyObj(fuelCost, () => this.fuel = this.stats.maxFuel);
-            if (actionId === 'REPAIR') buyObj(repCost, () => { this.health = 100; });
-            
-            if (actionId === 'UPG_ENGINE') { let u = this.upgrades.engine; if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); }); }
-            if (actionId === 'UPG_TANK') { let u = this.upgrades.tank; if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); }); }
-            if (actionId === 'UPG_RADAR') { let u = this.upgrades.radar; if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); }); }
-            if (actionId === 'UPG_TRUCK') { let u = this.upgrades.truck; if (u.lvl < u.max) buyObj(u.cost, () => { u.lvl++; u.cost = Math.floor(u.cost*1.5); this.applyStats(); }); }
+            // Upgrade Systems (V1, V2, V3)
+            if (id.startsWith('BUY_')) {
+                if (buyObj(btn.cost, () => { this.upgrades[btn.type] = btn.lvlReq; this.applyStats(); })) {
+                    window.System.msg("UPGRADE ADQUIRIDO!");
+                }
+            }
+            // Admin Systems
+            else if (id.startsWith('ACT_')) {
+                if (btn.action === 'repair' && this.health < 100) { buyObj(btn.cost, () => { this.health = 100; }); }
+                else if (btn.action === 'refuel' && this.fuel < this.stats.maxFuel) { buyObj(btn.cost, () => { this.fuel = this.stats.maxFuel; }); }
+                else if (btn.action === 'scout' && !this.upgrades.scout) { buyObj(btn.cost, () => { this.upgrades.scout = true; }); }
+            }
 
-            if (actionId === 'EXIT') { this.pendingCamPromise = CameraManager.startRearCamera(); this.changeState('EXIT_BASE_TRANSITION'); }
+            if (id === 'EXIT') { this.pendingCamPromise = CameraManager.startRearCamera(); this.changeState('EXIT_BASE_TRANSITION'); }
         },
 
         applyStats: function() {
-            this.stats.baseSpeed = 20 + (this.upgrades.engine.lvl * 5); this.stats.maxFuel = 100 + (this.upgrades.tank.lvl * 50); this.stats.radarRange = 150 + (this.upgrades.radar.lvl * 50); this.stats.wearRate = Math.max(0.1, 0.3 - (this.upgrades.truck.lvl * 0.05));
+            const engSpeeds = [20, 35, 55];
+            const batCaps = [100, 250, 600];
+            const radRanges = [150, 300, 600];
+            const chasCargo = [3, 6, 12];
+
+            this.stats.baseSpeed = engSpeeds[this.upgrades.engine - 1]; 
+            this.stats.maxFuel = batCaps[this.upgrades.battery - 1]; 
+            this.stats.radarRange = radRanges[this.upgrades.radar - 1]; 
+            this.stats.maxCargo = chasCargo[this.upgrades.chassis - 1];
+
             if (this.fuel > this.stats.maxFuel) this.fuel = this.stats.maxFuel;
         },
 
