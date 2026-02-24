@@ -49,7 +49,6 @@ window.Profile = {
     xp: 0, level: 1, coins: 0,
     // Status salvo específico do Jogo AR do Caminhão
     arSave: { 
-        money: 0, 
         upgrades: { engine: 1, battery: 1, radar: 1, chassis: 1, scout: false } 
     },
     
@@ -97,9 +96,9 @@ window.Profile = {
         window.Profile.updateUI();
     },
 
-    // Função vitalícia chamada pelo game_ar.js para salvar o dinheiro do caminhão!
+    // Função vitalícia chamada pelo game_ar.js para salvar o dinheiro global e os upgrades!
     saveAR: (arMoney, arUpgrades) => {
-        window.Profile.arSave.money = arMoney;
+        window.Profile.coins = arMoney; // O dinheiro é o mesmo globalmente!
         window.Profile.arSave.upgrades = arUpgrades;
         window.Profile.save();
     },
@@ -152,7 +151,7 @@ window.Profile = {
 };
 
 // =========================================================================
-// SISTEMA DE ADMINISTRAÇÃO E LOGIN
+// SISTEMA DE NAVEGAÇÃO E ADMINISTRAÇÃO
 // =========================================================================
 window.System = {
     activeGame: null, loopId: null, canvas: null, video: null, detector: null, currentCameraMode: null,
@@ -378,12 +377,11 @@ window.Admin = {
                 const u = users[uid];
                 const isOnline = u.status === 'online';
                 const dotClass = isOnline ? 'online-dot' : 'offline-dot';
-                const arDinheiro = u.arSave && u.arSave.money ? u.arSave.money : 0;
                 list.innerHTML += `
                     <div class="user-card">
                         <div class="user-info">
                             <h3><div class="${dotClass}"></div> ${u.name || 'Piloto Desconhecido'}</h3>
-                            <div class="user-stats">Nível: ${u.level || 1} | Moedas: ${u.coins || 0} | AR Money: R$${arDinheiro}</div>
+                            <div class="user-stats">Nível: ${u.level || 1} | Saldo: R$ ${u.coins || 0}</div>
                         </div>
                         <button class="delete-btn" onclick="window.Admin.deleteUser('${uid}')">EXCLUIR</button>
                     </div>
