@@ -1,6 +1,6 @@
 // =============================================================================
-// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (FINAL V30)
-// OFICINA MINORITY REPORT GIGANTE, SUB-MENUS E SALVAMENTO NA NUVEM PERMANENTE
+// AR TOY TRUCK SIMULATOR: MASTER ARCHITECT EDITION (V31 - MULTIPLAYER HUB)
+// OFICINA MINORITY REPORT + PONTO DE ENCONTRO SOCIAL (ROBLOX STYLE) E FIREBASE
 // =============================================================================
 
 (function() {
@@ -18,14 +18,183 @@
     }
 
     // =========================================================================
-    // 2) FRONT_AR_OFFICE (UI MODERNA, SUB-MENUS E GIGANTISMO)
+    // 2) SISTEMA SOCIAL MULTIPLAYER HUB (NOVO!)
+    // =========================================================================
+    const MultiplayerHub = {
+        isActive: false, cursor: { x: 0, y: 0, active: false }, hoverTime: 0, hoveredBtn: null, eventCallback: null,
+        remotePlayers: {}, myAction: null, actionTimer: 0,
+        
+        buttons: [
+            { id: 'BUY_ICECREAM', icon: '🍦', label: 'TOMAR SORVETE', cost: 10, color: '#ff9ff3' },
+            { id: 'BUY_PIZZA', icon: '🍕', label: 'COMER PIZZA', cost: 25, color: '#ff9f43' },
+            { id: 'BUY_POPCORN', icon: '🍿', label: 'COMPRAR PIPOCA', cost: 15, color: '#feca57' },
+            { id: 'LEAVE_HUB', icon: '🔙', label: 'VOLTAR À OFICINA', cost: 0, color: '#c8d6e5', isWide: true }
+        ],
+
+        init: function(callback) {
+            this.eventCallback = callback; this.isActive = true;
+            this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false };
+            this.hoverTime = 0; this.hoveredBtn = null; this.myAction = null; this.actionTimer = 0;
+            
+            // Conecta ao Firebase Hub
+            if(window.DB && window.System && window.System.playerId) {
+                const hubRef = window.DB.ref('ar_hub');
+                hubRef.on('value', snap => { this.remotePlayers = snap.val() || {}; });
+                window.DB.ref('ar_hub/' + window.System.playerId).onDisconnect().remove();
+            }
+        },
+
+        update: function(ctx, w, h, dt, gameState, rawPose, drawX, drawY, scaleCanvas) {
+            if (!this.isActive) return;
+
+            const cx = w / 2;
+            const gap = Math.min(20, w * 0.04); 
+            const btnW = Math.min(250, (w * 0.45));
+            const btnH = 120; 
+            const startY = Math.max(160, h * 0.25);
+            
+            // Fundo Lounge Social
+            ctx.fillStyle = "rgba(15, 5, 30, 0.92)"; ctx.fillRect(0, 0, w, h);
+            
+            // PROCESSAMENTO MOVENET LOCAL
+            this.cursor.active = false;
+            let kps = rawPose ? (Array.isArray(rawPose) ? (rawPose[0]?.keypoints || rawPose) : (rawPose.keypoints || rawPose.pose?.keypoints || [])) : [];
+            
+            if (kps && kps.length > 0) {
+                ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255, 0, 255, 0.5)"; ctx.fillStyle = "#fff";
+                const vW = window.System?.video?.videoWidth || 640; const vH = window.System?.video?.videoHeight || 480;
+                const mapKpx = (valX) => (w / 2) - ((valX - vW / 2) * scaleCanvas);
+                const mapKpy = (valY) => (h / 2) + ((valY - vH / 2) * scaleCanvas);
+
+                const rw = kps.find(k => k.name === 'right_wrist'); const lw = kps.find(k => k.name === 'left_wrist');
+                let domWrist = null;
+                if (rw && rw.score > 0.25 && lw && lw.score > 0.25) { domWrist = rw.y < lw.y ? rw : lw; } 
+                else if (rw && rw.score > 0.25) { domWrist = rw; } else if (lw && lw.score > 0.25) { domWrist = lw; }
+
+                if (domWrist) {
+                    const cxW = mapKpx(domWrist.x); const cyW = mapKpy(domWrist.y);
+                    if(Number.isFinite(cxW) && Number.isFinite(cyW)) { this.cursor.x = cxW; this.cursor.y = cyW; this.cursor.active = true; }
+                }
+            }
+
+            // SINCRONIZAÇÃO COM O FIREBASE MULTIPLAYER
+            if (this.cursor.active && window.DB && window.System && window.System.playerId) {
+                window.DB.ref('ar_hub/' + window.System.playerId).set({
+                    name: window.Profile?.username || 'Piloto',
+                    nx: this.cursor.x / w, 
+                    ny: this.cursor.y / h,
+                    action: this.myAction,
+                    timestamp: Date.now()
+                });
+            }
+
+            if (this.actionTimer > 0) {
+                this.actionTimer -= dt;
+                if (this.actionTimer <= 0) this.myAction = null;
+            }
+
+            // RENDERIZA OS AMIGOS MULTIPLAYER (AVATARES/CURSORES)
+            const now = Date.now();
+            for(let pid in this.remotePlayers) {
+                if(pid === window.System?.playerId) continue; 
+                let p = this.remotePlayers[pid];
+                if(now - p.timestamp > 5000) continue; 
+                
+                let px = p.nx * w; let py = p.ny * h;
+                
+                ctx.fillStyle = "rgba(46, 204, 113, 0.9)";
+                ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+                
+                ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px 'Chakra Petch'";
+                ctx.fillText(p.name, px, py - 25);
+                
+                if(p.action) {
+                    ctx.font = "40px Arial"; ctx.fillText(p.action, px, py - 50);
+                }
+            }
+
+            let currentGlobalCoins = window.Profile ? (window.Profile.coins || 0) : gameState.fallbackMoney;
+
+            ctx.fillStyle = "#ff00ff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+            ctx.font = "bold clamp(30px, 8vw, 55px) 'Russo One'"; ctx.fillText(`PONTO DE ENCONTRO`, cx, Math.max(45, startY - 100));
+            ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(24px, 6vw, 36px) 'Chakra Petch'"; ctx.fillText(`MEU BOLSO: R$ ${Math.floor(currentGlobalCoins).toLocaleString()}`, cx, Math.max(80, startY - 55));
+
+            let currentlyHovering = null;
+
+            this.buttons.forEach((btn, index) => {
+                let row = Math.floor(index / 2); let col = index % 2;
+                let bX = cx + (col === 0 ? -btnW - gap/2 : gap/2); let bY = startY + row * (btnH + gap);
+                let bW = btnW; let bH = btnH;
+
+                if (btn.isWide) { bX = cx - btnW - gap/2; bW = (btnW * 2) + gap; bH = 80; bY = startY + 2 * (btnH + gap); }
+
+                let isHover = false;
+                if (this.cursor.active && this.cursor.x > bX && this.cursor.x < bX + bW && this.cursor.y > bY && this.cursor.y < bY + bH) { 
+                    isHover = true; currentlyHovering = btn; 
+                }
+
+                let isClickable = currentGlobalCoins >= btn.cost || btn.cost === 0;
+                let statusColor = isClickable ? btn.color : "#e74c3c";
+
+                ctx.fillStyle = isHover && isClickable ? "rgba(255, 255, 255, 0.15)" : "rgba(25, 35, 50, 0.9)";
+                roundRect(ctx, bX, bY, bW, bH, 20); ctx.fill();
+                ctx.strokeStyle = isHover && isClickable ? statusColor : "rgba(255, 255, 255, 0.1)"; ctx.lineWidth = isHover && isClickable ? 5 : 2; ctx.stroke();
+
+                if (isHover && isClickable) { ctx.shadowColor = statusColor; ctx.shadowBlur = 20; ctx.strokeStyle = statusColor; ctx.stroke(); ctx.shadowBlur = 0; }
+
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                if (btn.isWide) {
+                    ctx.font = "40px Arial"; ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Chakra Petch'";
+                    ctx.fillText(`${btn.icon} ${btn.label} ${btn.icon}`, bX + bW/2, bY + bH/2);
+                } else {
+                    ctx.font = isHover ? "60px Arial" : "50px Arial";
+                    ctx.fillText(btn.icon, bX + bW/2, bY + bH/2 - 15);
+                    ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Chakra Petch'";
+                    ctx.fillText(btn.label, bX + bW/2, bY + bH - 30);
+                    ctx.fillStyle = statusColor; ctx.font = "bold 18px 'Russo One'"; 
+                    ctx.fillText(isClickable ? (btn.cost > 0 ? `R$ ${btn.cost}` : "GRÁTIS") : "SEM SALDO", bX + bW/2, bY + bH - 10);
+                }
+                btn.hitbox = { x: bX, y: bY, w: bW, h: bH };
+            });
+
+            ctx.textBaseline = "alphabetic"; 
+
+            if (currentlyHovering) {
+                if (this.hoveredBtn && this.hoveredBtn.id !== currentlyHovering.id) this.hoverTime = 0;
+                this.hoveredBtn = currentlyHovering; this.hoverTime += dt;
+                if (this.hoverTime >= 1.5) { 
+                    if (this.eventCallback) this.eventCallback(this.hoveredBtn); 
+                    this.hoverTime = 0; this.hoveredBtn = null;
+                }
+            } else { this.hoveredBtn = null; this.hoverTime = 0; }
+
+            if (this.cursor.active) {
+                ctx.fillStyle = "rgba(255, 0, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 15, 0, Math.PI*2); ctx.fill();
+                if (this.myAction) { ctx.font = "30px Arial"; ctx.textAlign = "center"; ctx.fillText(this.myAction, this.cursor.x, this.cursor.y - 30); }
+                if (this.hoverTime > 0 && this.hoveredBtn) {
+                    let tb = this.hoveredBtn.hitbox;
+                    if (tb) { ctx.strokeStyle = "#ff00ff"; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(tb.x + tb.w/2, tb.y + tb.h/2, 45, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke(); }
+                }
+            } else {
+                ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center"; 
+                ctx.fillText("APAREÇA NA CÂMERA E LEVANTE A MÃO PARA INTERAGIR (OU TOQUE)", cx, h - 20);
+            }
+        },
+
+        destroy: function() {
+            this.isActive = false; this.cursor = { x: 0, y: 0, active: false };
+            if(window.DB && window.System && window.System.playerId) {
+                window.DB.ref('ar_hub/' + window.System.playerId).remove();
+            }
+        }
+    };
+
+    // =========================================================================
+    // 3) FRONT_AR_OFFICE (MINORITY REPORT DA GARAGEM)
     // =========================================================================
     const GestureOffice = {
-        isActive: false, 
-        cursor: { x: 0, y: 0, active: false }, 
-        hoverTime: 0, 
-        hoveredBtn: null, 
-        eventCallback: null,
+        isActive: false, cursor: { x: 0, y: 0, active: false }, hoverTime: 0, hoveredBtn: null, eventCallback: null,
         
         menuState: 'MAIN',
         menus: {
@@ -34,8 +203,8 @@
                 { id: 'MENU_ENGINE', icon: '⚙️', label: 'MOTORES', color: '#3498db' },
                 { id: 'MENU_RADAR', icon: '📡', label: 'RADARES', color: '#00ffff' },
                 { id: 'MENU_CHASSIS', icon: '🚜', label: 'CHASSIS', color: '#f1c40f' },
-                { id: 'MENU_ADMIN', icon: '💼', label: 'ADMINISTRAÇÃO', color: '#9b59b6' },
-                { id: 'EXIT', icon: '🚀', label: 'SAIR E VOLTAR À PATRULHA', color: '#00ff66', isWide: true }
+                { id: 'GO_HUB', icon: '🌍', label: 'PONTO DE ENCONTRO', color: '#ff00ff', isWide: true },
+                { id: 'EXIT', icon: '🚀', label: 'SAIR DA BASE', color: '#00ff66', isWide: true }
             ],
             ENGINE: [
                 { id: 'BUY_ENG_1', type: 'engine', lvlReq: 1, icon: '⚙️', label: 'MOTOR V1', desc: 'Velocidade: 20', cost: 0, color: '#3498db' },
@@ -60,22 +229,13 @@
                 { id: 'BUY_CHA_2', type: 'chassis', lvlReq: 2, icon: '🚜', label: 'CHASSI ALUMÍNIO', desc: 'Carga Máx: 6', cost: 2000, color: '#f1c40f' },
                 { id: 'BUY_CHA_3', type: 'chassis', lvlReq: 3, icon: '🚛', label: 'CHASSI TITÂNIO', desc: 'Carga Máx: 12', cost: 6000, color: '#f1c40f' },
                 { id: 'BACK', icon: '🔙', label: 'VOLTAR AO MENU', color: '#aaaaaa', isWide: true }
-            ],
-            ADMIN: [
-                { id: 'ACT_REPAIR', action: 'repair', icon: '👨‍🔧', label: 'PAGAR MECÂNICO', desc: 'Restaura Vida', cost: 500, color: '#e74c3c' },
-                { id: 'ACT_REFUEL', action: 'refuel', icon: '🔌', label: 'CARGA RÁPIDA', desc: 'Enche a Bateria', cost: 300, color: '#f39c12' },
-                { id: 'ACT_SCOUT',  action: 'scout', icon: '🕵️', label: 'OLHEIRO (PERM)', desc: '+ Chance Raros', cost: 2500, color: '#9b59b6' },
-                { id: 'BACK', icon: '🔙', label: 'VOLTAR AO MENU', color: '#aaaaaa', isWide: true }
             ]
         },
 
         init: function(callback) {
-            this.eventCallback = callback; 
-            this.isActive = true; 
-            this.menuState = 'MAIN';
+            this.eventCallback = callback; this.isActive = true; this.menuState = 'MAIN';
             this.cursor = { x: window.innerWidth/2, y: window.innerHeight/2, active: false }; 
-            this.hoverTime = 0; 
-            this.hoveredBtn = null;
+            this.hoverTime = 0; this.hoveredBtn = null;
         },
 
         update: function(ctx, w, h, dt, gameState, rawPose, drawX, drawY, scaleCanvas) {
@@ -83,47 +243,25 @@
 
             const cx = w / 2;
             const gap = Math.min(20, w * 0.04); 
-            // Botões Gigantes para ver de longe
             const btnW = Math.min(250, (w * 0.45));
-            const btnH = Math.min(150, h * 0.22);
+            const btnH = Math.min(120, h * 0.18);
             const startY = Math.max(160, h * 0.25);
             
-            // Fundo escuro
             ctx.fillStyle = "rgba(5, 10, 20, 0.92)"; ctx.fillRect(0, 0, w, h);
             
-            // ========================================================
-            // PROCESSAMENTO MOVENET (MINORITY REPORT NATIVO)
-            // ========================================================
+            // PROCESSAMENTO MOVENET
             this.cursor.active = false;
-            let kps = [];
+            let kps = rawPose ? (Array.isArray(rawPose) ? (rawPose[0]?.keypoints || rawPose) : (rawPose.keypoints || rawPose.pose?.keypoints || [])) : [];
             
-            // Tratamento à prova de balas da array do Pose (Movenet)
-            if (rawPose) {
-                if (Array.isArray(rawPose) && rawPose.length > 0) {
-                    kps = rawPose[0].keypoints || rawPose;
-                } else if (rawPose.keypoints) {
-                    kps = rawPose.keypoints;
-                } else if (rawPose.pose && rawPose.pose.keypoints) {
-                    kps = rawPose.pose.keypoints;
-                }
-            }
-            if (!Array.isArray(kps)) kps = [];
-            
-            if (kps.length > 0) {
-                ctx.lineWidth = 6;
-                ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
-                ctx.fillStyle = "#fff";
+            if (kps && kps.length > 0) {
+                ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0, 255, 255, 0.8)"; ctx.fillStyle = "#fff";
+                const vW = window.System?.video?.videoWidth || 640; const vH = window.System?.video?.videoHeight || 480;
 
-                const vW = window.System?.video?.videoWidth || 640; 
-                const vH = window.System?.video?.videoHeight || 480;
-
-                // Mapeamento correto com a escala de vídeo atual da tela do celular
-                const mapKpx = (valX) => w - (drawX + (valX * scaleCanvas));
-                const mapKpy = (valY) => drawY + (valY * scaleCanvas);
+                const mapKpx = (valX) => (w / 2) - ((valX - vW / 2) * scaleCanvas);
+                const mapKpy = (valY) => (h / 2) + ((valY - vH / 2) * scaleCanvas);
 
                 const drawBone = (p1Name, p2Name) => {
-                    const kp1 = kps.find(k => k.name === p1Name); 
-                    const kp2 = kps.find(k => k.name === p2Name);
+                    const kp1 = kps.find(k => k.name === p1Name); const kp2 = kps.find(k => k.name === p2Name);
                     if (kp1 && kp2 && kp1.score > 0.25 && kp2.score > 0.25) {
                         const x1 = mapKpx(kp1.x); const y1 = mapKpy(kp1.y);
                         const x2 = mapKpx(kp2.x); const y2 = mapKpy(kp2.y);
@@ -135,49 +273,44 @@
                     }
                 };
 
-                drawBone('left_shoulder', 'right_shoulder'); 
-                drawBone('left_shoulder', 'left_elbow'); drawBone('left_elbow', 'left_wrist');
+                drawBone('left_shoulder', 'right_shoulder'); drawBone('left_shoulder', 'left_elbow'); drawBone('left_elbow', 'left_wrist');
                 drawBone('right_shoulder', 'right_elbow'); drawBone('right_elbow', 'right_wrist');
 
-                // Lógica para pegar o pulso (Mouse virtual)
-                const rw = kps.find(k => k.name === 'right_wrist'); 
-                const lw = kps.find(k => k.name === 'left_wrist');
+                const rw = kps.find(k => k.name === 'right_wrist'); const lw = kps.find(k => k.name === 'left_wrist');
                 let domWrist = null;
-                
                 if (rw && rw.score > 0.25 && lw && lw.score > 0.25) { domWrist = rw.y < lw.y ? rw : lw; } 
                 else if (rw && rw.score > 0.25) { domWrist = rw; } 
                 else if (lw && lw.score > 0.25) { domWrist = lw; }
 
                 if (domWrist) {
                     const cxW = mapKpx(domWrist.x); const cyW = mapKpy(domWrist.y);
-                    if(Number.isFinite(cxW) && Number.isFinite(cyW)) { 
-                        this.cursor.x = cxW; this.cursor.y = cyW; this.cursor.active = true; 
-                    }
+                    if(Number.isFinite(cxW) && Number.isFinite(cyW)) { this.cursor.x = cxW; this.cursor.y = cyW; this.cursor.active = true; }
                 }
             }
 
-            // AQUI É A CONEXÃO COM O DINHEIRO GLOBAL DO JOGADOR
             let currentGlobalCoins = window.Profile ? (window.Profile.coins || 0) : gameState.fallbackMoney;
 
             ctx.fillStyle = "#00ffff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
             ctx.font = "bold clamp(30px, 8vw, 55px) 'Russo One'"; ctx.fillText(`OFICINA DE ${window.Profile?.username || 'PILOTO'}`, cx, Math.max(45, startY - 100));
             ctx.fillStyle = "#00ff66"; ctx.font = "bold clamp(24px, 6vw, 36px) 'Chakra Petch'"; ctx.fillText(`CAIXA GERAL: R$ ${Math.floor(currentGlobalCoins).toLocaleString()}`, cx, Math.max(80, startY - 55));
-            ctx.fillStyle = "#fff"; ctx.font = "bold clamp(14px, 4vw, 20px) Arial"; ctx.fillText(`VIDA DO CAMINHÃO: ${Math.floor(gameState.health)}% | BATERIA: ${Math.floor(gameState.displayFuel)}/${gameState.stats.maxFuel}`, cx, Math.max(110, startY - 25));
 
             const activeMenu = this.menus[this.menuState] || this.menus['MAIN'];
             let currentlyHovering = null;
+            let wideCount = 0; 
 
             activeMenu.forEach((btn, index) => {
                 let row = Math.floor(index / 2); let col = index % 2;
                 let bX = cx + (col === 0 ? -btnW - gap/2 : gap/2); let bY = startY + row * (btnH + gap);
                 let bW = btnW; let bH = btnH;
 
-                if (btn.isWide) { bX = cx - btnW - gap/2; bW = (btnW * 2) + gap; bH = Math.min(80, btnH * 0.8); }
+                if (btn.isWide) { 
+                    bX = cx - btnW - gap/2; bW = (btnW * 2) + gap; bH = Math.min(80, btnH * 0.8); 
+                    bY = startY + Math.ceil(activeMenu.length / 2) * (btnH + gap) + (wideCount * (bH + gap));
+                    wideCount++;
+                }
 
                 let isHover = false;
-                if (this.cursor.active && this.cursor.x > bX && this.cursor.x < bX + bW && this.cursor.y > bY && this.cursor.y < bY + bH) { 
-                    isHover = true; currentlyHovering = btn; 
-                }
+                if (this.cursor.active && this.cursor.x > bX && this.cursor.x < bX + bW && this.cursor.y > bY && this.cursor.y < bY + bH) { isHover = true; currentlyHovering = btn; }
 
                 let displayCost = btn.cost ? `R$ ${btn.cost}` : ""; let subDesc = btn.desc || ""; let isClickable = true; let statusColor = btn.color; let badgeTxt = null;
 
@@ -188,12 +321,6 @@
                         isClickable = currentGlobalCoins >= btn.cost;
                         if (!isClickable) { statusColor = "#e74c3c"; displayCost = "SEM SALDO"; }
                     } else { displayCost = "BLOQUEADO"; statusColor = "#555555"; isClickable = false; badgeTxt = "🔒 REQ V" + (btn.lvlReq - 1); }
-                } 
-                else if (btn.id.startsWith('ACT_')) {
-                    if (btn.action === 'repair' && gameState.health >= 100) { displayCost = "CHASSI OK"; isClickable = false; statusColor = "#555"; }
-                    else if (btn.action === 'refuel' && gameState.fuel >= gameState.stats.maxFuel) { displayCost = "BATERIA OK"; isClickable = false; statusColor = "#555"; }
-                    else if (btn.action === 'scout' && gameState.upgrades.scout) { displayCost = "CONTRATADO"; isClickable = false; statusColor = "#2ecc71"; badgeTxt = "✓ ATIVO"; }
-                    else { isClickable = currentGlobalCoins >= btn.cost; if (!isClickable) { statusColor = "#e74c3c"; displayCost = "SEM SALDO"; } }
                 }
 
                 ctx.fillStyle = isHover && isClickable ? "rgba(255, 255, 255, 0.15)" : "rgba(25, 35, 50, 0.9)";
@@ -204,22 +331,22 @@
 
                 ctx.textAlign = "center"; ctx.textBaseline = "middle";
                 if (btn.isWide) {
-                    ctx.font = "clamp(30px, 6vw, 40px) Arial"; ctx.fillStyle = "#fff"; ctx.font = "bold clamp(20px, 5vw, 30px) 'Chakra Petch'";
+                    ctx.font = "35px Arial"; ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Chakra Petch'";
                     ctx.fillText(`${btn.icon} ${btn.label} ${btn.icon}`, bX + bW/2, bY + bH/2);
                 } else {
-                    ctx.font = isHover ? "clamp(55px, 12vw, 85px) Arial" : "clamp(50px, 10vw, 80px) Arial";
+                    ctx.font = isHover ? "55px Arial" : "50px Arial";
                     ctx.fillText(btn.icon, bX + bW/2, bY + bH/2 - 20);
-                    ctx.fillStyle = "#fff"; ctx.font = "bold clamp(18px, 4vw, 24px) 'Chakra Petch'";
+                    ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Chakra Petch'";
                     ctx.fillText(btn.label, bX + bW/2, bY + bH - 35);
                     if(subDesc) { ctx.fillStyle = "#aaa"; ctx.font = "clamp(12px, 3vw, 16px) Arial"; ctx.fillText(subDesc, bX + bW/2, bY + bH - 18); }
                     if (displayCost && !btn.id.startsWith('MENU_')) {
-                        ctx.fillStyle = isClickable || displayCost === "MÁXIMO" || displayCost.includes("OK") || displayCost === "EQUIPADO" ? statusColor : "#e74c3c";
-                        ctx.font = "bold clamp(16px, 4vw, 20px) 'Russo One'"; ctx.fillText(displayCost, bX + bW/2, bY + bH - 5);
+                        ctx.fillStyle = isClickable || displayCost === "MÁXIMO" || displayCost === "EQUIPADO" ? statusColor : "#e74c3c";
+                        ctx.font = "bold 16px 'Russo One'"; ctx.fillText(displayCost, bX + bW/2, bY + bH - 5);
                     }
                     if (badgeTxt) {
                         ctx.fillStyle = statusColor; let badgeW = ctx.measureText(badgeTxt).width + 20;
-                        roundRect(ctx, bX - 10, bY - 15, badgeW, 30, 10); ctx.fill();
-                        ctx.fillStyle = "#000"; ctx.font = "bold 14px Arial"; ctx.fillText(badgeTxt, bX - 10 + badgeW/2, bY);
+                        roundRect(ctx, bX - 10, bY - 15, badgeW, 25, 8); ctx.fill();
+                        ctx.fillStyle = "#000"; ctx.font = "bold 12px Arial"; ctx.fillText(badgeTxt, bX - 10 + badgeW/2, bY - 2);
                     }
                 }
                 btn.hitbox = { x: bX, y: bY, w: bW, h: bH };
@@ -227,7 +354,6 @@
 
             ctx.textBaseline = "alphabetic"; 
 
-            // Lógica de tempo para o clique "Minority Report"
             if (currentlyHovering) {
                 if (this.hoveredBtn && this.hoveredBtn.id !== currentlyHovering.id) this.hoverTime = 0;
                 this.hoveredBtn = currentlyHovering; this.hoverTime += dt;
@@ -237,15 +363,11 @@
                 }
             } else { this.hoveredBtn = null; this.hoverTime = 0; }
 
-            // Renderiza o Círculo Mágico que carrega o clique
             if (this.cursor.active) {
                 ctx.fillStyle = "rgba(0, 255, 255, 0.9)"; ctx.beginPath(); ctx.arc(this.cursor.x, this.cursor.y, 15, 0, Math.PI*2); ctx.fill();
                 if (this.hoverTime > 0 && this.hoveredBtn) {
                     let tb = this.hoveredBtn.hitbox;
-                    if (tb) { 
-                        ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 10; 
-                        ctx.beginPath(); ctx.arc(tb.x + tb.w/2, tb.y + tb.h/2, 45, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke(); 
-                    }
+                    if (tb) { ctx.strokeStyle = "#00ff66"; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(tb.x + tb.w/2, tb.y + tb.h/2, 45, -Math.PI/2, -Math.PI/2 + (this.hoverTime/1.5)*(Math.PI*2)); ctx.stroke(); }
                 }
             } else {
                 ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center"; 
@@ -256,19 +378,17 @@
     };
 
     // =========================================================================
-    // 3) ARQUITETURA GLOBAL DA ENGINE AR
+    // 4) ENGINE AR PRINCIPAL (CÂMERA TRASEIRA E FÍSICA)
     // =========================================================================
     let particles = [];
     
     const Game = {
-        state: 'UNINITIALIZED', lastTime: 0, timeTotal: 0, score: 0, transitionAlpha: 0, transitionPhase: 0, pendingCamPromise: null,
-        vPos: { x: 0, y: 0 }, baseHeading: 0, currentHeading: 0, virtualSpeed: 0, targetSpeed: 0, manualAccelerate: false, deviceForce: 0,
-        _deviceOrientationHandler: null, _deviceMotionHandler: null, _sensorsReady: false,
+        state: 'UNINITIALIZED', lastTime: 0, timeTotal: 0, score: 0, transitionAlpha: 0, transitionPhase: 0, 
+        vPos: { x: 0, y: 0 }, baseHeading: 0, currentHeading: 0, virtualSpeed: 0, manualAccelerate: false, deviceForce: 0,
+        _deviceOrientationHandler: null, _deviceMotionHandler: null,
         
         objectModel: null, detectedItems: [], lastAiTime: 0, aiIntervalMs: 500, aiIntervalId: null, aiProcessing: false,
-        activeAnomaly: null, anomalies: [], spawnTimer: 0,
-        
-        isExtracting: false, pickupTimer: 0, cooldown: 0, currentEvent: null, eventTimer: 0,
+        activeAnomaly: null, anomalies: [], spawnTimer: 0, isExtracting: false, pickupTimer: 0, cooldown: 0,
         currentPose: null, isEstimatingPose: false,
         
         fallbackMoney: 0, displayMoney: 0, displayFuel: 100, collectGlow: 0, collectZoom: 0, baseFlash: 0,
@@ -282,7 +402,7 @@
         init: function() {
             this.state = 'INIT'; this.lastTime = performance.now(); this.timeTotal = 0; this.score = 0;
             
-            // INTEGRAÇÃO COM O SISTEMA DE CADASTRO GLOBAL DA PLATAFORMA (core.js)
+            // INTEGRAÇÃO COM O SISTEMA GLOBAL (Usando o perfil do seu core original)
             if (window.Profile && window.Profile.arSave && window.Profile.arSave.upgrades) {
                 this.upgrades = window.Profile.arSave.upgrades;
             } else { 
@@ -297,7 +417,6 @@
             
             this.generateMission(); this.setupSensors(); this.setupInput(); 
             
-            // Ativa a Câmera Traseira pelo sistema nativo (Evita Bugs)
             if (window.System && window.System.switchCamera) { 
                 window.System.switchCamera('environment').then(() => { this.loadAIModel(); }); 
             } else { this.loadAIModel(); }
@@ -307,22 +426,22 @@
         
         completeMission: function() {
             this.currentMission.active = false; let bonus = this.currentMission.goal * 1000;
-            if (window.Profile) { 
-                window.Profile.coins = (window.Profile.coins || 0) + bonus; 
-                if(window.Profile.saveAR) window.Profile.saveAR(window.Profile.coins, this.upgrades); 
-            } else { this.fallbackMoney += bonus; }
+            if (window.Profile) { window.Profile.coins = (window.Profile.coins || 0) + bonus; if(window.Profile.saveAR) window.Profile.saveAR(window.Profile.coins, this.upgrades); } else { this.fallbackMoney += bonus; }
             window.System.msg("BÔNUS: R$" + bonus); this.baseFlash = 1.0; if (window.Sfx) window.Sfx.epic();
         },
         
         changeState: function(newState) {
             if (this.state === newState) return;
             if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
+            if (this.state === 'MULTIPLAYER_HUB') MultiplayerHub.destroy();
             this.state = newState;
+            
             switch(newState) {
                 case 'PLAY_REAR_AR': this.startAILoop(); if (!this.currentMission.active) this.generateMission(); break;
                 case 'WAITING_PICKUP': this.pickupTimer = 0; if(window.Sfx) window.Sfx.play(800, 'square', 0.2, 0.2); break;
                 case 'ENTER_BASE_TRANSITION': this.stopAILoop(); this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.virtualSpeed = 0; this.isExtracting = false; this.manualAccelerate = false; break;
                 case 'FRONT_AR_OFFICE': this.virtualSpeed = 0; this.deliverCargo(); this.baseFlash = 1.0; GestureOffice.init(this.handleOfficeAction.bind(this)); break;
+                case 'MULTIPLAYER_HUB': this.virtualSpeed = 0; MultiplayerHub.init(this.handleHubAction.bind(this)); break;
                 case 'EXIT_BASE_TRANSITION': this.transitionAlpha = 0; this.transitionPhase = 'FADE_OUT'; this.manualAccelerate = false; break;
             }
         },
@@ -369,6 +488,10 @@
                     let btnClicked = activeMenu.find(btn => btn.hitbox && x > btn.hitbox.x && x < btn.hitbox.x + btn.hitbox.w && y > btn.hitbox.y && y < btn.hitbox.y + btn.hitbox.h);
                     if(btnClicked && GestureOffice.eventCallback) GestureOffice.eventCallback(btnClicked);
                 }
+                else if (this.state === 'MULTIPLAYER_HUB') {
+                    let btnClicked = MultiplayerHub.buttons.find(btn => btn.hitbox && x > btn.hitbox.x && x < btn.hitbox.x + btn.hitbox.w && y > btn.hitbox.y && y < btn.hitbox.y + btn.hitbox.h);
+                    if(btnClicked && MultiplayerHub.eventCallback) MultiplayerHub.eventCallback(btnClicked);
+                }
             };
             canvas.onpointerup = () => { this.manualAccelerate = false; };
         },
@@ -401,8 +524,8 @@
         update: function(ctx, w, h, globalPose) {
             const now = performance.now(); let dt = (now - this.lastTime) / 1000; if (isNaN(dt) || dt > 0.1 || dt < 0) dt = 0.016; this.lastTime = now; this.timeTotal += dt;
 
-            // FORÇA O MOVENET NA OFICINA (Caso o jogo nativo pause ele)
-            if (this.state === 'FRONT_AR_OFFICE' && window.System?.detector && window.System.video?.readyState === 4) {
+            // FORÇA O MOVENET NA OFICINA E HUB (Para a magia social acontecer)
+            if ((this.state === 'FRONT_AR_OFFICE' || this.state === 'MULTIPLAYER_HUB') && window.System?.detector && window.System.video?.readyState === 4) {
                 if (!this.isEstimatingPose) {
                     this.isEstimatingPose = true;
                     window.System.detector.estimatePoses(window.System.video, {flipHorizontal: false}).then(p => {
@@ -424,8 +547,8 @@
             if (videoRatio > canvasRatio) { drawW = h * videoRatio; drawX = (w - drawW) / 2; } else { drawH = w / videoRatio; drawY = (h - drawH) / 2; }
             const scaleCanvas = drawW / vW; 
 
-            // RENDERIZAÇÃO DA CÂMARA DE FUNDO (EXCETO NA OFICINA)
-            if (!['FRONT_AR_OFFICE', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
+            // CÂMERA TRASEIRA (PARA O JOGO)
+            if (!['FRONT_AR_OFFICE', 'MULTIPLAYER_HUB', 'ENTER_BASE_TRANSITION', 'EXIT_BASE_TRANSITION'].includes(this.state)) {
                 ctx.save();
                 if (this.virtualSpeed > 0.1 && !this.isExtracting) { let susY = Math.sin(this.timeTotal * this.virtualSpeed * 1.5) * (this.virtualSpeed / this.stats.baseSpeed) * 3; ctx.translate(0, susY); }
                 if (this.collectZoom > 0) { let z = 1 + (this.collectZoom * 0.03); ctx.translate(w/2, h/2); ctx.scale(z, z); ctx.translate(-w/2, -h/2); this.collectZoom -= dt * 2; }
@@ -444,11 +567,15 @@
                 case 'PLAY_REAR_AR': case 'WAITING_PICKUP': case 'TOW_MODE':
                     this.updatePhysics(dt); this.updateEvents(dt); this.spawnAnomalies(dt); this.processAR(ctx, w, h, dt, drawX, drawY, scaleCanvas); this.drawHUD(ctx, w, h); break;
                 case 'ENTER_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'FRONT_AR_OFFICE'); break;
+                
+                // CÂMERA FRONTAL (PARA OFICINA E HUB)
                 case 'FRONT_AR_OFFICE':
-                    if (window.System?.video && window.System.video.readyState === 4) { 
-                        ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -drawX, drawY, drawW, drawH); ctx.restore(); 
-                    }
+                    if (window.System?.video && window.System.video.readyState === 4) { ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -drawX, drawY, drawW, drawH); ctx.restore(); }
                     GestureOffice.update(ctx, w, h, dt, this, this.currentPose || globalPose, drawX, drawY, scaleCanvas); break;
+                case 'MULTIPLAYER_HUB':
+                    if (window.System?.video && window.System.video.readyState === 4) { ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(window.System.video, -drawX, drawY, drawW, drawH); ctx.restore(); }
+                    MultiplayerHub.update(ctx, w, h, dt, this, this.currentPose || globalPose, drawX, drawY, scaleCanvas); break;
+                    
                 case 'EXIT_BASE_TRANSITION': this.processTransition(ctx, w, h, dt, 'PLAY_REAR_AR'); break;
             }
             this.updateParticles(ctx, dt, w, h); return this.score || 0; 
@@ -459,7 +586,7 @@
                 this.transitionAlpha += dt * 3.0; 
                 if (this.transitionAlpha >= 1) { this.transitionAlpha = 1; this.transitionPhase = 'SWITCH_CAM'; this.transitionPhase = 'FADE_IN'; }
             } else if (this.transitionPhase === 'SWITCH_CAM') {
-                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("CARREGANDO INTERFACE...", w/2, h/2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("A INICIAR INTERFACE...", w/2, h/2);
             } else if (this.transitionPhase === 'FADE_IN') {
                 this.transitionAlpha -= dt * 3.0; if (this.transitionAlpha <= 0) { this.transitionAlpha = 0; this.changeState(nextState); }
             }
@@ -524,28 +651,27 @@
 
             let visualFound = false; let foundBox = null;
             
-            // FILTRO DE IA: Só aceita brinquedos ou coisas semelhantes
+            // FILTRO DE IA: Objetos permitidos
             const allowedClasses = ['car', 'truck', 'bus', 'train', 'mouse', 'remote', 'cell phone', 'bottle', 'cup', 'keyboard'];
             
             this.detectedItems.forEach(item => {
                 if (!allowedClasses.includes(item.class) || item.score < 0.25) return;
+                const bW = item.bbox[2] * scaleCanvas; const bH = item.bbox[3] * scaleCanvas;
                 
-                // Mapeamento EXATO da Bounding Box do Tensor Flow (Vídeo) para o tamanho esticado do Canvas
-                const bW = item.bbox[2] * scaleCanvas; 
-                const bH = item.bbox[3] * scaleCanvas;
-                if (bW > w * 0.8 || bW < w * 0.05) return; // Tem que ter o tamanho de um brinquedo na tela
+                const bX = (w / 2) + (item.bbox[0] - (window.System?.video?.videoWidth||640) / 2) * scaleCanvas;
+                const bY = (h / 2) + (item.bbox[1] - (window.System?.video?.videoHeight||480) / 2) * scaleCanvas;
                 
-                const cX = drawX + (item.bbox[0] * scaleCanvas) + bW/2; 
-                const cY = drawY + (item.bbox[1] * scaleCanvas) + bH/2;
+                if (bW > w * 0.8 || bW < w * 0.05) return; 
                 
+                const cX = bX + bW/2; const cY = bY + bH/2;
                 let isCentered = Math.hypot(cX - cx, cY - cy) < Math.min(w, h) * 0.4;
                 
                 ctx.strokeStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.8)"; ctx.lineWidth = isCentered ? 4 : 2;
-                ctx.strokeRect(drawX + (item.bbox[0] * scaleCanvas), drawY + (item.bbox[1] * scaleCanvas), bW, bH);
+                ctx.strokeRect(bX, bY, bW, bH);
                 ctx.fillStyle = isCentered ? this.colors.danger : "rgba(255, 255, 0, 0.8)"; ctx.font = "bold 14px Arial";
-                ctx.fillText(item.class.toUpperCase(), drawX + (item.bbox[0] * scaleCanvas), drawY + (item.bbox[1] * scaleCanvas) - 5);
+                ctx.fillText(item.class.toUpperCase(), bX, bY - 5);
 
-                if (isCentered) { visualFound = true; foundBox = { x: drawX + (item.bbox[0] * scaleCanvas), y: drawY + (item.bbox[1] * scaleCanvas), w: bW, h: bH, label: item.class }; }
+                if (isCentered) { visualFound = true; foundBox = { x: bX, y: bY, w: bW, h: bH, label: item.class }; }
             });
 
             if (this.state === 'PLAY_REAR_AR') {
@@ -556,7 +682,6 @@
                 ctx.fillStyle = this.colors.danger; ctx.textAlign = "center"; ctx.font = "bold clamp(26px, 7vw, 50px) 'Russo One'"; ctx.fillText("ALVO BLOQUEADO!", cx, uiY - 55);
                 ctx.fillStyle = "#fff"; ctx.font = "bold clamp(18px, 4vw, 26px) Arial"; ctx.fillText("PARE E REMOVA COM A MÃO!", cx, uiY - 20);
 
-                // O TRUQUE: Se o objeto sumir da visão da câmera, significa que a criança tirou ele do chão!
                 if (!visualFound) {
                     this.pickupTimer += dt;
                     ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(w*0.1, uiY + 10, w*0.8, 30);
@@ -585,7 +710,6 @@
             let fuelPct = this.displayFuel / this.stats.maxFuel; let isFull = this.cargo.length >= this.stats.maxCargo; let radHead = (this.currentHeading - this.baseHeading) * (Math.PI / 180);
             if (this.collectGlow > 0) { ctx.fillStyle = `rgba(0, 255, 255, ${this.collectGlow * 0.3})`; ctx.fillRect(0, 0, w, h); this.collectGlow -= 0.03; }
 
-            // AR WAYPOINTS (NAVEGAÇÃO REAL PARA A BASE 3D GIGANTES)
             const drawARWaypoint = (worldX, worldY, label, color, isBase) => {
                 let dx = worldX - this.vPos.x; let dy = worldY - this.vPos.y; let dist = Math.hypot(dx, dy);
                 let angle = Math.atan2(dy, dx) + radHead + (Math.PI/2); let fwdAngle = Math.atan2(Math.sin(angle), Math.cos(angle)); let fov = Math.PI / 2.5; 
@@ -654,7 +778,6 @@
                 let total = this.cargo.reduce((a, b) => a + b, 0); let effBonus = Math.floor(total * (this.fuel / this.stats.maxFuel) * 0.3); total += effBonus;
                 if (this.currentMission && this.currentMission.active && this.currentMission.type === 'HEAVY LOAD') { total = Math.floor(total * 1.5); }
                 
-                // SALVA O DINHEIRO IMEDIATAMENTE NA CONTA GLOBAL
                 if (window.Profile) {
                     window.Profile.coins = (window.Profile.coins || 0) + total;
                     if(window.Profile.saveAR) window.Profile.saveAR(window.Profile.coins, this.upgrades);
@@ -692,7 +815,38 @@
                 else if (btn.action === 'scout' && !this.upgrades.scout) { buyObj(btn.cost, () => { this.upgrades.scout = true; saveState(); }); }
             }
 
+            if (id === 'GO_HUB') {
+                this.changeState('MULTIPLAYER_HUB');
+            }
             if (id === 'EXIT') { if(window.System && window.System.switchCamera) window.System.switchCamera('environment'); this.changeState('EXIT_BASE_TRANSITION'); }
+        },
+        
+        handleHubAction: function(btn) {
+            let id = btn.id || btn;
+            
+            if (id === 'LEAVE_HUB') {
+                this.changeState('FRONT_AR_OFFICE');
+                return;
+            }
+            
+            const buyObj = (cost, callback) => {
+                let wallet = window.Profile ? window.Profile.coins : this.fallbackMoney;
+                if (wallet >= cost && cost > 0) { 
+                    if (window.Profile) { window.Profile.coins -= cost; } else { this.fallbackMoney -= cost; }
+                    callback(); if(window.Sfx) window.Sfx.coin(); return true; 
+                }
+                if(window.Sfx) window.Sfx.error(); return false;
+            };
+            
+            const saveState = () => { if(window.Profile && window.Profile.saveAR) window.Profile.saveAR(window.Profile.coins, this.upgrades); };
+            
+            if (id.startsWith('BUY_')) {
+                if (buyObj(btn.cost, () => { saveState(); })) {
+                    MultiplayerHub.myAction = btn.icon;
+                    MultiplayerHub.actionTimer = 5.0;
+                    window.System.msg(`COMPROU ${btn.label.replace('COMPRAR ', '').replace('COMER ', '').replace('TOMAR ', '')}!`);
+                }
+            }
         },
 
         applyStats: function() {
@@ -722,7 +876,9 @@
         },
 
         cleanup: function() {
-            this.stopAILoop(); if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
+            this.stopAILoop(); 
+            if (this.state === 'FRONT_AR_OFFICE') GestureOffice.destroy();
+            if (this.state === 'MULTIPLAYER_HUB') MultiplayerHub.destroy();
             if (this._deviceOrientationHandler) window.removeEventListener('deviceorientation', this._deviceOrientationHandler);
             if (this._deviceMotionHandler) window.removeEventListener('devicemotion', this._deviceMotionHandler);
         }
