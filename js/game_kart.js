@@ -1,7 +1,7 @@
 // =============================================================================
-// KART LEGENDS: TITANIUM MASTER FINAL V20 (ULTIMATE COMBAT, CAROUSEL SHOP & HD KARTS)
+// KART LEGENDS: TITANIUM MASTER FINAL V21 (ULTIMATE COMBAT, CAROUSEL & HD KARTS)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. MODELOS VISUAIS HD, EXPLOSÕES REAIS, IA APRIMORADA, FÍSICA CORRIGIDA E CARROSSEL.
+// STATUS: 100% COMPLETO. MODELOS VISUAIS HD, PERSONAGENS REAIS, FÍSICA CORRIGIDA.
 // =============================================================================
 
 (function() {
@@ -113,6 +113,45 @@
         minimapBounds = { minX, maxX, minZ, maxZ, w: maxX-minX || 1, h: maxZ-minZ || 1 };
     }
 
+    // --- FUNÇÃO DE DESENHO DE CABEÇAS (Preservando as Identidades dos Personagens) ---
+    function drawCharacterHead(ctx, charId, steer) {
+        const stats = CHARACTERS[charId] || CHARACTERS[0]; const n = stats.name;
+        ctx.save(); ctx.rotate(steer * 0.3);
+        
+        if (n === 'DK') {
+            ctx.translate(0, -15);
+            ctx.fillStyle = '#4e342e'; ctx.beginPath(); ctx.ellipse(0, -20, 28, 30, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.moveTo(-15, -45); ctx.lineTo(0, -65); ctx.lineTo(15, -45); ctx.fill();
+            ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-8, -10); ctx.lineTo(8, -10); ctx.lineTo(0, 15); ctx.fill();
+        } 
+        else if (n === 'BOWSER') {
+            ctx.translate(0, -5);
+            ctx.fillStyle = '#27ae60'; ctx.beginPath(); ctx.ellipse(0, -25, 45, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 8; ctx.stroke(); 
+            ctx.fillStyle = '#ecf0f1'; const drawSpike = (sx, sy) => { ctx.beginPath(); ctx.arc(sx, sy, 10, 0, Math.PI*2); ctx.fill(); }; drawSpike(0, -55); drawSpike(-25, -30); drawSpike(25, -30); drawSpike(0, -10);
+            ctx.fillStyle = '#e67e22'; ctx.beginPath(); ctx.ellipse(0, -75, 20, 15, 0, 0, Math.PI*2); ctx.fill();
+        }
+        else if (n === 'YOSHI') {
+            ctx.translate(0, -10);
+            ctx.fillStyle = '#76ff03'; ctx.beginPath(); ctx.ellipse(0, -20, 20, 30, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.ellipse(0, -10, 14, 10, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-6, -45); ctx.lineTo(0, -55); ctx.lineTo(6, -45); ctx.fill(); ctx.beginPath(); ctx.moveTo(-5, -30); ctx.lineTo(0, -40); ctx.lineTo(5, -30); ctx.fill();
+        }
+        else if (n === 'PEACH') {
+            ctx.translate(0, -10);
+            ctx.fillStyle = '#ff9ff3'; ctx.beginPath(); ctx.ellipse(0, -15, 22, 25, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.moveTo(-18, -45); ctx.lineTo(18, -45); ctx.lineTo(22, -10); ctx.lineTo(-22, -10); ctx.fill(); ctx.fillStyle = '#f39c12'; ctx.beginPath(); ctx.moveTo(-12, -45); ctx.lineTo(-18, -60); ctx.lineTo(-5, -50); ctx.lineTo(0, -65); ctx.lineTo(5, -50); ctx.lineTo(18, -60); ctx.lineTo(12, -45); ctx.fill(); ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(0, -55, 3, 0, Math.PI*2); ctx.fill();
+        }
+        else if (n === 'WARIO') {
+            ctx.translate(0, -10);
+            ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.ellipse(0, -15, 32, 25, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#8e44ad'; ctx.fillRect(-22, -25, 8, 25); ctx.fillRect(14, -25, 8, 25); ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-25, -35); ctx.lineTo(-35, -32); ctx.lineTo(-40, -38); ctx.stroke(); ctx.beginPath(); ctx.moveTo(25, -35); ctx.lineTo(35, -32); ctx.lineTo(40, -38); ctx.stroke(); ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.ellipse(0, -42, 20, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -37, 28, 6, 0, 0, Math.PI*2); ctx.fill();
+        }
+        else if (n === 'TOAD') {
+            ctx.translate(0, -10);
+            ctx.fillStyle = '#3498db'; ctx.fillRect(-12, -15, 24, 15); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, -35, 32, 22, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.ellipse(0, -40, 12, 8, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(-22, -30, 8, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(22, -30, 8, 12, 0, 0, Math.PI*2); ctx.fill();
+        }
+        else {
+            ctx.translate(0, -10);
+            ctx.fillStyle = stats.color; ctx.beginPath(); ctx.ellipse(0, -15, 18, 20, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#2980b9'; ctx.fillRect(-12, -25, 6, 25); ctx.fillRect(6, -25, 6, 25); ctx.fillRect(-15, -5, 30, 10); ctx.fillStyle = stats.hat; ctx.beginPath(); ctx.ellipse(0, -35, 18, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -30, 22, 6, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText(n[0], 0, -10);
+        }
+        ctx.restore();
+    }
+
     const Logic = {
         state: 'MODE_SELECT', raceState: 'LOBBY', roomId: 'mario_arena_titanium_v8', selectedChar: 0, selectedTrack: 0, isReady: false, isOnline: false, isHost: false,
         dbRef: null, roomRef: null, lastSync: 0, totalRacers: 0, remotePlayersData: {}, localBots: [], maintenanceInterval: null,
@@ -203,6 +242,7 @@
                             } else { this.toggleReady(); }
                         } else { this.startRace(this.currentFase.trackId !== undefined ? this.currentFase.trackId : this.selectedTrack); }
                     } else {
+                        // VERIFICAÇÃO EXATA POR HITBOX
                         if (this.lobbyHitboxes) {
                             let clicked = this.lobbyHitboxes.find(b => clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h);
                             if (clicked) {
@@ -471,7 +511,8 @@
 
             if (d.status === 'FINISHED') {
                 let futureSeg = getSegment((d.pos + 300) / CONF.SEGMENT_LENGTH);
-                d.targetSteer = 0; d.steer += (-futureSeg.curve * 0.05 - d.steer) * 0.1; 
+                d.targetSteer = 0;
+                d.steer += (-futureSeg.curve * 0.05 - d.steer) * 0.1; 
                 d.speed = MathCore.lerp(d.speed, 130, 0.05); d.playerX *= 0.95; 
             } else {
                 if(pose && pose.keypoints) {
@@ -503,7 +544,7 @@
             const carScaleGlobal = w * 0.0022;
             const partY = (h * 0.80) + (15 * carScaleGlobal) + 5; 
             
-            // TRATOR e TANQUE são Reis do Offroad!
+            // FÍSICA APLICADA: TANQUE e TRATOR lidam melhor com Offroad
             let offroadDrag = CONF.OFFROAD_DECEL;
             if (activeKart.type === 'monster') offroadDrag = 0.95;
             if (activeKart.type === 'tractor') offroadDrag = 0.96;
@@ -604,7 +645,9 @@
                 if (p.pos >= trackLength) p.pos -= trackLength; 
                 if (p.life <= 0) p.active = false;
 
-                let target = null; let minDist = 3000;
+                let target = null;
+                let minDist = 3000;
+                
                 if (p.owner !== 'player' && d.status === 'RACING') {
                     let distToPlayer = d.pos - p.pos;
                     if (distToPlayer < 0) distToPlayer += trackLength;
@@ -684,17 +727,25 @@
                         });
                     }
 
+                    // IA COMBATE AVANÇADO (Mira antes de atirar)
                     if (r.item === 'shell') {
                         let botTarget = d.rivals.concat([{pos: d.pos, x: d.playerX}]).find(x => x.pos > r.pos && x.pos - r.pos < 1000);
-                        if (botTarget) { r.ai_targetLane = botTarget.x; if (Math.abs(r.x - botTarget.x) < 0.5) r.useItemTimer = 1; }
+                        if (botTarget) {
+                            r.ai_targetLane = botTarget.x; // Tenta alinhar para o tiro fatal
+                            if (Math.abs(r.x - botTarget.x) < 0.5) r.useItemTimer = 1;
+                        }
                     }
 
                     if (r.item && r.useItemTimer > 0) {
                         r.useItemTimer--;
                         if (r.useItemTimer <= 0) {
-                            if (r.item === 'mushroom') { r.speed = Math.min(CONF.TURBO_MAX_SPEED + 50, r.speed + 150); } 
-                            else if (r.item === 'banana') { botSeg.obs.push({ type: 'banana', x: r.x, collected: false }); } 
-                            else if (r.item === 'shell') { d.projectiles.push({ pos: r.pos + 200, x: r.x, speed: Math.max(r.speed, 200) + 150, active: true, life: 250, owner: r.id }); }
+                            if (r.item === 'mushroom') {
+                                r.speed = Math.min(CONF.TURBO_MAX_SPEED + 50, r.speed + 150);
+                            } else if (r.item === 'banana') {
+                                botSeg.obs.push({ type: 'banana', x: r.x, collected: false });
+                            } else if (r.item === 'shell') {
+                                d.projectiles.push({ pos: r.pos + 200, x: r.x, speed: Math.max(r.speed, 200) + 150, active: true, life: 250, owner: r.id });
+                            }
                             r.item = null;
                         }
                     }
@@ -879,7 +930,7 @@
             ctx.save(); ctx.translate(cx, y); ctx.scale(carScale, carScale); 
             ctx.rotate(tilt * 0.03 + spinAngle); 
             
-            const stats = CHARACTERS[charId] || CHARACTERS[0]; const n = stats.name; const w = stats.weight;
+            const stats = CHARACTERS[charId] || CHARACTERS[0]; const w = stats.weight;
             const kartModel = KART_MODELS[kartModelId] || KART_MODELS[0];
 
             // Sombra
@@ -909,21 +960,16 @@
                     ctx.fillStyle = '#e74c3c'; ctx.fillRect(-22, 32, 12, 3); ctx.fillRect(10, 32, 12, 3); // Lanternas
                 }
                 else if (kartModel.type === 'moto') {
-                    ctx.fillStyle = '#111'; 
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-6, -45, 12, 30, 4); ctx.fill(); ctx.beginPath(); ctx.roundRect(-8, 20, 16, 35, 4); ctx.fill(); } 
-                    else { ctx.fillRect(-6, -45, 12, 30); ctx.fillRect(-8, 20, 16, 35); }
+                    const dwMoto = (wx, wy, isFront) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-10, -20, 20, 40); ctx.restore(); };
+                    dwMoto(0, 30, false); dwMoto(0, -40, true);
                     ctx.fillStyle = kartModel.color;
                     ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-12, 10); ctx.lineTo(12, 10); ctx.fill(); // Carenagem Fina
                     ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-20, -25, 40, 4); // Guidão
                 }
                 else if (kartModel.type === 'tractor') {
-                    // Pneus Gigantes Traseiros com sulcos
-                    ctx.fillStyle = '#111'; 
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-45, 0, 25, 40, 4); ctx.fill(); ctx.beginPath(); ctx.roundRect(20, 0, 25, 40, 4); ctx.fill(); } else { ctx.fillRect(-45, 0, 25, 40); ctx.fillRect(20, 0, 25, 40); }
-                    ctx.fillStyle = '#000'; for(let i=4; i<36; i+=8) { ctx.fillRect(-45, i, 25, 3); ctx.fillRect(20, i, 25, 3); }
-                    // Pneus Pequenos Dianteiros
-                    if(ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-30, -45, 15, 25, 3); ctx.fill(); ctx.beginPath(); ctx.roundRect(15, -45, 15, 25, 3); ctx.fill(); } else { ctx.fillRect(-30, -45, 15, 25); ctx.fillRect(15, -45, 15, 25); }
-                    
+                    const dwTrac = (wx, wy, isFront, wW, wH) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-wW/2, -wH/2, wW, wH); ctx.fillStyle='#555'; ctx.fillRect(-wW/2+4, -wH/2+4, wW-8, wH-8); ctx.restore(); };
+                    dwTrac(-40, 15, false, 30, 50); dwTrac(40, 15, false, 30, 50); // Rodas gigantes traseiras
+                    dwTrac(-30, -35, true, 20, 30); dwTrac(30, -35, true, 20, 30); // Rodas pequenas dianteiras
                     ctx.fillStyle = kartModel.color; ctx.fillRect(-15, -40, 30, 50); // Capô Trator
                     ctx.fillStyle = '#333'; ctx.fillRect(-20, 0, 40, 30); // Cabine Alta
                     ctx.fillStyle = '#7f8c8d'; ctx.fillRect(10, -35, 4, 15); // Escapamento Vertical
@@ -938,11 +984,12 @@
                     ctx.fillStyle = '#34495e'; ctx.beginPath(); ctx.arc(0, -10, 18, 0, Math.PI*2); ctx.fill(); // Torre
                 }
                 else if (kartModel.type === 'plane') {
-                    ctx.fillStyle = '#111'; ctx.fillRect(-12, 10, 6, 12); ctx.fillRect(6, 10, 6, 12); ctx.fillRect(-3, -40, 6, 12); // Trens
+                    const dwPlane = (wx, wy, isFront) => { ctx.save(); ctx.translate(wx, wy); if(isFront) ctx.rotate(steer * 0.8); ctx.fillStyle = '#111'; ctx.fillRect(-6, -10, 12, 20); ctx.restore(); };
+                    dwPlane(-15, 20, false); dwPlane(15, 20, false); dwPlane(0, -40, true); // Trens aterragem
                     ctx.fillStyle = kartModel.color; ctx.beginPath(); ctx.ellipse(0, -10, 18, 50, 0, 0, Math.PI*2); ctx.fill(); // Fuselagem Jato
                     ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-60, 5); ctx.lineTo(60, 5); ctx.lineTo(0, -15); ctx.fill(); // Asas
                     ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(-25, 35); ctx.lineTo(25, 35); ctx.lineTo(0, 20); ctx.fill(); // Cauda
-                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-20, -2, 40, 4); ctx.restore(); // Hélice
+                    ctx.save(); ctx.translate(0, -60); ctx.rotate(Date.now() * 0.05); ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-20, -2, 40, 4); ctx.restore(); // Hélice animada
                 }
                 else if (kartModel.type === 'sport') {
                     drawWheels(18, 28, '#2c3e50', 5);
@@ -951,7 +998,6 @@
                 }
 
                 // Cabeça do Piloto (Adaptada à Posição do Kart Customizado)
-                ctx.save(); 
                 let headY = -10;
                 if (kartModel.type === 'moto') { headY = 10; ctx.translate(steer * -15, 0); } // Moto inclina o corpo
                 else if (kartModel.type === 'f1') headY = 0;
@@ -960,38 +1006,47 @@
                 else if (kartModel.type === 'plane') headY = -5;
                 else if (kartModel.type === 'luxury') headY = -10; // Preso dentro do carro
 
-                ctx.translate(0, headY); ctx.rotate(steer * 0.3);
-                ctx.fillStyle = stats.color; ctx.beginPath(); ctx.ellipse(0, -15, 18, 20, 0, 0, Math.PI*2); ctx.fill(); 
-                ctx.fillStyle = '#ffccaa'; ctx.beginPath(); ctx.ellipse(0, -15, 12, 10, 0, 0, Math.PI*2); ctx.fill(); // Rosto Humanoide Base
-                ctx.fillStyle = stats.hat; ctx.beginPath(); ctx.ellipse(0, -35, 18, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -30, 22, 6, 0, 0, Math.PI*2); ctx.fill(); 
-                ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText(n[0], 0, -10); 
-                ctx.restore();
+                ctx.translate(0, headY);
+                drawCharacterHead(ctx, charId, steer);
                 ctx.restore();
                 return;
             }
 
             // --- KART PADRÃO DOS PERSONAGENS ORIGINAIS ---
-            if (n === 'DK') {
+            if (stats.name === 'DK') {
                 drawWheels(28, 38, '#2c3e50');
                 ctx.fillStyle = '#8B4513'; ctx.beginPath(); ctx.ellipse(0, 0, 55, 38, 0, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = '#555'; ctx.lineWidth = 6; ctx.beginPath(); ctx.ellipse(0, -12, 53, 15, 0, 0, Math.PI); ctx.stroke(); ctx.beginPath(); ctx.ellipse(0, 12, 53, 15, 0, 0, Math.PI); ctx.stroke();
                 ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center'; ctx.fillText('DK', 0, 15);
-                ctx.save(); ctx.translate(0, -15); ctx.rotate(steer * 0.3); ctx.fillStyle = '#4e342e'; ctx.beginPath(); ctx.ellipse(0, -20, 28, 30, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.moveTo(-15, -45); ctx.lineTo(0, -65); ctx.lineTo(15, -45); ctx.fill();
-                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(-8, -10); ctx.lineTo(8, -10); ctx.lineTo(0, 15); ctx.fill(); ctx.restore();
             } 
-            else if (n === 'BOWSER') {
+            else if (stats.name === 'BOWSER') {
                 drawWheels(34, 44);
                 ctx.fillStyle = '#7f8c8d'; ctx.beginPath(); ctx.ellipse(0, 8, 65, 30, 0, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 4; ctx.stroke(); 
                 ctx.fillStyle = '#2c3e50'; ctx.fillRect(-25, 20, 50, 20); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(-15, 40, 8, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(15, 40, 8, 0, Math.PI*2); ctx.fill();
-                ctx.save(); ctx.translate(0, -5); ctx.rotate(steer * 0.3); ctx.fillStyle = '#27ae60'; ctx.beginPath(); ctx.ellipse(0, -25, 45, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 8; ctx.stroke(); 
-                ctx.fillStyle = '#ecf0f1'; const drawSpike = (sx, sy) => { ctx.beginPath(); ctx.arc(sx, sy, 10, 0, Math.PI*2); ctx.fill(); }; drawSpike(0, -55); drawSpike(-25, -30); drawSpike(25, -30); drawSpike(0, -10);
-                ctx.fillStyle = '#e67e22'; ctx.beginPath(); ctx.ellipse(0, -75, 20, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+            }
+            else if (stats.name === 'YOSHI') {
+                drawWheels(18, 28, '#27ae60');
+                ctx.fillStyle = '#ecf0f1'; ctx.beginPath(); ctx.ellipse(0, 0, 28, 40, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(-15, 10, 10, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(15, -15, 8, 0, Math.PI*2); ctx.fill();
+            }
+            else if (stats.name === 'PEACH') {
+                drawWheels(16, 26, '#ecf0f1');
+                ctx.fillStyle = '#ff9ff3'; ctx.beginPath(); ctx.moveTo(-25, -20); ctx.lineTo(25, -20); ctx.lineTo(35, 15); ctx.lineTo(-35, 15); ctx.fill(); ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 5; ctx.stroke(); 
+                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(-20, 10, 5, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(20, 10, 5, 0, Math.PI*2); ctx.fill();
+            }
+            else if (stats.name === 'WARIO') {
+                drawWheels(26, 32); 
+                ctx.fillStyle = '#bdc3c7'; ctx.fillRect(-35, 5, 12, 35); ctx.fillRect(23, 5, 12, 35); ctx.fillStyle = '#8e44ad'; ctx.beginPath(); ctx.moveTo(-40, -15); ctx.lineTo(40, -15); ctx.lineTo(45, 20); ctx.lineTo(-45, 20); ctx.fill();
+            }
+            else if (stats.name === 'TOAD') {
+                drawWheels(14, 22);
+                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.ellipse(0, 10, 25, 15, 0, 0, Math.PI*2); ctx.fill();
             }
             else {
                 drawWheels(20, 30);
                 ctx.fillStyle = '#95a5a6'; ctx.fillRect(-15, 15, 30, 18); ctx.strokeStyle = stats.color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-25, -20); ctx.lineTo(25, -20); ctx.lineTo(35, 10); ctx.lineTo(-35, 10); ctx.closePath(); ctx.stroke();
-                ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); ctx.fillStyle = stats.color; ctx.beginPath(); ctx.ellipse(0, -15, 18, 20, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#2980b9'; ctx.fillRect(-12, -25, 6, 25); ctx.fillRect(6, -25, 6, 25); ctx.fillRect(-15, -5, 30, 10); ctx.fillStyle = stats.hat; ctx.beginPath(); ctx.ellipse(0, -35, 18, 15, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(0, -30, 22, 6, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText(n[0], 0, -10); ctx.restore();
             }
+
+            drawCharacterHead(ctx, charId, steer);
             ctx.restore(); 
         },
 
@@ -1099,12 +1154,12 @@
                 ctx.fillStyle = "rgba(0,0,0,0.5)";
                 if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(cx - carW/2, cy - 120, carW, 240, 20); ctx.fill(); } else { ctx.fillRect(cx - carW/2, cy - 120, carW, 240); }
 
-                // Setas exatas no tamanho do carrossel
+                // Setas Hitboxes Perfeitas
                 ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial";
                 ctx.fillText("<", cx - carW/2 + 30, cy); 
-                this.shopHitboxes.push({ x: cx - carW/2, y: cy - 40, w: 60, h: 80, action: 'prev' });
+                this.shopHitboxes.push({ x: cx - carW/2, y: cy - 40, w: 80, h: 80, action: 'prev' });
                 ctx.fillText(">", cx + carW/2 - 30, cy); 
-                this.shopHitboxes.push({ x: cx + carW/2 - 60, y: cy - 40, w: 60, h: 80, action: 'next' });
+                this.shopHitboxes.push({ x: cx + carW/2 - 80, y: cy - 40, w: 80, h: 80, action: 'next' });
 
                 // Desenho Central do Kart
                 let charColor = CHARACTERS[this.selectedChar].color;
