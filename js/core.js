@@ -1,5 +1,6 @@
 /* =================================================================
-   CORE DO SISTEMA - PERSISTÊNCIA MULTIPLAYER, ADMIN E AR NATIVO
+   CORE DO SISTEMA - VERSÃO COM LOGIN E INTEGRAÇÃO FIREBASE DB
+   STATUS: GESTÃO DE SESSÃO E PERMISSÕES DE JOGOS ATIVADAS
    ================================================================= */
 
 window.Sfx = {
@@ -24,8 +25,7 @@ window.Sfx = {
     click: () => window.Sfx.play(1000, 'sine', 0.1, 0.08),
     error: () => window.Sfx.play(150, 'sawtooth', 0.3, 0.1),
     coin: () => { window.Sfx.play(988, 'sine', 0.1, 0.1); setTimeout(()=>window.Sfx.play(1319, 'sine', 0.2, 0.1), 100); },
-    epic: () => { window.Sfx.play(400, 'square', 0.5, 0.2); setTimeout(()=>window.Sfx.play(600, 'sawtooth', 0.5, 0.2), 200); setTimeout(()=>window.Sfx.play(800, 'sine', 1.0, 0.3), 400); },
-    laser: () => { window.Sfx.play(1200, 'sawtooth', 0.1, 0.05); }
+    epic: () => { window.Sfx.play(400, 'square', 0.5, 0.2); setTimeout(()=>window.Sfx.play(600, 'sawtooth', 0.5, 0.2), 200); setTimeout(()=>window.Sfx.play(800, 'sine', 1.0, 0.3), 400); }
 };
 
 window.Gfx = {
@@ -40,92 +40,126 @@ window.Gfx = {
     shakeScreen: (val) => { window.Gfx.addShake(val); }
 };
 
-// =========================================================================
-// SISTEMA DE PERFIL E SALVAMENTO NA NUVEM (FIREBASE)
-// =========================================================================
+window.Auth = {
+    getFakeEmail: (username) => {
+        return username.trim().toLowerCase().replace(/\s+/g, '') + '@thiaguinho.os';
+    },
+    
+    showError: (msg) => {
+        const errEl = document.getElementById('auth-error');
+        errEl.innerText = msg;
+        errEl.style.display = 'block';
+        window.Sfx.error();
+    },
+
+    login: async () => {
+        window.Sfx.click();
+        const user = document.getElementById('auth-user').value;
+        const pass = document.getElementById('auth-pass').value;
+        if(!user || !pass) return window.Auth.showError("Preenche nome e senha!");
+        
+        try {
+            document.getElementById('loading').classList.remove('hidden');
+            await window.AuthApp.signInWithEmailAndPassword(window.Auth.getFakeEmail(user), pass);
+        } catch(e) {
+            document.getElementById('loading').classList.add('hidden');
+            window.Auth.showError("Credenciais inválidas. Tenta de novo!");
+        }
+    },
+
+    register: async () => {
+        window.Sfx.click();
+        const user = document.getElementById('auth-user').value.trim();
+        const pass = document.getElementById('auth-pass').value;
+        if(!user || pass.length < 6) return window.Auth.showError("O nome não pode estar vazio e a senha deve ter 6 dígitos!");
+        
+        try {
+            document.getElementById('loading').classList.remove('hidden');
+            const cred = await window.AuthApp.createUserWithEmailAndPassword(window.Auth.getFakeEmail(user), pass);
+            
+            const role = user.toLowerCase() === 'thiago' ? 'admin' : 'player';
+            
+            const initialProfile = {
+                username: user,
+                role: role,
+                xp: 0,
+                level: 1,
+                coins: 0,
+                permissions: {}
+            };
+            
+            if(window.Games) {
+                window.Games.forEach(g => {
+                    initialProfile.permissions[g.id] = (role === 'admin' || g.id === 'drive'); 
+                });
+            }
+
+            await window.DB.ref('users/' + cred.user.uid).set(initialProfile);
+        } catch(e) {
+            document.getElementById('loading').classList.add('hidden');
+            window.Auth.showError("Nome já existe ou ocorreu um erro.");
+        }
+    },
+
+    logout: () => {
+        window.Sfx.click();
+        window.AuthApp.signOut();
+    }
+};
+
 window.Profile = {
-    id: localStorage.getItem('thiaguinho_id') || null,
-    name: localStorage.getItem('thiaguinho_name') || null,
-    xp: 0, level: 1, coins: 0,
-    // Status salvo específico do Jogo AR do Caminhão
+    username: 'Jogador', role: 'player', xp: 0, level: 1, coins: 0, permissions: {},
+    
+    // Suporte aos Dados do Jogo de AR
     arSave: { 
         upgrades: { engine: 1, battery: 1, radar: 1, chassis: 1, scout: false } 
     },
-    
-    load: async () => {
-        if (!window.Profile.id) {
-            // Se for a primeira vez, exige que coloque o nome para criar a conta
-            document.getElementById('name-modal').classList.remove('hidden');
-            return;
-        }
 
-        document.getElementById('display-player-name').innerHTML = `${window.Profile.name} <span>Wii</span>`;
-        
-        // Puxa os dados da Nuvem se houver internet
-        if (window.DB) {
-            try {
-                const snapshot = await window.DB.ref('users/' + window.Profile.id).once('value');
-                const data = snapshot.val();
-                if (data) {
+    loadFromFirebase: (uid) => {
+        return new Promise((resolve) => {
+            window.DB.ref('users/' + uid).on('value', snap => {
+                const data = snap.val();
+                if(data) {
+                    window.Profile.username = data.username || 'Jogador';
+                    window.Profile.role = data.role || 'player';
                     window.Profile.xp = data.xp || 0;
                     window.Profile.level = data.level || 1;
                     window.Profile.coins = data.coins || 0;
-                    if (data.arSave) window.Profile.arSave = data.arSave;
+                    window.Profile.permissions = data.permissions || {};
+                    if(data.arSave) window.Profile.arSave = data.arSave;
+                    window.Profile.updateUI();
+                    window.System.renderChannels(); 
                 }
-                window.Profile.setOnline();
-            } catch(e) {
-                console.error("Modo offline carregado.");
-            }
-        }
-        window.Profile.updateUI();
+                resolve();
+            });
+        });
     },
 
-    save: () => {
-        // Salva na nuvem e no LocalStorage
-        if (window.DB && window.Profile.id) {
-            window.DB.ref('users/' + window.Profile.id).update({
-                name: window.Profile.name,
+    save: () => { 
+        if(window.System.playerId && window.System.playerId.length > 20) {
+            window.DB.ref('users/' + window.System.playerId).update({
                 xp: window.Profile.xp,
                 level: window.Profile.level,
                 coins: window.Profile.coins,
-                arSave: window.Profile.arSave,
-                lastSeen: Date.now()
+                arSave: window.Profile.arSave
             });
         }
-        localStorage.setItem('thiaguinho_profile', JSON.stringify({ xp: window.Profile.xp, level: window.Profile.level, coins: window.Profile.coins, arSave: window.Profile.arSave }));
-        window.Profile.updateUI();
+        window.Profile.updateUI(); 
     },
 
-    // Função vitalícia chamada pelo game_ar.js para salvar o dinheiro global e os upgrades!
+    // Função que o game_ar.js vai chamar para gastar/ganhar dinheiro
     saveAR: (arMoney, arUpgrades) => {
-        window.Profile.coins = arMoney; // O dinheiro é o mesmo globalmente!
+        window.Profile.coins = arMoney;
         window.Profile.arSave.upgrades = arUpgrades;
         window.Profile.save();
-    },
-
-    setOnline: () => {
-        if (window.DB && window.Profile.id) {
-            const userStatusRef = window.DB.ref('users/' + window.Profile.id + '/status');
-            window.DB.ref('.info/connected').on('value', (snapshot) => {
-                if (snapshot.val() == false) {
-                    document.getElementById('net-status').innerHTML = "OFFLINE 🔴";
-                    document.getElementById('net-status').style.color = "#e74c3c";
-                    return;
-                }
-                document.getElementById('net-status').innerHTML = "ONLINE 🟢";
-                document.getElementById('net-status').style.color = "#2ecc71";
-                
-                userStatusRef.onDisconnect().set('offline').then(() => {
-                    userStatusRef.set('online');
-                });
-            });
-        }
     },
 
     addReward: (score, isWin, extraCoins = 0) => {
         let xpGained = isWin ? Math.max(100, Math.floor(score * 2.0)) : Math.max(20, Math.floor(score * 0.5));
         let coinsGained = (isWin ? Math.max(10, Math.floor(score * 0.2)) : 0) + extraCoins; 
+        
         window.Profile.xp += xpGained; window.Profile.coins += coinsGained;
+        
         let nextLevelXP = window.Profile.level * 1000; let leveledUp = false;
         while(window.Profile.xp >= nextLevelXP) {
             window.Profile.level++; window.Profile.xp -= nextLevelXP; nextLevelXP = window.Profile.level * 1000; leveledUp = true;
@@ -135,10 +169,20 @@ window.Profile = {
 
     updateUI: () => {
         const reqXP = window.Profile.level * 1000; const pct = Math.min(100, (window.Profile.xp / reqXP) * 100);
+        const nameEl = document.getElementById('ui-username'); if(nameEl) nameEl.innerText = window.Profile.username;
         document.getElementById('ui-level').innerText = window.Profile.level;
         document.getElementById('ui-xp-text').innerText = `${window.Profile.xp}/${reqXP}`;
         document.getElementById('ui-xp-bar').style.width = `${pct}%`;
         document.getElementById('ui-coins').innerText = window.Profile.coins;
+
+        const adminBtnContainer = document.getElementById('admin-btn-container');
+        if (adminBtnContainer) {
+            if (window.Profile.role === 'admin') {
+                adminBtnContainer.innerHTML = `<div class="wii-oval-btn" onclick="window.Admin.init()" style="border-color:#e67e22; color:#e67e22;">Painel Admin</div>`;
+            } else {
+                adminBtnContainer.innerHTML = '';
+            }
+        }
     },
 
     getRank: (score, isWin) => {
@@ -150,68 +194,33 @@ window.Profile = {
     }
 };
 
-// =========================================================================
-// SISTEMA DE NAVEGAÇÃO E ADMINISTRAÇÃO
-// =========================================================================
 window.System = {
-    activeGame: null, loopId: null, canvas: null, video: null, detector: null, currentCameraMode: null,
-
-    registerName: () => {
-        const nameInput = document.getElementById('player-name-input').value.trim().toUpperCase();
-        if (!nameInput) { alert("Digite o nome do Piloto!"); return; }
-        
-        // Cria um ID único para o celular
-        window.Profile.id = 'PILOTO_' + Date.now() + '_' + Math.floor(Math.random()*1000);
-        window.Profile.name = nameInput;
-        
-        localStorage.setItem('thiaguinho_id', window.Profile.id);
-        localStorage.setItem('thiaguinho_name', window.Profile.name);
-        
-        document.getElementById('name-modal').classList.add('hidden');
-        document.getElementById('display-player-name').innerHTML = `${window.Profile.name} <span>Wii</span>`;
-        
-        window.Sfx.init(); window.Sfx.epic();
-        window.Profile.save();
-        window.Profile.setOnline();
-    },
+    playerId: 'p_' + Math.floor(Math.random()*10000), 
+    activeGame: null, loopId: null, canvas: null, video: null, detector: null,
+    currentCameraMode: null,
 
     switchCamera: async (facingMode) => {
         if (window.System.currentCameraMode === facingMode) return;
-        if (window.System.video.srcObject) { window.System.video.srcObject.getTracks().forEach(track => track.stop()); }
-
+        if (window.System.video.srcObject) {
+            window.System.video.srcObject.getTracks().forEach(track => track.stop());
+        }
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: facingMode }, width: 640, height: 480 },
+                audio: false
+            });
             window.System.video.srcObject = stream;
             
             if (facingMode === 'environment') {
                 window.System.video.style.transform = "none";
-                window.System.video.style.position = "fixed";
-                window.System.video.style.inset = "0";
-                window.System.video.style.width = "100%";
-                window.System.video.style.height = "100%";
-                window.System.video.style.objectFit = "cover";
-                window.System.video.style.zIndex = "1";
-                window.System.video.style.opacity = "1";
-                window.System.video.style.borderRadius = "0";
-                window.System.video.style.border = "none";
             } else {
                 window.System.video.style.transform = "scaleX(-1)";
-                window.System.video.style.position = "absolute";
-                window.System.video.style.inset = "auto";
-                window.System.video.style.bottom = "clamp(70px, 10vh, 95px)";
-                window.System.video.style.right = "clamp(10px, 3vw, 25px)";
-                window.System.video.style.width = "clamp(90px, 20vw, 130px)";
-                window.System.video.style.height = "auto";
-                window.System.video.style.zIndex = "50";
-                window.System.video.style.borderRadius = "12px";
-                window.System.video.style.border = "3px solid white";
-                window.System.video.style.opacity = "1"; 
             }
+            
             await new Promise((resolve) => { window.System.video.onloadedmetadata = () => resolve(); });
             window.System.currentCameraMode = facingMode;
         } catch(error) {
-            console.error("Erro na Câmera:", error);
-            window.System.msg("ERRO DE CÂMERA");
+            console.error("Erro ao trocar de câmera:", error);
         }
     },
 
@@ -226,10 +235,13 @@ window.System = {
     renderChannels: () => {
         const grid = document.getElementById('channel-grid'); if(!grid) return; grid.innerHTML = '';
         window.Games.forEach(g => {
-            const div = document.createElement('div'); div.className = 'channel';
-            div.innerHTML = `<div class="channel-icon">${g.icon}</div><div class="channel-title">${g.title}</div>`;
-            div.onclick = () => { window.Sfx.click(); window.System.openPhases(g); };
-            div.onmouseenter = () => window.Sfx.hover(); grid.appendChild(div);
+            const hasAccess = window.Profile.role === 'admin' || window.Profile.permissions[g.id] === true;
+            if (hasAccess) {
+                const div = document.createElement('div'); div.className = 'channel';
+                div.innerHTML = `<div class="channel-icon">${g.icon}</div><div class="channel-title">${g.title}</div>`;
+                div.onclick = () => { window.Sfx.click(); window.System.openPhases(g); };
+                div.onmouseenter = () => window.Sfx.hover(); grid.appendChild(div);
+            }
         });
     },
 
@@ -239,7 +251,7 @@ window.System = {
         document.getElementById('phase-title').innerText = game.title.toUpperCase();
         
         const grid = document.getElementById('phase-grid'); grid.innerHTML = '';
-        const phases = game.opts.phases || [ { id: 'arcade', name: 'MODO ARCADE', desc: 'Jogue livremente', reqLvl: 1 } ];
+        const phases = game.opts.phases || [ { id: 'arcade', name: 'MODO ARCADE', desc: 'Jogue livremente offline ou online', reqLvl: 1 } ];
 
         phases.forEach(fase => {
             const isUnlocked = window.Profile.level >= fase.reqLvl;
@@ -258,7 +270,7 @@ window.System = {
                     window.Sfx.click();
                     document.getElementById('phase-screen').classList.add('hidden');
                     document.getElementById('loading').classList.remove('hidden');
-                    document.getElementById('loading-text').innerText = "CALIBRANDO SENSORES...";
+                    document.getElementById('loading-text').innerText = "AJUSTANDO SENSORES...";
 
                     const targetCamera = game.opts.camera === 'environment' ? 'environment' : 'user';
                     await window.System.switchCamera(targetCamera);
@@ -273,7 +285,9 @@ window.System = {
                         window.System.loop();
                     }, 500);
                 };
-            } else { card.onclick = () => window.System.msg(`Requer Nível ${fase.reqLvl}`); }
+            } else {
+                card.onclick = () => window.System.msg(`Requer Nível ${fase.reqLvl}`);
+            }
             grid.appendChild(card);
         });
     },
@@ -285,6 +299,7 @@ window.System = {
         let pose = null;
 
         const isArMode = window.System.activeGame.opts.camera === 'environment';
+
         if(!isArMode && window.System.detector && window.System.video.readyState === 4) {
             const p = await window.System.detector.estimatePoses(window.System.video, {flipHorizontal: false});
             if(p.length > 0) pose = p[0];
@@ -318,6 +333,7 @@ window.System = {
     gameOver: (score, isWin = true, coinsInGame = 0) => {
         window.System.stopGame();
         let finalScore = Math.floor(score || 0);
+        
         let rewards = window.Profile.addReward(finalScore, isWin, coinsInGame);
         let rankData = window.Profile.getRank(finalScore, isWin);
 
@@ -352,55 +368,13 @@ window.System = {
     }
 };
 
-window.Admin = {
-    open: () => {
-        document.getElementById('menu-screen').classList.add('hidden');
-        document.getElementById('admin-screen').classList.remove('hidden');
-        window.Admin.loadUsers();
-    },
-    close: () => {
-        document.getElementById('admin-screen').classList.add('hidden');
-        document.getElementById('menu-screen').classList.remove('hidden');
-    },
-    loadUsers: () => {
-        if (!window.DB) {
-            document.getElementById('admin-user-list').innerHTML = "<div style='color:#e74c3c; padding: 20px; font-family: Chakra Petch'>Erro: Sem Conexão com Firebase</div>";
-            return;
-        }
-        window.DB.ref('users').on('value', (snap) => {
-            const users = snap.val();
-            const list = document.getElementById('admin-user-list');
-            list.innerHTML = '';
-            if (!users) { list.innerHTML = "<div style='color:#fff; padding: 20px;'>Nenhum piloto registrado.</div>"; return; }
-            
-            Object.keys(users).forEach(uid => {
-                const u = users[uid];
-                const isOnline = u.status === 'online';
-                const dotClass = isOnline ? 'online-dot' : 'offline-dot';
-                list.innerHTML += `
-                    <div class="user-card">
-                        <div class="user-info">
-                            <h3><div class="${dotClass}"></div> ${u.name || 'Piloto Desconhecido'}</h3>
-                            <div class="user-stats">Nível: ${u.level || 1} | Saldo: R$ ${u.coins || 0}</div>
-                        </div>
-                        <button class="delete-btn" onclick="window.Admin.deleteUser('${uid}')">EXCLUIR</button>
-                    </div>
-                `;
-            });
-        });
-    },
-    deleteUser: (uid) => {
-        if(confirm("Tem certeza absoluta que deseja excluir este piloto da base de dados?")) {
-            window.DB.ref('users/' + uid).remove();
-        }
-    }
-};
+const style = document.createElement('style');
+style.innerHTML = `@keyframes popMsg { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 15% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; } 30% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 80% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; } }`;
+document.head.appendChild(style);
 
 window.onload = async () => {
-    window.Sfx.init();
     window.System.canvas = document.getElementById('game-canvas'); window.System.video = document.getElementById('webcam');
     window.System.resize(); window.addEventListener('resize', window.System.resize);
-    window.Profile.load();
 
     await window.System.switchCamera('user');
 
@@ -408,7 +382,20 @@ window.onload = async () => {
     await tf.ready();
     window.System.detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING });
 
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('menu-screen').classList.remove('hidden');
-    window.System.renderChannels();
+    window.AuthApp.onAuthStateChanged(async (user) => {
+        if (user) {
+            window.System.playerId = user.uid;
+            document.getElementById('loading-text').innerText = "SINCRONIZANDO PERFIL...";
+            await window.Profile.loadFromFirebase(user.uid);
+            
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+        } else {
+            window.System.playerId = null;
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('auth-screen').classList.remove('hidden');
+        }
+    });
 };
