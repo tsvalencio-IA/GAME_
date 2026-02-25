@@ -1,28 +1,45 @@
 // =============================================================================
-// STAR WING AR: GALAXY COMMANDER (COCKPIT FLIGHT SIMULATOR)
+// STAR WING AR: 4K COCKPIT SIMULATOR (ULTIMATE EDITION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT & PARCEIRO DE PROGRAMAÇÃO
-// STATUS: PSEUDO-3D ENGINE, HOLO-JOYSTICK, COMBATE ESPACIAL
+// STATUS: 3D POLYGON ENGINE, TRUE COCKPIT, PHYSICAL JOYSTICK, ARM TRACKING
 // =============================================================================
 
 (function() {
     "use strict";
 
     // -----------------------------------------------------------------
-    // 1. CONFIGURAÇÕES DO MOTOR 3D E DO JOGO
+    // 1. MOTOR 3D & MATEMÁTICA
     // -----------------------------------------------------------------
-    const CONF = {
-        FOV: 400,            // Campo de visão (profundidade)
-        RENDER_DIST: 5000,   // Distância máxima de renderização no eixo Z
-        BASE_SPEED: 40,      // Velocidade de voo
-        BOOST_SPEED: 120,    // Velocidade com turbo
-        MAX_ENEMIES: 10,     // Limite de inimigos no ecrã
-        JOYSTICK_R: 80       // Tamanho do raio de controlo do manche
+    const Math3D = {
+        fov: 500,
+        rotateX: (x, y, z, angle) => {
+            let cos = Math.cos(angle), sin = Math.sin(angle);
+            return { x: x, y: y * cos - z * sin, z: y * sin + z * cos };
+        },
+        rotateY: (x, y, z, angle) => {
+            let cos = Math.cos(angle), sin = Math.sin(angle);
+            return { x: x * cos + z * sin, y: y, z: -x * sin + z * cos };
+        },
+        rotateZ: (x, y, z, angle) => {
+            let cos = Math.cos(angle), sin = Math.sin(angle);
+            return { x: x * cos - y * sin, y: x * sin + y * cos, z: z };
+        },
+        project: (x, y, z, w, h) => {
+            if (z < 10) return { visible: false }; // Atrás da câmara
+            let scale = Math3D.fov / z;
+            return {
+                x: (x * scale) + (w / 2),
+                y: (y * scale) + (h / 2),
+                s: scale,
+                visible: true
+            };
+        }
     };
 
     // -----------------------------------------------------------------
-    // 2. SÍNTESE DE ÁUDIO (Sons estilo Sci-Fi)
+    // 2. SÍNTESE DE ÁUDIO 8-BIT/SCI-FI
     // -----------------------------------------------------------------
-    const FlightAudio = {
+    const AudioEngine = {
         ctx: null, engineOsc: null, engineGain: null, initialized: false,
         init: function() {
             if (this.initialized) return;
@@ -34,610 +51,478 @@
                 this.initialized = true;
             } catch (e) {}
         },
-        startEngine: function() {
+        start: function() {
             if (!this.initialized || this.engineOsc) return;
             if (this.ctx.state === 'suspended') this.ctx.resume();
             this.engineOsc = this.ctx.createOscillator();
             this.engineOsc.type = 'sawtooth';
-            this.engineOsc.frequency.value = 60;
+            this.engineOsc.frequency.value = 80;
             this.engineOsc.connect(this.engineGain);
             this.engineOsc.start();
         },
-        updateEngine: function(speedRatio, isBoosting) {
+        updateRPM: function(pitch, boost) {
             if (!this.engineOsc) return;
-            const now = this.ctx.currentTime;
-            this.engineOsc.frequency.setTargetAtTime(60 + (speedRatio * 100) + (isBoosting ? 100 : 0), now, 0.1);
-            this.engineGain.gain.setTargetAtTime(isBoosting ? 0.15 : 0.05, now, 0.1);
+            let targetFreq = 80 + (Math.abs(pitch) * 20) + (boost ? 100 : 0);
+            this.engineOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.1);
+            this.engineGain.gain.setTargetAtTime(boost ? 0.15 : 0.08, this.ctx.currentTime, 0.1);
         },
-        stopEngine: function() {
+        shoot: function() {
+            if (!this.initialized) return;
+            let t = this.ctx.currentTime;
+            let osc = this.ctx.createOscillator(); let g = this.ctx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(1200, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+            g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+            osc.connect(g); g.connect(this.ctx.destination); osc.start(t); osc.stop(t + 0.15);
+        },
+        explode: function() {
+            if (!this.initialized) return;
+            let t = this.ctx.currentTime;
+            let osc = this.ctx.createOscillator(); let g = this.ctx.createGain();
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(10, t + 0.6);
+            g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+            osc.connect(g); g.connect(this.ctx.destination); osc.start(t); osc.stop(t + 0.6);
+        },
+        stop: function() {
             if (this.engineOsc) { this.engineOsc.stop(); this.engineOsc.disconnect(); this.engineOsc = null; }
-        },
-        playShoot: function() {
-            if (!this.initialized) return;
-            const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
-            osc.type = 'square'; osc.frequency.setValueAtTime(880, t); osc.frequency.exponentialRampToValueAtTime(110, t + 0.2);
-            g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-            osc.connect(g); g.connect(this.ctx.destination); osc.start(t); osc.stop(t + 0.2);
-        },
-        playExplosion: function() {
-            if (!this.initialized) return;
-            const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.exponentialRampToValueAtTime(10, t + 0.5);
-            g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-            osc.connect(g); g.connect(this.ctx.destination); osc.start(t); osc.stop(t + 0.5);
         }
     };
 
     // -----------------------------------------------------------------
-    // 3. MOTOR DE JOGO (Lógica Principal)
+    // 3. MOTOR DO JOGO E LÓGICA
     // -----------------------------------------------------------------
     const Game = {
-        state: 'START',
-        lastTime: 0,
-        score: 0,
+        state: 'START', lastTime: 0, score: 0,
         
-        // Dados da Nave (O Jogador)
-        ship: {
-            hp: 100, energy: 100,
-            x: 0, y: 0,             // Posição visual no ecrã
-            pitch: 0, yaw: 0, roll: 0, // Rotação da nave
-            targetPitch: 0, targetYaw: 0,
-            speed: CONF.BASE_SPEED,
-            isBoosting: false,
-            lastShootTime: 0
-        },
-
-        // Efeitos Visuais
-        shake: 0,
-        hitFlash: 0,
+        // Estado do Jogador
+        ship: { hp: 100, shield: 100, speed: 60, boost: 0, pitch: 0, yaw: 0, roll: 0 },
+        camera: { x: 0, y: 0, z: 0 },
         
-        // Entidades do Mundo 3D
-        stars: [],
-        entities: [], // Inimigos e Asteroides
-        lasers: [],
-        particles: [],
-
-        // Controlos UI
-        joystick: { x: 0, y: 0, active: false },
-        buttons: {
-            shoot: { x: 0, y: 0, r: 50, pressed: false },
-            boost: { x: 0, y: 0, r: 50, pressed: false }
+        // Elementos Físicos e Renderização
+        entities: [], lasers: [], particles: [], terrain: [],
+        
+        // Tracking do Jogador
+        pilotArms: {
+            left: { x: 0, y: 0, active: false, action: null },
+            right: { x: 0, y: 0, active: false }
         },
+        
+        // Painel e Joystick
+        joystick: { 
+            baseX: 0, baseY: 0, 
+            stickX: 0, stickY: 0, 
+            maxRadius: 80 
+        },
+        dashboard: {
+            shootBtn: { x: 0, y: 0, r: 60, pressed: false },
+            shieldBtn: { x: 0, y: 0, r: 50, pressed: false }
+        },
+        
+        lastShoot: 0, shake: 0, flash: 0,
 
-        init: function(faseData) {
-            this.state = 'PLAYING';
-            this.lastTime = performance.now();
-            this.score = 0;
-            this.ship = { hp: 100, energy: 100, x: 0, y: 0, pitch: 0, yaw: 0, roll: 0, targetPitch: 0, targetYaw: 0, speed: CONF.BASE_SPEED, isBoosting: false, lastShootTime: 0 };
-            this.entities = []; this.lasers = []; this.particles = []; this.stars = [];
+        init: function() {
+            this.state = 'PLAYING'; this.lastTime = performance.now(); this.score = 0;
+            this.ship = { hp: 100, shield: 100, speed: 100, boost: 100, pitch: 0, yaw: 0, roll: 0 };
+            this.entities = []; this.lasers = []; this.particles = []; this.terrain = [];
             
-            // Gerar estrelas para o fundo
-            for(let i=0; i<200; i++) {
-                this.stars.push({
-                    x: (Math.random() - 0.5) * 4000,
-                    y: (Math.random() - 0.5) * 4000,
-                    z: Math.random() * CONF.RENDER_DIST
-                });
-            }
-
-            FlightAudio.init();
-            FlightAudio.startEngine();
-            if (window.System && window.System.msg) window.System.msg("MÓDULO DE VOO ATIVADO");
-            this.setupInput();
-        },
-
-        cleanup: function() {
-            FlightAudio.stopEngine();
-            if(window.System && window.System.canvas) {
-                window.System.canvas.onpointerdown = null;
-                window.System.canvas.onpointerup = null;
-            }
-        },
-
-        setupInput: function() {
-            const canvas = window.System.canvas;
-            canvas.onpointerdown = (e) => {
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left; const y = e.clientY - rect.top;
-                
-                // Verificar toques nos botões virtuais
-                if (Math.hypot(x - this.buttons.shoot.x, y - this.buttons.shoot.y) < this.buttons.shoot.r) {
-                    this.buttons.shoot.pressed = true; this.fireLaser();
+            // Gerar Grelha de Terreno 3D
+            for (let z = 0; z < 20; z++) {
+                for (let x = -10; x < 10; x++) {
+                    this.terrain.push({ x: x * 400, y: 800, z: z * 400 });
                 }
-                if (Math.hypot(x - this.buttons.boost.x, y - this.buttons.boost.y) < this.buttons.boost.r) {
-                    this.buttons.boost.pressed = true;
-                }
-            };
-            canvas.onpointerup = () => {
-                this.buttons.shoot.pressed = false;
-                this.buttons.boost.pressed = false;
-            };
-        },
-
-        // --- MATEMÁTICA 3D ---
-        project3D: function(x, y, z, w, h) {
-            if (z <= 0) return { visible: false };
-            const scale = CONF.FOV / z;
-            return {
-                x: (x * scale) + (w / 2) + this.ship.x,
-                y: (y * scale) + (h / 2) + this.ship.y,
-                s: scale,
-                visible: true
-            };
-        },
-
-        update: function(ctx, w, h, pose) {
-            const now = performance.now();
-            let dt = (now - this.lastTime) / 1000;
-            if (dt > 0.1) dt = 0.016; // Prevenir saltos de frame
-            this.lastTime = now;
-
-            if (this.state === 'GAMEOVER') {
-                this.renderGameOver(ctx, w, h);
-                return Math.floor(this.score);
             }
 
-            this.processAIInput(pose, w, h);
-            this.updatePhysics(dt);
-            this.spawner(dt);
-            this.checkCollisions();
-
-            ctx.save();
-            if (this.shake > 0) {
-                ctx.translate((Math.random()-0.5)*this.shake, (Math.random()-0.5)*this.shake);
-                this.shake *= 0.9;
-                if(this.shake < 0.5) this.shake = 0;
-            }
-
-            this.renderWorld(ctx, w, h);
-            this.renderCockpit(ctx, w, h);
-            ctx.restore();
-
-            return Math.floor(this.score);
+            AudioEngine.init(); AudioEngine.start();
+            if(window.System && window.System.msg) window.System.msg("HYPER-DRIVE ENGAGED");
         },
 
-        processAIInput: function(pose, w, h) {
-            this.joystick.active = false;
-            
-            // Posição dos botões baseada no tamanho do ecrã
-            this.buttons.shoot.x = w * 0.15; this.buttons.shoot.y = h * 0.85;
-            this.buttons.boost.x = w * 0.85; this.buttons.boost.y = h * 0.85;
-            const joyCenterX = w / 2; const joyCenterY = h * 0.85;
+        cleanup: function() { AudioEngine.stop(); },
+
+        // --- TRACKING & INPUT (MOVENET) ---
+        processArmTracking: function(pose, w, h) {
+            // Posicionar Elementos Físicos do Cockpit
+            this.joystick.baseX = w * 0.75; 
+            this.joystick.baseY = h * 0.85;
+            this.dashboard.shootBtn = { x: w * 0.20, y: h * 0.80, r: 60, pressed: false };
+            this.dashboard.shieldBtn = { x: w * 0.35, y: h * 0.85, r: 40, pressed: false };
+
+            this.pilotArms.left.active = false;
+            this.pilotArms.right.active = false;
 
             if (pose && pose.keypoints) {
-                const rightWrist = pose.keypoints.find(k => k.name === 'right_wrist');
-                const leftWrist = pose.keypoints.find(k => k.name === 'left_wrist');
-                const nose = pose.keypoints.find(k => k.name === 'nose');
+                const getKp = (name) => pose.keypoints.find(k => k.name === name);
+                const rw = getKp('right_wrist'); const lw = getKp('left_wrist');
 
-                // Lógica da Mão Direita -> Manche Holográfico
-                if (rightWrist && rightWrist.score > 0.3) {
-                    this.joystick.active = true;
-                    // Mapear posição da câmara para o ecrã (Inverter X por causa do espelho)
-                    const handX = (1 - (rightWrist.x / 640)) * w;
-                    const handY = (rightWrist.y / 480) * h;
+                // Mapear posição da câmara para o ecrã
+                const mapX = (x) => (1 - (x / 640)) * w;
+                const mapY = (y) => (y / 480) * h;
+
+                // Mão Direita -> Manche Físico
+                if (rw && rw.score > 0.2) {
+                    this.pilotArms.right.active = true;
+                    this.pilotArms.right.x = mapX(rw.x);
+                    this.pilotArms.right.y = mapY(rw.y);
+
+                    // Puxar o manche para a mão, com limite de raio
+                    let dx = this.pilotArms.right.x - this.joystick.baseX;
+                    let dy = this.pilotArms.right.y - this.joystick.baseY;
+                    let dist = Math.hypot(dx, dy);
                     
-                    this.joystick.x = handX; this.joystick.y = handY;
+                    if (dist > this.joystick.maxRadius) {
+                        this.joystick.stickX = this.joystick.baseX + (dx / dist) * this.joystick.maxRadius;
+                        this.joystick.stickY = this.joystick.baseY + (dy / dist) * this.joystick.maxRadius;
+                    } else {
+                        this.joystick.stickX = this.pilotArms.right.x;
+                        this.joystick.stickY = this.pilotArms.right.y;
+                    }
 
-                    // Calcular desvio em relação ao centro do ecrã para rodar a nave
-                    let normX = (handX - w/2) / (w/2);
-                    let normY = (handY - h/2) / (h/2);
-                    
-                    // Limitar os valores
-                    normX = Math.max(-1, Math.min(1, normX));
-                    normY = Math.max(-1, Math.min(1, normY));
+                    // A inclinação do manche controla a nave
+                    let normX = (this.joystick.stickX - this.joystick.baseX) / this.joystick.maxRadius;
+                    let normY = (this.joystick.stickY - this.joystick.baseY) / this.joystick.maxRadius;
 
-                    this.ship.targetYaw = normX * 40;   // A nave vira para os lados
-                    this.ship.targetPitch = normY * 30; // A nave sobe e desce
+                    this.ship.yaw = normX * 0.05;     // Virar
+                    this.ship.pitch = normY * 0.05;   // Subir/Descer
+                    this.ship.roll = normX * 0.5;     // Rolar visualmente
+
                 } else {
-                    this.ship.targetYaw = 0; this.ship.targetPitch = 0;
+                    // Retorno automático do manche ao centro
+                    this.joystick.stickX += (this.joystick.baseX - this.joystick.stickX) * 0.1;
+                    this.joystick.stickY += (this.joystick.baseY - this.joystick.stickY) * 0.1;
+                    this.ship.yaw *= 0.9; this.ship.pitch *= 0.9; this.ship.roll *= 0.9;
                 }
 
-                // Lógica da Mão Esquerda -> Atirar (Levantar a mão acima do nariz)
-                if (leftWrist && nose && leftWrist.score > 0.3 && nose.score > 0.5) {
-                    if (leftWrist.y < nose.y) {
-                        this.buttons.shoot.pressed = true;
-                        this.fireLaser();
-                    } else {
-                        if (!window.System.canvas.matches(':active')) this.buttons.shoot.pressed = false;
+                // Mão Esquerda -> Painel de Comandos
+                if (lw && lw.score > 0.2) {
+                    this.pilotArms.left.active = true;
+                    this.pilotArms.left.x = mapX(lw.x);
+                    this.pilotArms.left.y = mapY(lw.y);
+
+                    // Deteção de toques holográficos
+                    if (Math.hypot(this.pilotArms.left.x - this.dashboard.shootBtn.x, this.pilotArms.left.y - this.dashboard.shootBtn.y) < this.dashboard.shootBtn.r) {
+                        this.dashboard.shootBtn.pressed = true;
+                        this.fire();
+                    }
+                    if (Math.hypot(this.pilotArms.left.x - this.dashboard.shieldBtn.x, this.pilotArms.left.y - this.dashboard.shieldBtn.y) < this.dashboard.shieldBtn.r) {
+                        this.dashboard.shieldBtn.pressed = true;
                     }
                 }
             } else {
-                this.ship.targetYaw = 0; this.ship.targetPitch = 0;
+                this.ship.yaw *= 0.9; this.ship.pitch *= 0.9; this.ship.roll *= 0.9;
+                this.joystick.stickX += (this.joystick.baseX - this.joystick.stickX) * 0.1;
+                this.joystick.stickY += (this.joystick.baseY - this.joystick.stickY) * 0.1;
             }
         },
 
-        fireLaser: function() {
+        fire: function() {
             const now = performance.now();
-            if (now - this.ship.lastShootTime > 150) { // Cadência de tiro
-                this.ship.lastShootTime = now;
-                // Dispara dois lasers das pontas das asas
-                this.lasers.push({ x: -150, y: 50, z: 0, vz: 1500 });
-                this.lasers.push({ x: 150, y: 50, z: 0, vz: 1500 });
-                FlightAudio.playShoot();
-                this.shake = 2; // Pequeno coice
+            if (now - this.lastShoot > 120) {
+                this.lastShoot = now;
+                // Dispara do centro/lados da câmara
+                this.lasers.push({ x: -100, y: 100, z: 0, vx: 0, vy: 0, vz: 3000 });
+                this.lasers.push({ x: 100, y: 100, z: 0, vx: 0, vy: 0, vz: 3000 });
+                AudioEngine.shoot();
+                this.shake = 5;
             }
         },
 
-        updatePhysics: function(dt) {
-            // Suavizar movimento da nave
-            this.ship.yaw += (this.ship.targetYaw - this.ship.yaw) * 5 * dt;
-            this.ship.pitch += (this.ship.targetPitch - this.ship.pitch) * 5 * dt;
-            this.ship.roll = -this.ship.yaw * 0.8; // Efeito de rolagem ao virar
+        // --- UPDATE FÍSICA ---
+        update: function(ctx, w, h, pose) {
+            const now = performance.now(); let dt = Math.min((now - this.lastTime) / 1000, 0.05); this.lastTime = now;
 
-            // Efeito visual do ecrã a inclinar
-            this.ship.x = -this.ship.yaw * 10;
-            this.ship.y = -this.ship.pitch * 10;
-
-            // Lógica do Turbo
-            if (this.buttons.boost.pressed && this.ship.energy > 0) {
-                this.ship.isBoosting = true;
-                this.ship.speed = CONF.BOOST_SPEED;
-                this.ship.energy -= 20 * dt;
-                CONF.FOV = 400 + (Math.random() * 20); // Efeito de velocidade no FOV
-            } else {
-                this.ship.isBoosting = false;
-                this.ship.speed = CONF.BASE_SPEED;
-                this.ship.energy = Math.min(100, this.ship.energy + 10 * dt);
-                CONF.FOV = 400;
+            if (this.state === 'GAMEOVER') {
+                this.renderWorld(ctx, w, h); this.renderCockpit(ctx, w, h);
+                ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,w,h);
+                ctx.fillStyle = "#ff003c"; ctx.textAlign = "center"; ctx.font = "bold 60px 'Russo One'";
+                ctx.fillText("SISTEMAS CRÍTICOS!", w/2, h/2);
+                return Math.floor(this.score);
             }
 
-            FlightAudio.updateEngine(this.ship.speed / CONF.BOOST_SPEED, this.ship.isBoosting);
-            this.score += (this.ship.speed * dt * 0.5);
+            this.processArmTracking(pose, w, h);
+            
+            let speed = this.dashboard.shieldBtn.pressed ? 200 : this.ship.speed; // Boost falso
+            AudioEngine.updateRPM(this.ship.pitch, this.dashboard.shieldBtn.pressed);
+            this.score += speed * dt * 0.1;
 
-            // Mover mundo para trás (ilusão de voo)
-            const speedZ = this.ship.speed * dt * 60;
-
-            // Estrelas
-            this.stars.forEach(s => {
-                s.z -= speedZ * 2;
-                if (s.z <= 0) { s.z = CONF.RENDER_DIST; s.x = (Math.random() - 0.5) * 4000; s.y = (Math.random() - 0.5) * 4000; }
+            // Mover Terreno (Grelha 3D infinita)
+            this.terrain.forEach(t => {
+                t.z -= speed * dt * 30;
+                // Aplicar rotação da nave ao mundo
+                t.x -= this.ship.yaw * speed * dt * 50;
+                t.y -= this.ship.pitch * speed * dt * 50;
+                
+                if (t.z < 0) { t.z += 8000; t.x = (Math.random()-0.5)*8000; t.y = 800 + (Math.random()-0.5)*400; }
             });
 
-            // Lasers (movem-se para a frente no eixo Z)
-            for (let i = this.lasers.length - 1; i >= 0; i--) {
-                let l = this.lasers[i];
-                l.z += l.vz * dt;
-                // O laser acompanha a mira para onde atiramos
-                l.x += this.ship.yaw * dt * 20;
-                l.y += this.ship.pitch * dt * 20;
-                if (l.z > CONF.RENDER_DIST) this.lasers.splice(i, 1);
+            // Spawner de Inimigos (Polígonos)
+            if (this.entities.length < 15 && Math.random() < 0.1) {
+                this.entities.push({
+                    type: Math.random() > 0.7 ? 'obstacle' : 'fighter',
+                    x: (Math.random() - 0.5) * 6000, y: (Math.random() - 0.5) * 4000, z: 10000,
+                    hp: 50, size: 200, rotZ: 0
+                });
             }
 
-            // Inimigos e Asteroides
+            // Atualizar Entidades
             for (let i = this.entities.length - 1; i >= 0; i--) {
                 let e = this.entities[i];
-                e.z -= speedZ;
-                
-                // IA básica dos inimigos: mover-se ligeiramente na direção do jogador
-                if (e.type === 'ship') {
-                    e.x += (0 - e.x) * 0.5 * dt;
-                    e.y += (0 - e.y) * 0.5 * dt;
-                }
+                e.z -= speed * dt * (e.type === 'fighter' ? 40 : 20);
+                e.x -= this.ship.yaw * speed * dt * 50;
+                e.y -= this.ship.pitch * speed * dt * 50;
+                e.rotZ += dt;
 
-                if (e.z <= 0) {
-                    // Passou por nós, se for perto damos dano!
-                    if (Math.abs(e.x) < 300 && Math.abs(e.y) < 300) {
-                        this.ship.hp -= 15;
-                        this.hitFlash = 1.0;
-                        this.shake = 20;
-                        FlightAudio.playExplosion();
-                        if (window.System && window.System.msg) window.System.msg("IMPACTO!");
-                        if (this.ship.hp <= 0) this.gameOver();
+                if (e.z < 100) {
+                    if (Math.abs(e.x) < 400 && Math.abs(e.y) < 400) {
+                        this.ship.hp -= 20; this.flash = 1.0; this.shake = 30; AudioEngine.explode();
+                        if (this.ship.hp <= 0) this.triggerGameOver();
                     }
                     this.entities.splice(i, 1);
                 }
             }
 
-            // Partículas
+            // Atualizar Lasers e Colisões
+            for (let i = this.lasers.length - 1; i >= 0; i--) {
+                let l = this.lasers[i];
+                l.z += l.vz * dt;
+                l.x += this.ship.yaw * 1000 * dt; // Compensação da câmara
+                l.y += this.ship.pitch * 1000 * dt;
+                
+                let hit = false;
+                for (let j = this.entities.length - 1; j >= 0; j--) {
+                    let e = this.entities[j];
+                    if (Math.abs(l.z - e.z) < 500 && Math.abs(l.x - e.x) < e.size && Math.abs(l.y - e.y) < e.size) {
+                        e.hp -= 30; hit = true;
+                        if (e.hp <= 0) {
+                            AudioEngine.explode(); this.score += 150;
+                            this.spawnParticles(e.x, e.y, e.z, e.type === 'fighter' ? '#ff003c' : '#f1c40f', 15);
+                            this.entities.splice(j, 1);
+                        }
+                        break;
+                    }
+                }
+                if (hit || l.z > 10000) this.lasers.splice(i, 1);
+            }
+
+            // Atualizar Partículas
             for (let i = this.particles.length - 1; i >= 0; i--) {
                 let p = this.particles[i];
                 p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
                 p.life -= dt * 2;
                 if (p.life <= 0) this.particles.splice(i, 1);
             }
+
+            // Renderizar Tudo
+            ctx.save();
+            if (this.shake > 0) { ctx.translate((Math.random()-0.5)*this.shake, (Math.random()-0.5)*this.shake); this.shake *= 0.9; }
+            this.renderWorld(ctx, w, h);
+            this.renderCockpit(ctx, w, h);
+            this.renderPilotArms(ctx, w, h);
+            if (this.flash > 0) { ctx.fillStyle = `rgba(255, 0, 0, ${this.flash})`; ctx.fillRect(0,0,w,h); this.flash -= dt * 2; }
+            ctx.restore();
+
+            return Math.floor(this.score);
         },
 
-        spawner: function(dt) {
-            if (this.entities.length < CONF.MAX_ENEMIES && Math.random() < 0.05) {
-                const isEnemy = Math.random() > 0.5;
-                this.entities.push({
-                    type: isEnemy ? 'ship' : 'asteroid',
-                    x: (Math.random() - 0.5) * 3000,
-                    y: (Math.random() - 0.5) * 3000,
-                    z: CONF.RENDER_DIST,
-                    hp: isEnemy ? 20 : 50,
-                    size: isEnemy ? 100 : 150 + Math.random() * 100,
-                    rot: Math.random() * Math.PI * 2
-                });
+        triggerGameOver: function() {
+            this.state = 'GAMEOVER'; AudioEngine.stop();
+            setTimeout(() => { if(window.System.gameOver) window.System.gameOver(this.score, true, Math.floor(this.score/50)); else window.System.home(); }, 3000);
+        },
+
+        spawnParticles: function(x, y, z, color, count) {
+            for(let i=0; i<count; i++) {
+                this.particles.push({ x: x, y: y, z: z, vx: (Math.random()-0.5)*2000, vy: (Math.random()-0.5)*2000, vz: (Math.random()-0.5)*2000, life: 1.0, c: color });
             }
         },
 
-        checkCollisions: function() {
-            for (let i = this.lasers.length - 1; i >= 0; i--) {
-                let l = this.lasers[i];
-                let hit = false;
-
-                for (let j = this.entities.length - 1; j >= 0; j--) {
-                    let e = this.entities[j];
-                    // Colisão 3D básica
-                    if (Math.abs(l.z - e.z) < 200 && Math.abs(l.x - e.x) < e.size && Math.abs(l.y - e.y) < e.size) {
-                        e.hp -= 25;
-                        hit = true;
-                        
-                        // Faiscas do impacto
-                        for(let k=0; k<5; k++) {
-                            this.particles.push({
-                                x: e.x, y: e.y, z: e.z,
-                                vx: (Math.random()-0.5)*500, vy: (Math.random()-0.5)*500, vz: -500,
-                                life: 1, color: '#f1c40f'
-                            });
-                        }
-
-                        if (e.hp <= 0) {
-                            FlightAudio.playExplosion();
-                            this.score += (e.type === 'ship' ? 100 : 50);
-                            
-                            // Explosão Grande
-                            for(let k=0; k<20; k++) {
-                                this.particles.push({
-                                    x: e.x, y: e.y, z: e.z,
-                                    vx: (Math.random()-0.5)*1000, vy: (Math.random()-0.5)*1000, vz: (Math.random()-0.5)*1000,
-                                    life: 1.5, color: e.type === 'ship' ? '#e74c3c' : '#95a5a6'
-                                });
-                            }
-                            this.entities.splice(j, 1);
-                        }
-                        break; // Um laser acerta apenas num alvo
-                    }
-                }
-                if (hit) this.lasers.splice(i, 1);
-            }
-        },
-
-        // --- RENDERIZAÇÃO GRÁFICA ---
+        // --- RENDERIZADORES 4K (Desenho Geométrico Avançado) ---
         renderWorld: function(ctx, w, h) {
-            // Fundo / Espaço
-            ctx.fillStyle = '#050510';
-            ctx.fillRect(0, 0, w, h);
+            // Fundo Espacial com Gradiente Profundo
+            let bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+            bgGrad.addColorStop(0, '#02000a'); bgGrad.addColorStop(1, '#0a0022');
+            ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, w, h);
 
-            // Rotação Global do Ecrã (Roll)
-            ctx.translate(w/2, h/2);
-            ctx.rotate(this.ship.roll * Math.PI / 180);
-            ctx.translate(-w/2, -h/2);
+            // Rotação visual da câmara (Roll)
+            ctx.translate(w/2, h/2); ctx.rotate(this.ship.roll); ctx.translate(-w/2, -h/2);
 
-            // Grelha de Movimento (Estilo Synthwave/Retro 3D)
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.15)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            const gridY = 1000; // Posição do chão
-            for (let i = -5; i <= 5; i++) {
-                let p1 = this.project3D(i * 400, gridY, 100, w, h);
-                let p2 = this.project3D(i * 400, gridY, CONF.RENDER_DIST, w, h);
-                if (p1.visible && p2.visible) {
-                    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-                }
-            }
-            // Linhas horizontais da grelha que se movem
-            let zOffset = (this.score % 100) * 10;
-            for (let i = 0; i < 20; i++) {
-                let zPos = i * 250 - zOffset;
-                if (zPos > 0) {
-                    let p1 = this.project3D(-2000, gridY, zPos, w, h);
-                    let p2 = this.project3D(2000, gridY, zPos, w, h);
-                    if (p1.visible && p2.visible) {
-                        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-                    }
-                }
-            }
-            ctx.stroke();
-
-            // Estrelas
-            ctx.fillStyle = '#ffffff';
-            this.stars.forEach(s => {
-                let p = this.project3D(s.x, s.y, s.z, w, h);
+            // Desenhar Terreno (Grelha Tron/Synthwave)
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)'; ctx.lineWidth = 1.5;
+            this.terrain.forEach(t => {
+                let p = Math3D.project(t.x, t.y, t.z, w, h);
                 if (p.visible) {
-                    ctx.globalAlpha = p.s * 1.5;
-                    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.5, p.s * 15), 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = `rgba(0, 255, 255, ${p.s})`;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 10 * p.s), 0, Math.PI*2); ctx.fill();
                 }
             });
-            ctx.globalAlpha = 1.0;
 
-            // Ordenar Entidades e Partículas por Z (Para desenhar as de trás primeiro)
+            // Preparar Lista Z-Buffer
             let drawables = [];
-            this.entities.forEach(e => drawables.push({ type: 'entity', obj: e, z: e.z }));
+            this.entities.forEach(e => drawables.push({ type: e.type, obj: e, z: e.z }));
             this.lasers.forEach(l => drawables.push({ type: 'laser', obj: l, z: l.z }));
             this.particles.forEach(p => drawables.push({ type: 'particle', obj: p, z: p.z }));
-            
             drawables.sort((a, b) => b.z - a.z);
 
             drawables.forEach(d => {
-                if (d.z <= 0) return;
-                const p = this.project3D(d.obj.x, d.obj.y, d.obj.z, w, h);
+                let obj = d.obj;
+                let p = Math3D.project(obj.x, obj.y, obj.z, w, h);
                 if (!p.visible) return;
 
-                if (d.type === 'entity') {
-                    const e = d.obj;
-                    const size = e.size * p.s;
-                    ctx.save();
-                    ctx.translate(p.x, p.y);
-                    ctx.rotate(e.rot + (this.score * 0.01));
-                    
-                    if (e.type === 'asteroid') {
-                        ctx.fillStyle = '#7f8c8d';
-                        ctx.beginPath();
-                        ctx.moveTo(-size, 0); ctx.lineTo(-size*0.5, -size);
-                        ctx.lineTo(size*0.8, -size*0.8); ctx.lineTo(size, 0);
-                        ctx.lineTo(size*0.5, size); ctx.lineTo(-size*0.5, size*0.8);
-                        ctx.closePath(); ctx.fill();
-                        // Detalhes sombra
-                        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                        ctx.beginPath(); ctx.arc(-size*0.2, -size*0.2, size*0.3, 0, Math.PI); ctx.fill();
-                    } 
-                    else if (e.type === 'ship') {
-                        // Nave Inimiga (Triângulo ameaçador)
-                        ctx.fillStyle = '#c0392b';
-                        ctx.shadowBlur = 15 * p.s; ctx.shadowColor = '#ff0000';
-                        ctx.beginPath();
-                        ctx.moveTo(0, size);      // Bico apontado para o jogador
-                        ctx.lineTo(size, -size);
-                        ctx.lineTo(0, -size*0.5);
-                        ctx.lineTo(-size, -size);
-                        ctx.closePath(); ctx.fill();
-                        ctx.shadowBlur = 0;
-                    }
-                    ctx.restore();
+                if (d.type === 'fighter') {
+                    this.draw3DShip(ctx, p.x, p.y, p.s * obj.size, obj.rotZ);
                 } 
+                else if (d.type === 'obstacle') {
+                    this.draw3DAsteroid(ctx, p.x, p.y, p.s * obj.size, obj.rotZ);
+                }
                 else if (d.type === 'laser') {
-                    ctx.fillStyle = '#00ffff';
-                    ctx.shadowBlur = 20 * p.s; ctx.shadowColor = '#00ffff';
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, Math.max(2, 20 * p.s), 0, Math.PI*2);
-                    ctx.fill();
-                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#00ffcc'; ctx.shadowBlur = 15; ctx.shadowColor = '#00ffcc';
+                    ctx.beginPath(); ctx.ellipse(p.x, p.y, Math.max(2, 20*p.s), Math.max(2, 60*p.s), 0, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
                 }
                 else if (d.type === 'particle') {
-                    ctx.globalAlpha = Math.max(0, d.obj.life);
-                    ctx.fillStyle = d.obj.color;
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, Math.max(1, 15 * p.s), 0, Math.PI*2);
-                    ctx.fill();
+                    ctx.globalAlpha = Math.max(0, obj.life);
+                    ctx.fillStyle = obj.c; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 30*p.s), 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1.0;
                 }
             });
 
-            // Flash de Dano
-            if (this.hitFlash > 0) {
-                ctx.fillStyle = `rgba(255, 0, 0, ${this.hitFlash * 0.5})`;
-                ctx.fillRect(-w, -h, w*3, h*3);
-                this.hitFlash -= 0.05;
-            }
+            // Resetar Rotação para a UI
+            ctx.translate(w/2, h/2); ctx.rotate(-this.ship.roll); ctx.translate(-w/2, -h/2);
+        },
 
-            // Desfazer Roll global para renderizar o UI estático
-            ctx.translate(w/2, h/2);
-            ctx.rotate(-this.ship.roll * Math.PI / 180);
-            ctx.translate(-w/2, -h/2);
+        draw3DShip: function(ctx, cx, cy, s, rot) {
+            ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+            // Asa Direita
+            ctx.fillStyle = '#8e44ad'; ctx.beginPath(); ctx.moveTo(0, -s*0.2); ctx.lineTo(s, s*0.5); ctx.lineTo(0, s); ctx.fill();
+            // Asa Esquerda
+            ctx.fillStyle = '#9b59b6'; ctx.beginPath(); ctx.moveTo(0, -s*0.2); ctx.lineTo(-s, s*0.5); ctx.lineTo(0, s); ctx.fill();
+            // Corpo Central
+            ctx.fillStyle = '#ff003c'; ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(s*0.3, s*0.8); ctx.lineTo(-s*0.3, s*0.8); ctx.fill();
+            // Motor Glore
+            ctx.shadowBlur = 20; ctx.shadowColor = '#00ffff'; ctx.fillStyle = '#00ffff';
+            ctx.beginPath(); ctx.arc(0, s*0.8, s*0.2, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        },
+
+        draw3DAsteroid: function(ctx, cx, cy, s, rot) {
+            ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+            ctx.fillStyle = '#34495e'; ctx.beginPath();
+            ctx.moveTo(-s, 0); ctx.lineTo(-s*0.5, -s); ctx.lineTo(s*0.8, -s*0.8); ctx.lineTo(s, 0); ctx.lineTo(s*0.6, s); ctx.lineTo(-s*0.5, s*0.8);
+            ctx.closePath(); ctx.fill();
+            // Textura/Luzes
+            ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.moveTo(-s*0.5, -s); ctx.lineTo(s*0.8, -s*0.8); ctx.lineTo(s*0.2, 0); ctx.fill();
+            ctx.restore();
         },
 
         renderCockpit: function(ctx, w, h) {
-            // Mira no centro do ecrã
-            const cx = w / 2; const cy = h / 2 - 50;
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - 40, cy); ctx.lineTo(cx + 40, cy); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx, cy - 40); ctx.lineTo(cx, cy + 40); ctx.stroke();
+            // Overlay do Vidro do Cockpit
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 10;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w*0.2, h*0.2); ctx.lineTo(w*0.8, h*0.2); ctx.lineTo(w, 0); ctx.stroke();
 
-            // Painel Inferior (Cockpit Interior)
-            const panelY = h * 0.75;
-            const grad = ctx.createLinearGradient(0, panelY, 0, h);
-            grad.addColorStop(0, 'rgba(15, 20, 30, 0.9)');
-            grad.addColorStop(1, 'rgba(5, 10, 15, 1)');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.moveTo(0, h); ctx.lineTo(0, panelY + 50);
-            ctx.lineTo(w*0.2, panelY); ctx.lineTo(w*0.8, panelY);
-            ctx.lineTo(w, panelY + 50); ctx.lineTo(w, h);
-            ctx.closePath(); ctx.fill();
-            
-            ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 3; ctx.stroke();
+            // Painel Inferior
+            const panelY = h * 0.7;
+            let pGrad = ctx.createLinearGradient(0, panelY, 0, h);
+            pGrad.addColorStop(0, '#0a0a10'); pGrad.addColorStop(1, '#020205');
+            ctx.fillStyle = pGrad;
+            ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(0, panelY + 50); ctx.lineTo(w*0.15, panelY); ctx.lineTo(w*0.85, panelY); ctx.lineTo(w, panelY + 50); ctx.lineTo(w, h); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 4; ctx.stroke();
 
-            // HUD do Piloto
-            ctx.fillStyle = '#00ffcc'; ctx.font = "bold 20px 'Chakra Petch', Arial"; ctx.textAlign = "left";
-            ctx.fillText(`INTEGRIDADE: ${Math.floor(this.ship.hp)}%`, 20, panelY + 40);
-            
-            // Barra de HP
-            ctx.fillStyle = 'rgba(255,0,0,0.3)'; ctx.fillRect(20, panelY + 50, 200, 15);
-            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c';
-            ctx.fillRect(20, panelY + 50, this.ship.hp * 2, 15);
-
-            ctx.textAlign = "right";
-            ctx.fillText(`ENERGIA TURBO: ${Math.floor(this.ship.energy)}%`, w - 20, panelY + 40);
-            // Barra de Energia
-            ctx.fillStyle = 'rgba(0,100,255,0.3)'; ctx.fillRect(w - 220, panelY + 50, 200, 15);
-            ctx.fillStyle = '#3498db'; ctx.fillRect(w - 20 - (this.ship.energy*2), panelY + 50, this.ship.energy * 2, 15);
-
-            ctx.textAlign = "center"; ctx.fillStyle = "#f1c40f"; ctx.font = "bold 30px 'Russo One'";
-            ctx.fillText(`SCORE: ${Math.floor(this.score)}`, cx, panelY + 45);
-
-            // Botões Virtuais (Atirar e Turbo)
-            const drawBtn = (btn, label, color) => {
-                ctx.fillStyle = btn.pressed ? color : 'rgba(0,0,0,0.5)';
-                ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.stroke();
-                ctx.fillStyle = btn.pressed ? '#fff' : color; ctx.font = "bold 18px Arial"; ctx.fillText(label, btn.x, btn.y + 6);
+            // Ecrãs Holográficos do Dashboard
+            const drawScreen = (sx, sy, sw, sh, color, title, val) => {
+                ctx.fillStyle = `rgba(${color}, 0.1)`; ctx.fillRect(sx, sy, sw, sh);
+                ctx.strokeStyle = `rgba(${color}, 0.5)`; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, sw, sh);
+                ctx.fillStyle = `rgb(${color})`; ctx.font = "bold 14px 'Chakra Petch'"; ctx.fillText(title, sx + 10, sy + 20);
+                ctx.font = "bold 24px 'Russo One'"; ctx.fillText(val, sx + 10, sy + 50);
             };
-            drawBtn(this.buttons.shoot, "ATIRAR", "#e74c3c");
-            drawBtn(this.buttons.boost, "TURBO", "#3498db");
 
-            // Joystick Holográfico Controlado por IA (MoveNet)
-            const joyCenterX = w / 2; const joyCenterY = h * 0.85;
+            drawScreen(w*0.05, panelY + 20, 150, 70, '0, 255, 100', 'INTEGRIDADE', `${Math.floor(this.ship.hp)}%`);
+            drawScreen(w - 200, panelY + 20, 150, 70, '0, 200, 255', 'VELOCIDADE', `${Math.floor(this.score / 10)} k/s`);
+
+            // Radar Central
+            ctx.fillStyle = '#050505'; ctx.beginPath(); ctx.arc(w/2, panelY + 60, 50, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#00ffcc'; ctx.beginPath(); ctx.arc(w/2, panelY + 60, 50, 0, Math.PI*2); ctx.stroke();
+            // Blips do radar
+            this.entities.forEach(e => {
+                let rx = (e.x / 6000) * 45; let ry = -(e.z / 10000) * 45;
+                ctx.fillStyle = e.type === 'fighter' ? '#ff003c' : '#f1c40f';
+                ctx.beginPath(); ctx.arc(w/2 + rx, panelY + 60 + ry, 3, 0, Math.PI*2); ctx.fill();
+            });
+
+            // MANCHE FÍSICO 3D (Joystick)
+            const joy = this.joystick;
+            ctx.shadowBlur = 10; ctx.shadowColor = '#000';
+            // Base Metálica
+            ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(joy.baseX, joy.baseY, 60, 30, 0, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#444'; ctx.lineWidth = 5; ctx.stroke();
             
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.1)';
-            ctx.beginPath(); ctx.arc(joyCenterX, joyCenterY, CONF.JOYSTICK_R, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)'; ctx.lineWidth = 2; ctx.stroke();
+            // Haste
+            ctx.lineWidth = 20; ctx.lineCap = 'round';
+            let gradStick = ctx.createLinearGradient(joy.baseX, joy.baseY, joy.stickX, joy.stickY);
+            gradStick.addColorStop(0, '#111'); gradStick.addColorStop(1, '#555');
+            ctx.strokeStyle = gradStick;
+            ctx.beginPath(); ctx.moveTo(joy.baseX, joy.baseY); ctx.lineTo(joy.stickX, joy.stickY); ctx.stroke();
+            ctx.shadowBlur = 0;
 
-            // Posição do manche dependente da câmara/mão
-            let stickX = joyCenterX; let stickY = joyCenterY;
-            if (this.joystick.active) {
-                // Limitar o desenho visual do manche ao círculo base
-                let dx = this.joystick.x - joyCenterX;
-                let dy = this.joystick.y - joyCenterY;
-                let dist = Math.hypot(dx, dy);
-                if (dist > CONF.JOYSTICK_R) {
-                    stickX = joyCenterX + (dx / dist) * CONF.JOYSTICK_R;
-                    stickY = joyCenterY + (dy / dist) * CONF.JOYSTICK_R;
-                } else {
-                    stickX = this.joystick.x;
-                    stickY = this.joystick.y;
-                }
-            } else {
-                // Retorna ao centro se não houver mão
-                ctx.fillStyle = '#fff'; ctx.font = "12px Arial";
-                ctx.fillText("APONTE A MÃO PARA GUIAR", joyCenterX, joyCenterY - CONF.JOYSTICK_R - 10);
+            // Cabeça do Manche
+            let knobGrad = ctx.createRadialGradient(joy.stickX - 10, joy.stickY - 10, 5, joy.stickX, joy.stickY, 35);
+            knobGrad.addColorStop(0, '#fff'); knobGrad.addColorStop(0.3, '#e74c3c'); knobGrad.addColorStop(1, '#800000');
+            ctx.fillStyle = knobGrad;
+            ctx.beginPath(); ctx.arc(joy.stickX, joy.stickY, 35, 0, Math.PI*2); ctx.fill();
+            // Anel Brilhante se Ativo
+            if (this.pilotArms.right.active) {
+                ctx.shadowBlur = 15; ctx.shadowColor = '#ff003c'; ctx.strokeStyle = '#ff003c'; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(joy.stickX, joy.stickY, 35, 0, Math.PI*2); ctx.stroke(); ctx.shadowBlur = 0;
             }
 
-            // Haste do manche
-            ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 15; ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(joyCenterX, h); ctx.lineTo(stickX, stickY); ctx.stroke();
-            
-            // Cabeça do manche brilhante
-            ctx.fillStyle = this.joystick.active ? '#00ffff' : '#555555';
-            ctx.shadowBlur = this.joystick.active ? 20 : 0; ctx.shadowColor = '#00ffff';
-            ctx.beginPath(); ctx.arc(stickX, stickY, 25, 0, Math.PI*2); ctx.fill();
-            ctx.shadowBlur = 0;
+            // BOTÕES HOLOGRÁFICOS (Painel Esquerdo)
+            const drawHoloBtn = (btn, icon, color) => {
+                ctx.fillStyle = btn.pressed ? `rgba(${color}, 0.5)` : `rgba(${color}, 0.1)`;
+                ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = `rgb(${color})`; ctx.lineWidth = btn.pressed ? 6 : 2;
+                if (btn.pressed) { ctx.shadowBlur = 20; ctx.shadowColor = `rgb(${color})`; }
+                ctx.stroke(); ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = "bold 24px Arial"; ctx.fillText(icon, btn.x, btn.y + 8);
+            };
+            drawHoloBtn(this.dashboard.shootBtn, "💥 ATIRAR", "255, 0, 60");
         },
 
-        renderGameOver: function(ctx, w, h) {
-            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = "#e74c3c"; ctx.textAlign = "center"; ctx.font = "bold 60px 'Russo One'";
-            ctx.fillText("NAVE DESTRUÍDA", w/2, h/2 - 20);
-            ctx.fillStyle = "#f1c40f"; ctx.font = "bold 30px Arial";
-            ctx.fillText(`SCORE FINAL: ${Math.floor(this.score)}`, w/2, h/2 + 40);
-        },
+        renderPilotArms: function(ctx, w, h) {
+            // Renderiza o braço mecânico do fato espacial projetado até ao volante
+            const drawArm = (wristX, wristY, isRight) => {
+                const shoulderX = isRight ? w * 0.9 : w * 0.1;
+                const shoulderY = h + 100; // Ombro fora do ecrã
+                // Calcula um cotovelo falso (IK simples)
+                const elbowX = shoulderX + (wristX - shoulderX) * 0.6 + (isRight ? 100 : -100);
+                const elbowY = shoulderY + (wristY - shoulderY) * 0.6 + 50;
 
-        gameOver: function() {
-            this.state = 'GAMEOVER';
-            FlightAudio.stopEngine();
-            setTimeout(() => {
-                if (window.System && window.System.gameOver) {
-                    window.System.gameOver(this.score, true, Math.floor(this.score / 100)); // Win=true só pra dar recompensa, converte score em moedas
-                } else {
-                    window.System.home();
-                }
-            }, 3000);
+                ctx.shadowBlur = 10; ctx.shadowColor = '#000';
+                
+                // Segmento Ombro -> Cotovelo
+                ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 45; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                ctx.beginPath(); ctx.moveTo(shoulderX, shoulderY); ctx.lineTo(elbowX, elbowY); ctx.stroke();
+                // Detalhe laranja (Neon Suit)
+                ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 15; ctx.stroke();
+
+                // Segmento Cotovelo -> Pulso
+                ctx.strokeStyle = '#34495e'; ctx.lineWidth = 35;
+                ctx.beginPath(); ctx.moveTo(elbowX, elbowY); ctx.lineTo(wristX, wristY); ctx.stroke();
+                ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 10; ctx.stroke();
+
+                // Junta do Cotovelo
+                ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(elbowX, elbowY, 25, 0, Math.PI*2); ctx.fill();
+                
+                // Mão/Luva
+                ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(wristX, wristY, 30, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = isRight ? '#e74c3c' : '#00ffcc'; ctx.beginPath(); ctx.arc(wristX, wristY, 15, 0, Math.PI*2); ctx.fill();
+                ctx.shadowBlur = 0;
+            };
+
+            if (this.pilotArms.right.active) drawArm(this.pilotArms.right.x, this.pilotArms.right.y, true);
+            if (this.pilotArms.left.active) drawArm(this.pilotArms.left.x, this.pilotArms.left.y, false);
         }
     };
 
-    // Registar o jogo no Sistema Principal do ThIAguinho OS
+    // Registar no Sistema Principal
     const regLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
-            window.System.registerGame('flight_sim', 'Star Wing AR', '🚀', Game, {
-                camera: 'user', // Usar a câmara frontal para ver o jogador
-                phases: [
-                    { id: 'arcade', name: 'SOBREVIVÊNCIA', desc: 'Pilote pelo espaço e destrua asteroides!', reqLvl: 1 }
-                ]
+            window.System.registerGame('flight_sim', 'Star Wing 4K', '🚀', Game, {
+                camera: 'user', // Câmara frontal
+                phases: [ { id: 'arcade', name: 'SOBREVIVÊNCIA 3D', desc: 'Pilote na cabine. A mão direita no Manche, a esquerda nos comandos!', reqLvl: 1 } ]
             });
             clearInterval(regLoop);
         }
