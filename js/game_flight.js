@@ -1,7 +1,7 @@
 // =============================================================================
-// AERO STRIKE AR: YOKE COMBAT SIMULATOR (MINORITY REPORT EDITION)
+// AERO STRIKE AR: FULL YOKE COMBAT SIMULATOR
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT & PARCEIRO DE PROGRAMAÇÃO
-// STATUS: TRUE ATMOSPHERIC 3D, DUAL-HAND YOKE, HOLOGRAPHIC WEAPONS, LOCK-ON
+// STATUS: TRUE ATMOSPHERIC 3D, DUAL-HAND YOKE, THUMB-TRIGGER ZONES, HOTAS
 // =============================================================================
 
 (function() {
@@ -93,23 +93,18 @@
         
         ship: { 
             hp: 100, speed: 400, targetSpeed: 400, altitude: 6000, heading: 0, 
-            pitch: 0, yaw: 0, roll: 0, worldX: 0, worldZ: 0 
+            pitch: 0, yaw: 0, roll: 0, worldX: 0, worldZ: 0, throttlePct: 0.5
         },
         
         entities: [], bullets: [], missiles: [], clouds: [], particles: [],
         
-        // Manche Central (Yoke) e Painel Holográfico
+        // Manche Central (Yoke) com Gatilhos de Dedão Integrados
         yoke: {
-            baseX: 0, baseY: 0, // Definido dinamicamente no render
-            yOffset: 0,         // Empurrar/Puxar o manche (Pitch)
-            angle: 0,           // Rotação do manche (Roll)
-            isLeftHolding: false, isRightHolding: false
-        },
-        
-        mfd: {
-            vulcanBtn: { x: 0, y: 0, r: 50, pressed: false },
-            missileBtn: { x: 0, y: 0, r: 50, pressed: false },
-            throttleSlider: { x: 0, y: 0, w: 40, h: 200, val: 0.7 }
+            baseX: 0, baseY: 0, 
+            yOffset: 0,         
+            angle: 0,           
+            isLeftHolding: false, isRightHolding: false,
+            leftBtnPressed: false, rightBtnPressed: false // Os botões de dedão
         },
         
         arms: { left: { x:0, y:0, active:false }, right: { x:0, y:0, active:false } },
@@ -119,7 +114,7 @@
         init: function() {
             this.state = 'PLAYING'; this.lastTime = performance.now();
             this.mission.targetsDestroyed = 0;
-            this.ship = { hp: 100, speed: 400, targetSpeed: 400, altitude: 6000, heading: 0, pitch: 0, yaw: 0, roll: 0, worldX: 0, worldZ: 0 };
+            this.ship = { hp: 100, speed: 400, targetSpeed: 400, altitude: 6000, heading: 0, pitch: 0, yaw: 0, roll: 0, worldX: 0, worldZ: 0, throttlePct: 0.5 };
             this.entities = []; this.bullets = []; this.missiles = []; this.clouds = []; this.particles = [];
             
             for (let i = 0; i < 50; i++) {
@@ -130,22 +125,20 @@
             }
 
             AudioEngine.init(); AudioEngine.startJet();
-            if(window.System && window.System.msg) window.System.msg("OBJETIVO: DESTRUIR 15 ALVOS.");
+            if(window.System && window.System.msg) window.System.msg("MÃOS NO VOLANTE. DESLIZE OS PULSOS PARA OS BOTÕES PARA ATIRAR.");
         },
 
         cleanup: function() { AudioEngine.stop(); },
 
-        // --- TRACKING & INPUT (MOVENET DUAL-HAND) ---
+        // --- TRACKING & INPUT (MOVENET DUAL-HAND YOKE) ---
         processArmTracking: function(pose, w, h) {
-            // Posicionar UI
+            // Posicionar UI Base do Manche
             this.yoke.baseX = w / 2;
             this.yoke.baseY = h * 0.85;
-            this.mfd.vulcanBtn = { x: w * 0.15, y: h * 0.65, r: 55, pressed: false };
-            this.mfd.missileBtn = { x: w * 0.15, y: h * 0.85, r: 55, pressed: false };
-            this.mfd.throttleSlider = { x: w * 0.05, y: h * 0.65, w: 30, h: 200, val: this.mfd.throttleSlider.val };
 
             this.arms.left.active = false; this.arms.right.active = false;
             this.yoke.isLeftHolding = false; this.yoke.isRightHolding = false;
+            this.yoke.leftBtnPressed = false; this.yoke.rightBtnPressed = false;
 
             if (pose && pose.keypoints) {
                 const getKp = (name) => pose.keypoints.find(k => k.name === name);
@@ -154,45 +147,21 @@
                 const mapX = (x) => (1 - (x / 640)) * w;
                 const mapY = (y) => (y / 480) * h;
 
-                // Processar Mão Direita (Sempre no manche)
                 if (rw && rw.score > 0.2) {
                     this.arms.right.active = true;
                     this.arms.right.x = mapX(rw.x); this.arms.right.y = mapY(rw.y);
                     this.yoke.isRightHolding = true;
                 }
 
-                // Processar Mão Esquerda (Pode segurar o manche ou soltar para tocar botões)
                 if (lw && lw.score > 0.2) {
                     this.arms.left.active = true;
                     this.arms.left.x = mapX(lw.x); this.arms.left.y = mapY(lw.y);
-                    
-                    // Se a mão esquerda estiver baixa e perto do centro, está a segurar o manche
-                    if (this.arms.left.y > h * 0.5 && this.arms.left.x > w * 0.25) {
-                        this.yoke.isLeftHolding = true;
-                    } else {
-                        // MINORITY REPORT MODE: Mão livre para tocar painéis
-                        let lx = this.arms.left.x; let ly = this.arms.left.y;
-                        
-                        // Botão Vulcan
-                        if (Math.hypot(lx - this.mfd.vulcanBtn.x, ly - this.mfd.vulcanBtn.y) < this.mfd.vulcanBtn.r) {
-                            this.mfd.vulcanBtn.pressed = true; this.fireVulcan();
-                        }
-                        // Botão Missil
-                        if (Math.hypot(lx - this.mfd.missileBtn.x, ly - this.mfd.missileBtn.y) < this.mfd.missileBtn.r) {
-                            this.mfd.missileBtn.pressed = true; this.fireMissile();
-                        }
-                        // Slider Aceleração
-                        if (lx < w * 0.12 && ly > this.mfd.throttleSlider.y && ly < this.mfd.throttleSlider.y + this.mfd.throttleSlider.h) {
-                            let pct = 1 - ((ly - this.mfd.throttleSlider.y) / this.mfd.throttleSlider.h);
-                            this.mfd.throttleSlider.val = Math.max(0, Math.min(1, pct));
-                            this.ship.targetSpeed = 300 + (this.mfd.throttleSlider.val * 700);
-                        }
-                    }
+                    this.yoke.isLeftHolding = true;
                 }
 
-                // --- LÓGICA DO MANCHE (YOKE) ---
+                // --- FÍSICA E CONTROLOS DO MANCHE (YOKE) ---
                 if (this.yoke.isRightHolding && this.yoke.isLeftHolding) {
-                    // DUAS MÃOS: Inclinação e Rotação precisas
+                    // 1. DINÂMICA DE VOO (Inclinação e Rotação)
                     let midY = (this.arms.right.y + this.arms.left.y) / 2;
                     let dy = this.arms.right.y - this.arms.left.y;
                     let dx = this.arms.right.x - this.arms.left.x;
@@ -200,27 +169,63 @@
                     this.yoke.angle = Math.atan2(dy, dx);
                     this.yoke.yOffset = midY - this.yoke.baseY;
 
-                } else if (this.yoke.isRightHolding) {
-                    // UMA MÃO: Apenas a mão direita guia
-                    let normX = (this.arms.right.x - (w*0.75)) / (w*0.25); // Direita controla roll movendo pros lados
+                    // 2. CONTROLO DE ACELERAÇÃO (Afastar/Aproximar as mãos)
+                    let handDist = Math.hypot(dx, dy);
+                    // Distância entre 100px (Travagem) e 350px (Turbo)
+                    this.ship.throttlePct = Math.max(0, Math.min(1, (handDist - 100) / 250));
+                    this.ship.targetSpeed = 300 + (this.ship.throttlePct * 700);
+
+                } else if (this.yoke.isRightHolding || this.yoke.isLeftHolding) {
+                    // Controlo com uma mão (Emergência/Auto-estabiliza parcial)
+                    let activeHand = this.yoke.isRightHolding ? this.arms.right : this.arms.left;
+                    let normX = (activeHand.x - this.yoke.baseX) / (w/3); 
                     this.yoke.angle = normX * (Math.PI / 4);
-                    this.yoke.yOffset = this.arms.right.y - this.yoke.baseY;
+                    this.yoke.yOffset = activeHand.y - this.yoke.baseY;
                 } else {
                     // NENHUMA MÃO: Retorno ao centro
                     this.yoke.angle *= 0.9;
                     this.yoke.yOffset *= 0.9;
                 }
 
-                // Converter movimento do Yoke para Física do Avião
-                // Limitar yOffset
+                // Limitar curso do manche
                 this.yoke.yOffset = Math.max(-150, Math.min(150, this.yoke.yOffset));
                 
-                let targetRoll = this.yoke.angle; // Roda o avião
-                let targetPitch = (this.yoke.yOffset / 150) * (Math.PI / 3); // Sobe/Desce
+                // Converter Yoke -> Aeronave
+                let targetRoll = this.yoke.angle;
+                let targetPitch = (this.yoke.yOffset / 150) * (Math.PI / 3);
 
                 this.ship.roll += (targetRoll - this.ship.roll) * 0.1;
                 this.ship.pitch += (targetPitch - this.ship.pitch) * 0.05;
-                this.ship.yaw -= this.ship.roll * 0.02; // Guinar com a curva
+                this.ship.yaw -= this.ship.roll * 0.02;
+
+                // --- 3. GATILHOS DE DEDÃO (THUMB TRIGGERS) ---
+                // Calcular posição exata (absoluta) dos botões no ecrã com a rotação do manche
+                let drawYokeY = this.yoke.baseY + this.yoke.yOffset;
+                let cosA = Math.cos(this.yoke.angle);
+                let sinA = Math.sin(this.yoke.angle);
+
+                // Posição local do botão Esquerdo (Missil) no volante
+                let lbx = -100; let lby = -50;
+                let absLeftBtnX = this.yoke.baseX + (lbx * cosA - lby * sinA);
+                let absLeftBtnY = drawYokeY + (lbx * sinA + lby * cosA);
+
+                // Posição local do botão Direito (Vulcan) no volante
+                let rbx = 100; let rby = -50;
+                let absRightBtnX = this.yoke.baseX + (rbx * cosA - rby * sinA);
+                let absRightBtnY = drawYokeY + (rbx * sinA + rby * cosA);
+
+                // Verificar colisão do pulso com o botão virtual para disparar
+                const TRIGGER_RADIUS = 60;
+
+                if (this.yoke.isLeftHolding && Math.hypot(this.arms.left.x - absLeftBtnX, this.arms.left.y - absLeftBtnY) < TRIGGER_RADIUS) {
+                    this.yoke.leftBtnPressed = true;
+                    this.fireMissile();
+                }
+
+                if (this.yoke.isRightHolding && Math.hypot(this.arms.right.x - absRightBtnX, this.arms.right.y - absRightBtnY) < TRIGGER_RADIUS) {
+                    this.yoke.rightBtnPressed = true;
+                    this.fireVulcan();
+                }
 
             } else {
                 this.yoke.angle *= 0.9; this.yoke.yOffset *= 0.9;
@@ -245,7 +250,7 @@
             const now = performance.now();
             if (now - this.lastMissileTime > 1500) {
                 this.lastMissileTime = now;
-                // Se houver um alvo trancado (currentTarget), o míssil persegue-o
+                // Se houver um alvo trancado, persegue
                 this.missiles.push({ x: -150, y: 50, z: 0, vz: 1500, target: this.currentTarget, life: 6.0 });
                 this.missiles.push({ x:  150, y: 50, z: 0, vz: 1500, target: this.currentTarget, life: 6.0 });
                 AudioEngine.fireMissile();
@@ -271,9 +276,9 @@
 
             this.processArmTracking(pose, w, h);
             
-            // Física Básica
+            // Física Básica e Áudio
             this.ship.speed += (this.ship.targetSpeed - this.ship.speed) * dt;
-            AudioEngine.updateThrottle(this.mfd.throttleSlider.val);
+            AudioEngine.updateThrottle(this.ship.throttlePct);
             
             let speedZ = this.ship.speed * dt * 25;
             this.ship.worldZ += speedZ * Math.cos(this.ship.yaw);
@@ -299,19 +304,17 @@
             let closestDist = Infinity;
             for (let e of this.entities) {
                 let relZ = e.z - this.ship.worldZ; let relX = e.x - this.ship.worldX; let relY = e.y - this.ship.altitude;
-                // Se o inimigo estiver à frente e relativamente centrado
+                
                 if (relZ > 2000 && relZ < 15000 && Math.abs(relX) < 2000 && Math.abs(relY) < 2000) {
                     if (relZ < closestDist) { closestDist = relZ; this.currentTarget = e; }
                 }
                 
-                // Atualizar posição do inimigo
                 e.x += e.vx * dt; e.z += e.vz * dt;
                 if (e.x > this.ship.worldX + 5000) e.vx -= 800 * dt;
                 if (e.x < this.ship.worldX - 5000) e.vx += 800 * dt;
 
-                if (relZ < -2000) { e.hp = -1; continue; } // Passou
+                if (relZ < -2000) { e.hp = -1; continue; } 
 
-                // Inimigo Atira
                 if (Math.random() < 0.015 && relZ > 1000 && relZ < 6000 && Math.abs(relX) < 1500) {
                      this.bullets.push({ x: relX, y: relY, z: relZ, vz: -4000, isEnemy: true, life: 2.5 });
                 }
@@ -349,14 +352,12 @@
                 m.vz += 1500 * dt; 
                 m.z += m.vz * dt; m.life -= dt;
                 
-                // Rasto de fumo espesso do míssil
                 this.particles.push({ x: m.x, y: m.y, z: m.z, vx: (Math.random()-0.5)*100, vy: (Math.random()-0.5)*100, vz: -m.vz*0.2, life: 1.0, c: 'rgba(200,200,200,0.6)', size: 60 });
-                // Fogo do propulsor
                 this.particles.push({ x: m.x, y: m.y, z: m.z, vx: 0, vy: 0, vz: -m.vz*0.1, life: 0.2, c: '#e67e22', size: 40 });
 
                 if (m.target && m.target.hp > 0) {
                     let relX = m.target.x - this.ship.worldX; let relY = m.target.y - this.ship.altitude; let relZ = m.target.z - this.ship.worldZ;
-                    m.x += (relX - m.x) * 6 * dt; m.y += (relY - m.y) * 6 * dt; // Perseguição Homing
+                    m.x += (relX - m.x) * 6 * dt; m.y += (relY - m.y) * 6 * dt; // Perseguição
                     
                     if (Math.abs(m.z - relZ) < 600 && Math.abs(m.x - relX) < 500) {
                         m.target.hp -= 150; m.life = 0;
@@ -366,19 +367,16 @@
                 if (m.life <= 0) this.missiles.splice(i, 1);
             }
 
-            // Nuvens
             for (let c of this.clouds) {
                 if (c.z - this.ship.worldZ < -5000) { c.z += 35000; c.x = this.ship.worldX + (Math.random()-0.5)*30000; }
             }
 
-            // Atualizar Partículas
             for (let i = this.particles.length - 1; i >= 0; i--) {
                 let p = this.particles[i];
                 p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.life -= dt;
                 if (p.life <= 0) this.particles.splice(i, 1);
             }
 
-            // RENDERIZAÇÃO
             ctx.save();
             if (this.shake > 0) { ctx.translate((Math.random()-0.5)*this.shake, (Math.random()-0.5)*this.shake); this.shake *= 0.9; }
             this.renderWorld(ctx, w, h);
@@ -392,8 +390,8 @@
 
         destroyTarget: function(target, rx, ry, rz) {
             AudioEngine.explode();
-            this.spawnParticles(rx, ry, rz, '#e74c3c', 30, 100); // Explosão de fogo
-            this.spawnParticles(rx, ry, rz, '#34495e', 20, 150); // Fumo
+            this.spawnParticles(rx, ry, rz, '#e74c3c', 30, 100); 
+            this.spawnParticles(rx, ry, rz, '#34495e', 20, 150); 
             this.mission.targetsDestroyed++;
             if (this.mission.targetsDestroyed >= this.mission.targetGoal) this.endGame('VICTORY');
         },
@@ -418,7 +416,6 @@
             ctx.translate(w/2, h/2); ctx.rotate(this.ship.roll);
             let horizonY = this.ship.pitch * 1000; 
 
-            // Céu e Terra
             let skyGrad = ctx.createLinearGradient(0, -h, 0, horizonY);
             skyGrad.addColorStop(0, '#00081a'); skyGrad.addColorStop(1, '#4facfe');
             ctx.fillStyle = skyGrad; ctx.fillRect(-w, -h*2, w*2, horizonY + h*2);
@@ -427,7 +424,6 @@
             groundGrad.addColorStop(0, '#1e2c1a'); groundGrad.addColorStop(1, '#0d140a');
             ctx.fillStyle = groundGrad; ctx.fillRect(-w, horizonY, w*2, h*2);
 
-            // Grelha de Movimento
             ctx.strokeStyle = 'rgba(0, 255, 100, 0.1)'; ctx.lineWidth = 2;
             ctx.beginPath();
             let zOffset = (this.ship.worldZ % 2000);
@@ -462,34 +458,28 @@
                 else if (d.type === 'jet') {
                     this.draw3DJet(ctx, p.x, p.y, 450 * p.s, d.obj.rotZ);
                     
-                    // UI de Inimigo / HUD Lock-on
                     if (d.obj === this.currentTarget) {
-                        ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3;
-                        let s = 80;
-                        // Desenhar Retícula de Trancamento
+                        ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3; let s = 80;
                         ctx.beginPath();
                         ctx.moveTo(p.x - s, p.y - s/2); ctx.lineTo(p.x - s, p.y - s); ctx.lineTo(p.x - s/2, p.y - s);
                         ctx.moveTo(p.x + s, p.y - s/2); ctx.lineTo(p.x + s, p.y - s); ctx.lineTo(p.x + s/2, p.y - s);
                         ctx.moveTo(p.x - s, p.y + s/2); ctx.lineTo(p.x - s, p.y + s); ctx.lineTo(p.x - s/2, p.y + s);
                         ctx.moveTo(p.x + s, p.y + s/2); ctx.lineTo(p.x + s, p.y + s); ctx.lineTo(p.x + s/2, p.y + s);
                         ctx.stroke();
-                        ctx.fillStyle = '#e74c3c'; ctx.font = "bold 14px Arial"; ctx.fillText("LOCKED", p.x - 30, p.y + s + 20);
+                        ctx.fillStyle = '#e74c3c'; ctx.textAlign = 'center'; ctx.font = "bold 14px Arial"; ctx.fillText("LOCKED", p.x, p.y + s + 20);
                     } else {
                         ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 1;
                         ctx.strokeRect(p.x - 40, p.y - 40, 80, 80);
                     }
                 }
                 else if (d.type === 'bullet') {
-                    // Balas Gigantes e brilhantes (Tracers)
                     ctx.fillStyle = d.obj.isEnemy ? '#ff0000' : '#ffff00';
                     ctx.shadowBlur = 20; ctx.shadowColor = ctx.fillStyle;
                     ctx.beginPath(); ctx.ellipse(p.x, p.y, Math.max(2, 10 * p.s), Math.max(2, 60 * p.s), 0, 0, Math.PI*2); ctx.fill();
                     ctx.shadowBlur = 0;
                 }
                 else if (d.type === 'missile') {
-                    // Míssil
-                    ctx.fillStyle = '#fff';
-                    ctx.fillRect(p.x - 15*p.s, p.y - 15*p.s, 30*p.s, 30*p.s);
+                    ctx.fillStyle = '#fff'; ctx.fillRect(p.x - 15*p.s, p.y - 15*p.s, 30*p.s, 30*p.s);
                 }
                 else if (d.type === 'particle') {
                     ctx.globalAlpha = Math.max(0, d.obj.life);
@@ -512,10 +502,9 @@
         },
 
         renderCockpit: function(ctx, w, h) {
-            // --- 1. HUD MILITAR ---
+            // --- HUD ---
             ctx.save(); ctx.translate(w/2, h/2); ctx.rotate(this.ship.roll);
             let hudPitchY = this.ship.pitch * 500; 
-
             ctx.strokeStyle = '#00ff00'; ctx.fillStyle = '#00ff00'; ctx.lineWidth = 2; ctx.font = "14px 'Chakra Petch'";
             for (let i = -3; i <= 3; i++) {
                 if(i === 0) continue;
@@ -525,7 +514,6 @@
             }
             ctx.restore(); 
 
-            // Crosshair e Tapes
             ctx.strokeStyle = '#00ff00'; ctx.fillStyle = '#00ff00'; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(w/2, h/2, 20, 0, Math.PI*2); ctx.stroke(); ctx.beginPath(); ctx.arc(w/2, h/2, 2, 0, Math.PI*2); ctx.fill();
 
@@ -535,12 +523,11 @@
             ctx.textAlign = "center"; ctx.fillStyle = "#f1c40f"; ctx.font = "bold 24px 'Russo One'";
             ctx.fillText(`ALVOS: ${this.mission.targetsDestroyed} / ${this.mission.targetGoal}`, w/2, h*0.1);
 
-            // --- 2. PAINEL DO TABLIER ---
+            // --- TABLIER ---
             const panelY = h * 0.8;
             ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(0, panelY); ctx.lineTo(w, panelY); ctx.lineTo(w, h); ctx.fill();
             ctx.strokeStyle = '#333'; ctx.lineWidth = 5; ctx.stroke();
 
-            // Radar
             ctx.fillStyle = '#051a05'; ctx.beginPath(); ctx.arc(w*0.85, panelY + 60, 60, 0, Math.PI*2); ctx.fill();
             ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2; ctx.stroke();
             this.entities.forEach(e => {
@@ -548,7 +535,13 @@
                 if(Math.hypot(rx, rz) < 60) { ctx.fillStyle = '#f00'; ctx.fillRect(w*0.85 + rx, panelY + 60 - rz, 5, 5); }
             });
 
-            // --- 3. MANCHE DUPLO (YOKE) CENTRAL ---
+            // Barra de Velocidade (Aceleração Física com os braços)
+            ctx.fillStyle = '#222'; ctx.fillRect(w*0.15, panelY + 20, 150, 20);
+            ctx.fillStyle = '#3498db'; ctx.fillRect(w*0.15, panelY + 20, 150 * this.ship.throttlePct, 20);
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(w*0.15, panelY + 20, 150, 20);
+            ctx.fillStyle = '#fff'; ctx.font = "12px Arial"; ctx.fillText("POTÊNCIA (AFASTE AS MÃOS)", w*0.15 + 75, panelY + 15);
+
+            // --- YOKE (MANCHE DUPLO COM BOTÕES INTEGRADOS) ---
             const yoke = this.yoke;
             let drawYokeY = yoke.baseY + yoke.yOffset;
             
@@ -556,55 +549,43 @@
             ctx.translate(yoke.baseX, drawYokeY);
             ctx.rotate(yoke.angle);
 
-            // Coluna Central do Manche
+            // Coluna Central
             ctx.fillStyle = '#222'; ctx.fillRect(-30, 0, 60, h);
             
-            // Corpo do Volante
+            // Volante
             ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 40; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.beginPath();
-            ctx.moveTo(-150, -60); // Pega Esquerda topo
-            ctx.lineTo(-150, 40);  // Pega Esquerda base
-            ctx.lineTo(-80, 80);   // Centro Esquerdo
-            ctx.lineTo(80, 80);    // Centro Direito
-            ctx.lineTo(150, 40);   // Pega Direita base
-            ctx.lineTo(150, -60);  // Pega Direita topo
+            ctx.moveTo(-150, -60); ctx.lineTo(-150, 40); ctx.lineTo(-80, 80); 
+            ctx.lineTo(80, 80); ctx.lineTo(150, 40); ctx.lineTo(150, -60);
             ctx.stroke();
 
-            // Pegas (Borracha)
+            // Pegas (Onde seguras)
             ctx.strokeStyle = '#444'; ctx.lineWidth = 44;
             ctx.beginPath(); ctx.moveTo(-150, -50); ctx.lineTo(-150, 30); ctx.stroke(); // Esq
             ctx.beginPath(); ctx.moveTo(150, -50); ctx.lineTo(150, 30); ctx.stroke();   // Dir
 
-            // Logotipo Central / Miolo
+            // BOTÃO DO POLEGAR ESQUERDO (MÍSSIL)
+            ctx.fillStyle = this.yoke.leftBtnPressed ? '#fff' : '#e74c3c';
+            ctx.beginPath(); ctx.arc(-100, -50, 25, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.fillStyle = this.yoke.leftBtnPressed ? '#e74c3c' : '#fff'; 
+            ctx.textAlign = 'center'; ctx.font = "bold 12px Arial"; ctx.fillText("MSL", -100, -45);
+
+            // BOTÃO DO POLEGAR DIREITO (VULCAN)
+            ctx.fillStyle = this.yoke.rightBtnPressed ? '#fff' : '#f1c40f';
+            ctx.beginPath(); ctx.arc(100, -50, 25, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#f39c12'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.fillStyle = '#000'; ctx.font = "bold 12px Arial"; ctx.fillText("FIRE", 100, -45);
+
+            // Logotipo Central
             ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(0, 60, 50, 0, Math.PI*2); ctx.fill();
             ctx.strokeStyle = '#555'; ctx.lineWidth = 5; ctx.stroke();
             
             ctx.restore();
-
-            // --- 4. PAINEL HOLOGRÁFICO (MINORITY REPORT MODE) ---
-            // Se a mão esquerda NÃO está a segurar o manche, mostra os botões interativos
-            if (!this.yoke.isLeftHolding) {
-                const drawBtn = (btn, label, color) => {
-                    ctx.fillStyle = btn.pressed ? color : `rgba(0,0,0,0.6)`;
-                    ctx.beginPath(); ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI*2); ctx.fill();
-                    ctx.strokeStyle = color; ctx.lineWidth = btn.pressed ? 6 : 3; ctx.stroke();
-                    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = "bold 16px Arial"; ctx.fillText(label, btn.x, btn.y + 6);
-                };
-                drawBtn(this.mfd.vulcanBtn, "🔥 VULCAN", "#f1c40f");
-                drawBtn(this.mfd.missileBtn, "🚀 MÍSSIL", "#e74c3c");
-
-                // Slider de Aceleração
-                let s = this.mfd.throttleSlider;
-                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(s.x, s.y, s.w, s.h);
-                ctx.strokeStyle = '#00ffcc'; ctx.strokeRect(s.x, s.y, s.w, s.h);
-                let handleY = s.y + (s.h * (1 - s.val));
-                ctx.fillStyle = '#00ffcc'; ctx.fillRect(s.x - 10, handleY - 10, s.w + 20, 20);
-                ctx.fillStyle = '#fff'; ctx.fillText("VELOCIDADE", s.x + 15, s.y - 15);
-            }
         },
 
         renderPilotArms: function(ctx, w, h) {
-            const drawArm = (wristX, wristY, isRight, isHolding) => {
+            const drawArm = (wristX, wristY, isRight, isPressing) => {
                 const shoulderX = isRight ? w * 0.9 : w * 0.1;
                 const shoulderY = h + 150;
                 const elbowX = shoulderX + (wristX - shoulderX) * 0.5 + (isRight ? 100 : -100);
@@ -617,20 +598,24 @@
                 ctx.beginPath(); ctx.moveTo(shoulderX, shoulderY); ctx.lineTo(elbowX, elbowY); ctx.stroke();
                 ctx.lineWidth = 45; ctx.beginPath(); ctx.moveTo(elbowX, elbowY); ctx.lineTo(wristX, wristY); ctx.stroke();
 
-                // Luva
+                // Luva Base
                 ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(wristX, wristY, 35, 0, Math.PI*2); ctx.fill();
                 
-                // Brilho holográfico se a mão estiver "livre" (Minority Report)
-                if (!isHolding && !isRight) {
-                    ctx.shadowBlur = 20; ctx.shadowColor = '#00ffcc'; ctx.fillStyle = '#00ffcc';
-                    ctx.beginPath(); ctx.arc(wristX, wristY, 15, 0, Math.PI*2); ctx.fill();
+                // Representação do Polegar Virtual Esticado
+                if (isPressing) {
+                    ctx.strokeStyle = '#111'; ctx.lineWidth = 18; ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    ctx.moveTo(wristX, wristY);
+                    // Desenha um segmento (o polegar) indo em direção ao interior do volante
+                    ctx.lineTo(wristX + (isRight ? -40 : 40), wristY - 20);
+                    ctx.stroke();
                 }
 
                 ctx.shadowBlur = 0;
             };
 
-            if (this.arms.right.active) drawArm(this.arms.right.x, this.arms.right.y, true, this.yoke.isRightHolding);
-            if (this.arms.left.active) drawArm(this.arms.left.x, this.arms.left.y, false, this.yoke.isLeftHolding);
+            if (this.arms.right.active) drawArm(this.arms.right.x, this.arms.right.y, true, this.yoke.rightBtnPressed);
+            if (this.arms.left.active) drawArm(this.arms.left.x, this.arms.left.y, false, this.yoke.leftBtnPressed);
         }
     };
 
@@ -639,7 +624,7 @@
         if(window.System && window.System.registerGame) {
             window.System.registerGame('flight_sim', 'Aero Strike AR', '🛩️', Game, {
                 camera: 'user',
-                phases: [ { id: 'mission1', name: 'INTERCEÇÃO AÉREA', desc: 'Pilote com as duas mãos no Manche. Solte a esquerda para tocar nos botões de arma!', reqLvl: 1 } ]
+                phases: [ { id: 'mission1', name: 'ZONA DE GATILHO', desc: 'Pilote com as duas mãos! Deslize o pulso para o centro do manche para atirar. Afaste as mãos para acelerar!', reqLvl: 1 } ]
             });
             clearInterval(regLoop);
         }
