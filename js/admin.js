@@ -1,6 +1,6 @@
 /* =================================================================
    PAINEL DE ADMINISTRAÇÃO E GESTÃO DE USUÁRIOS (SISTEMA GLOBAL)
-   STATUS: SUPER GESTOR ATIVADO (ONLINE, DINHEIRO, XP, COMPRAS E PRESENTES)
+   STATUS: SUPER GESTOR ATIVADO (ONLINE DETECTOR FIX)
    ================================================================= */
 
 window.Admin = {
@@ -12,7 +12,6 @@ window.Admin = {
     },
 
     loadUsers: function() {
-        // Busca todos os utilizadores em tempo real na base de dados
         window.DB.ref('users').on('value', snap => {
             const users = snap.val() || {};
             this.renderUsers(users);
@@ -21,9 +20,8 @@ window.Admin = {
 
     renderUsers: function(users) {
         const grid = document.getElementById('admin-user-list');
-        grid.innerHTML = ''; // Limpa a lista
+        grid.innerHTML = ''; 
         
-        // Injeta estilos extras no HTML dinamicamente para os novos botões e informações
         if (!document.getElementById('admin-dynamic-styles')) {
             const style = document.createElement('style');
             style.id = 'admin-dynamic-styles';
@@ -43,52 +41,47 @@ window.Admin = {
         }
 
         const availableGames = window.Games || [];
+        const now = Date.now();
 
         for (let uid in users) {
             const u = users[uid];
-            
-            // TRAVA DE SEGURANÇA REMOVIDA: Agora o Admin aparece na lista normalmente!
-            // if (u.role === 'admin') continue; 
-
             const card = document.createElement('div');
             card.className = 'admin-user-card';
 
-            // Verifica se está Online ou Offline
-            const isOnline = u.status === 'online';
+            // NOVO DETECTOR ONLINE (Considera Online se interagiu nos últimos 60 segundos)
+            let isOnline = u.status === 'online';
+            if (!isOnline && u.lastSeen) {
+                if (now - u.lastSeen < 60000) isOnline = true;
+            }
+
             const statusClass = isOnline ? 'status-online' : 'status-offline';
             const statusTitle = isOnline ? 'Online Agora' : 'Offline';
 
-            // HTML dos Upgrades (Como ele gastou o dinheiro no Caminhão AR/Kart)
             let upgradesHTML = '';
             if (u.arSave && u.arSave.upgrades) {
                 const upg = u.arSave.upgrades;
-                upgradesHTML = `
-                    <div class="admin-badge">Motor V${upg.engine || 1}</div>
+                upgradesHTML += `
+                    <div class="admin-badge">Motor AR V${upg.engine || 1}</div>
                     <div class="admin-badge">Bateria V${upg.battery || 1}</div>
-                    <div class="admin-badge">Radar V${upg.radar || 1}</div>
-                    <div class="admin-badge">Chassi V${upg.chassis || 1}</div>
-                    ${upg.scout ? '<div class="admin-badge" style="background: rgba(155,89,182,0.5); border-color: #9b59b6;">🕵️ Olheiro Ativo</div>' : ''}
                 `;
-            } else {
-                upgradesHTML = `<span style="font-size: 0.8rem; color: #777;">Nenhum item comprado na Oficina.</span>`;
             }
+            if (u.kartSave && u.kartSave.upgrades) {
+                const kUpg = u.kartSave.upgrades;
+                upgradesHTML += `
+                    <div class="admin-badge" style="background:rgba(230,126,34,0.2); border-color:#e67e22;">Kart Motor V${kUpg.engine || 1}</div>
+                    <div class="admin-badge" style="background:rgba(230,126,34,0.2); border-color:#e67e22;">Pneus V${kUpg.tires || 1}</div>
+                `;
+            }
+            if (upgradesHTML === '') upgradesHTML = `<span style="font-size: 0.8rem; color: #777;">Nenhum item comprado.</span>`;
 
-            // Permissões de Jogos
             let togglesHTML = '';
             availableGames.forEach(game => {
                 const hasAccess = u.permissions && u.permissions[game.id] === true;
                 const activeClass = hasAccess ? 'active' : '';
                 const btnText = hasAccess ? `${game.icon} ${game.title}` : `🚫 ${game.title}`;
-                
-                togglesHTML += `
-                    <button class="admin-toggle-btn ${activeClass}" 
-                            onclick="window.Admin.togglePermission('${uid}', '${game.id}', ${hasAccess})">
-                        ${btnText}
-                    </button>
-                `;
+                togglesHTML += `<button class="admin-toggle-btn ${activeClass}" onclick="window.Admin.togglePermission('${uid}', '${game.id}', ${hasAccess})">${btnText}</button>`;
             });
 
-            // Botão de Excluir dinâmico (Protege o Admin de se auto-deletar)
             let deleteBtnHTML = '';
             if (u.role === 'admin') {
                 deleteBtnHTML = `<button class="admin-btn-action btn-delete" style="opacity: 0.5; cursor: not-allowed;" onclick="alert('Sistema: Você não pode excluir a própria conta de Super Gestor!')">🛡️ ADMINISTRAÇÃO</button>`;
@@ -109,18 +102,16 @@ window.Admin = {
                     <span>|</span>
                     <span><strong>XP:</strong> ${u.xp || 0}</span>
                     <span>|</span>
-                    <span style="color: #2ecc71; font-family: 'Russo One'; font-size: 1.1rem; text-shadow: 0 0 10px rgba(46, 204, 113, 0.3);">🪙 R$ ${u.coins || 0}</span>
+                    <span style="color: #2ecc71; font-family: 'Russo One'; font-size: 1.1rem; text-shadow: 0 0 10px rgba(46, 204, 113, 0.3);">🪙 R$ ${(u.coins || 0).toLocaleString()}</span>
                 </div>
 
                 <div style="margin-top: 15px;">
-                    <div style="font-size: 0.75rem; color: #aaa; text-transform: uppercase; margin-bottom: 4px;">Inventário (Compras na Oficina):</div>
-                    <div class="upgrades-list">
-                        ${upgradesHTML}
-                    </div>
+                    <div style="font-size: 0.75rem; color: #aaa; text-transform: uppercase; margin-bottom: 4px;">Inventário:</div>
+                    <div class="upgrades-list">${upgradesHTML}</div>
                 </div>
 
                 <div class="admin-toggles" style="margin-top: 15px;">
-                    <div style="width: 100%; font-size: 0.75rem; color: #aaa; text-transform: uppercase; margin-bottom: 4px;">Permissões de Acesso aos Jogos:</div>
+                    <div style="width: 100%; font-size: 0.75rem; color: #aaa; text-transform: uppercase; margin-bottom: 4px;">Permissões de Acesso:</div>
                     ${togglesHTML}
                 </div>
 
@@ -129,14 +120,12 @@ window.Admin = {
                     ${deleteBtnHTML}
                 </div>
             `;
-
             grid.appendChild(card);
         }
     },
 
     togglePermission: function(uid, gameId, currentState) {
         window.Sfx.click();
-        // Atualiza diretamente no Firebase. A alteração vai propagar e acionar o "loadUsers" novamente
         window.DB.ref(`users/${uid}/permissions/${gameId}`).set(!currentState);
     },
 
@@ -151,18 +140,12 @@ window.Admin = {
         window.Sfx.coin();
         const amountStr = prompt(`Quantos Reais (R$) deseja enviar de presente para a conta de ${username}?\n(Digite apenas números)`);
         if (!amountStr) return;
-        
         const amount = parseInt(amountStr);
-        if (isNaN(amount) || amount <= 0) {
-            alert("Valor inválido. A operação foi cancelada.");
-            return;
-        }
+        if (isNaN(amount) || amount <= 0) { alert("Valor inválido. A operação foi cancelada."); return; }
 
-        // Vai à base de dados, pega o dinheiro atual do utilizador e soma com o presente
         window.DB.ref('users/' + uid + '/coins').once('value').then(snap => {
             const currentCoins = snap.val() || 0;
             const newTotal = currentCoins + amount;
-            
             window.DB.ref('users/' + uid + '/coins').set(newTotal).then(() => {
                 alert(`Sucesso! R$ ${amount} foram depositados na conta de ${username}.`);
                 window.Sfx.epic();
