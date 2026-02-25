@@ -792,7 +792,7 @@
     // Registar no Sistema Principal
     const regLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
-            window.System.registerGame('flight_sim', 'Aero Strike WAR', '🚀', Game, {
+            window.System.registerGame('flight_sim', 'Aero Strike WAR', '🛩️', Game, {
                 camera: 'user', 
                 phases: [ 
                     { id: 'mission1', name: 'TREINO VS. IA', desc: 'Fique em pé! Passo Atrás = Sobe. Passo Frente = Desce. Mira Automática Instântanea. Incline a Cabeça = Míssil!', mode: 'SINGLE', reqLvl: 1 },
