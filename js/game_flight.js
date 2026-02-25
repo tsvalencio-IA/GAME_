@@ -1,39 +1,40 @@
 // =============================================================================
-// AERO STRIKE AR: 6DOF LOOPING & KART-STYLE TRACKING EDITION
+// AERO STRIKE AR: 6DOF COMBAT SIMULATOR (MILITARY YOKE EDITION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT & PARCEIRO DE PROGRAMAÇÃO
-// STATUS: FULL 3D LOOPING, DEPTH-PITCH, FLOATING YOKE, HEAD-MISSILES
+// STATUS: FIXED INVERTED PHYSICS, MILITARY HUD, HD HORIZON, HEAD-TRACKING MISSILES
 // =============================================================================
 
 (function() {
     "use strict";
 
     // -----------------------------------------------------------------
-    // 1. MOTOR 3D & MATEMÁTICA VETORIAL ABSOLUTA (6DOF)
+    // 1. MOTOR 3D & MATEMÁTICA VETORIAL AERONÁUTICA (6DOF)
     // -----------------------------------------------------------------
     const Math3D = {
         fov: 700,
         projectFull: (objX, objY, objZ, camX, camY, camZ, pitch, yaw, w, h) => {
             let dx = objX - camX;
-            let dy = objY - camY;
+            let dy = camY - objY; // Y invertido para o Canvas (Céu = -, Chão = +)
             let dz = objZ - camZ;
 
-            // Rotação Yaw (Eixo Y)
-            let cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+            // Yaw (Rodar a câmara no Eixo Y) - Invertido para a Física Correta
+            let cosY = Math.cos(-yaw), sinY = Math.sin(-yaw);
             let x1 = dx * cosY - dz * sinY;
             let z1 = dx * sinY + dz * cosY;
 
-            // Rotação Pitch (Eixo X) - Suporta loops 360º
+            // Pitch (Subir/Descer o bico no Eixo X)
             let cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-            let y2 = dy * cosP + z1 * sinP;
-            let z2 = -dy * sinP + z1 * cosP;
+            let y2 = dy * cosP - z1 * sinP;
+            let z2 = dy * sinP + z1 * cosP;
 
-            if (z2 < 10) return { visible: false };
+            // Se z2 >= 0, está atrás da câmara
+            if (z2 >= -10) return { visible: false };
 
-            let scale = Math3D.fov / z2;
+            let scale = Math3D.fov / (-z2);
             return {
                 x: (x1 * scale) + (w / 2),
                 y: (y2 * scale) + (h / 2),
-                s: scale, z: z2, visible: true
+                s: scale, z: -z2, visible: true
             };
         }
     };
@@ -94,18 +95,16 @@
         mission: { targetsDestroyed: 0, targetGoal: 30 },
         
         ship: { 
-            hp: 100, speed: 800, // Velocidade Fixa Combate
+            hp: 100, speed: 800, // Velocidade Fixa
             worldX: 0, worldY: 5000, worldZ: 0,
             pitch: 0, yaw: 0, roll: 0
         },
         
         entities: [], bullets: [], missiles: [], clouds: [], particles: [],
         
-        // Manche Flutuante (Kart Style)
+        // Manche Flutuante Militar
         yoke: { x: 0, y: 0, scale: 1, angle: 0, isHolding: false, depthRatio: 1.0 },
-        
         combat: { currentTarget: null, lockTimer: 0, isLocked: false, lastVulcanTime: 0, missileCooldown: 0, headTilted: false },
-        
         shake: 0, damageFlash: 0,
 
         init: function() {
@@ -120,12 +119,12 @@
             }
 
             AudioEngine.init(); AudioEngine.startJet();
-            if(window.System && window.System.msg) window.System.msg("ESTICAR BRAÇOS: DESCE | ENCOLHER: SOBE | CABEÇA: MÍSSIL");
+            if(window.System && window.System.msg) window.System.msg("EMPÚRRE O MANCHE PARA DESCER | PUXE PARA SUBIR!");
         },
 
         cleanup: function() { AudioEngine.stop(); },
 
-        // --- TRACKING AVANÇADO (PROFUNDIDADE E MIRA FÁCIL) ---
+        // --- TRACKING AVANÇADO (PROFUNDIDADE E MIRA CORRIGIDA) ---
         processTracking: function(pose, w, h, dt) {
             this.yoke.isHolding = false;
             this.combat.headTilted = false;
@@ -137,7 +136,7 @@
                 const rEar = getKp('right_ear'); const lEar = getKp('left_ear');
                 const mapX = (x) => (1 - (x / 640)) * w; const mapY = (y) => (y / 480) * h;
 
-                // Tracking de Cabeça (Mísseis) - Inclinar para a Direita
+                // Tracking de Cabeça (Mísseis) - Inclinar a cabeça para a Direita (orelha direita desce no vídeo)
                 if (rEar && lEar && rEar.score > 0.4 && lEar.score > 0.4) {
                     if ((rEar.y - lEar.y) > 25) this.combat.headTilted = true;
                 }
@@ -149,7 +148,6 @@
                     let rx = mapX(rw.x), ry = mapY(rw.y);
                     let lx = mapX(lw.x), ly = mapY(lw.y);
 
-                    // Posição central do manche
                     this.yoke.x = (rx + lx) / 2;
                     this.yoke.y = (ry + ly) / 2;
 
@@ -157,40 +155,43 @@
                     this.yoke.angle = Math.atan2(dy, dx);
                     
                     let handDist = Math.hypot(dx, dy);
-
-                    // Calcular Profundidade (Distância das mãos vs Ombros)
-                    let refDist = w * 0.4; // Fallback
+                    let refDist = w * 0.4; 
                     if (rs && ls && rs.score > 0.3 && ls.score > 0.3) {
                         refDist = Math.hypot(mapX(rs.x) - mapX(ls.x), mapY(rs.y) - mapY(ls.y));
                     }
                     
                     this.yoke.depthRatio = handDist / refDist;
-                    // Escala visual do manche
                     this.yoke.scale = Math.max(0.6, Math.min(1.8, this.yoke.depthRatio));
 
-                    // FÍSICA DO AVIÃO
+                    // ========================================================
+                    // FÍSICA CORRIGIDA (YOKE INVERTIDO)
+                    // ========================================================
+                    
                     // 1. Roll (Inclinação do volante)
-                    this.ship.roll += (this.yoke.angle - this.ship.roll) * 5 * dt;
+                    // Se a mão direita desce, angle é > 0. Queremos rolar para a Direita.
+                    let targetRoll = -this.yoke.angle; // Invertido para simulação visual fluida
+                    this.ship.roll += (targetRoll - this.ship.roll) * 5 * dt;
 
-                    // 2. Pitch (Profundidade dos braços)
+                    // 2. Pitch (Subir/Descer com Profundidade)
                     let targetPitchVel = 0;
-                    if (this.yoke.depthRatio < 1.0) targetPitchVel = -1.2; // Braços esticados -> Mergulha
-                    else if (this.yoke.depthRatio > 1.3) targetPitchVel = 1.2; // Braços encolhidos -> Sobe
+                    if (this.yoke.depthRatio < 0.9) targetPitchVel = -1.5; // Empurra os braços -> Bico Desce (Mergulho)
+                    else if (this.yoke.depthRatio > 1.2) targetPitchVel = 1.5; // Puxa os braços -> Bico Sobe (Looping)
                     this.ship.pitch += targetPitchVel * dt;
 
-                    // 3. Yaw (Mirar movendo o volante pelo ecrã)
-                    let normX = (this.yoke.x - w/2) / (w/3); // -1 a 1 dependendo da posição X
+                    // 3. Yaw (Mirar Esquerda/Direita)
+                    let normX = (this.yoke.x - w/2) / (w/3); 
                     normX = Math.max(-1.5, Math.min(1.5, normX));
-                    this.ship.yaw += normX * 1.5 * dt; // Roda para o lado que mover as mãos
+                    // Move as mãos para a Direita (normX > 0) -> Avião vira para a Direita!
+                    this.ship.yaw += normX * 2.0 * dt; 
                     
                 }
             }
             
             if (!this.yoke.isHolding) {
-                this.ship.roll *= 0.95; // Auto-estabiliza
+                this.ship.roll *= 0.95; // Auto-estabiliza se largar o manche
             }
 
-            // Normalizar ângulos para evitar overflow matemático num jogo de loops infinitos
+            // Normalizar ângulos 360º para Loops
             this.ship.pitch = this.ship.pitch % (Math.PI * 2);
             this.ship.yaw = this.ship.yaw % (Math.PI * 2);
             if (this.ship.pitch < 0) this.ship.pitch += Math.PI * 2;
@@ -204,7 +205,7 @@
 
             let forwardX = sinY * cosP;
             let forwardY = sinP;
-            let forwardZ = cosY * cosP;
+            let forwardZ = -Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             
             // 1. Procurar Alvo
             this.combat.currentTarget = null;
@@ -213,15 +214,15 @@
 
             for (let e of this.entities) {
                 let relX = e.x - this.ship.worldX; let relY = this.ship.worldY - e.y; let relZ = e.z - this.ship.worldZ;
-                let camX = relX * cosY - relZ * sinY;
-                let camZ = relX * sinY + relZ * cosY;
-                let camYProj = relY * cosP + camZ * sinP; // Posição Y vertical relativa
+                let camX = relX * Math.cos(-this.ship.yaw) - relZ * Math.sin(-this.ship.yaw);
+                let camZ = relX * Math.sin(-this.ship.yaw) + relZ * Math.cos(-this.ship.yaw);
+                let camYProj = relY * cosP - camZ * sinP; 
 
-                if (camZ > 1500 && camZ < 25000) {
-                    // Caixa de mira BEM GRANDE para facilitar
-                    if (Math.abs(camX) < 4000 && Math.abs(camYProj) < 4000) {
+                if (camZ < -1500 && camZ > -35000) {
+                    // Caixa de mira ENORME para ser fácil de trancar
+                    if (Math.abs(camX) < 6000 && Math.abs(camYProj) < 6000) {
                         targetOnSights = true;
-                        if (camZ < closestDist) { closestDist = camZ; this.combat.currentTarget = e; }
+                        if (camZ > closestDist) { closestDist = camZ; this.combat.currentTarget = e; }
                     }
                 }
             }
@@ -285,25 +286,25 @@
 
             this.processTracking(pose, w, h, dt);
             
-            // FÍSICA VETORIAL ABSOLUTA 3D
             let cosP = Math.cos(this.ship.pitch); let sinP = Math.sin(this.ship.pitch);
             let cosY = Math.cos(this.ship.yaw); let sinY = Math.sin(this.ship.yaw);
 
+            // Vetor Direcional (Frente Real do Avião)
             let forwardX = sinY * cosP;
             let forwardY = sinP;
-            let forwardZ = cosY * cosP;
+            let forwardZ = -cosY * cosP; 
             let speedUnits = this.ship.speed * 25;
             
             this.ship.worldX += speedUnits * forwardX * dt;
-            this.ship.worldZ += speedUnits * forwardZ * dt;
             this.ship.worldY += speedUnits * forwardY * dt;
+            this.ship.worldZ += speedUnits * forwardZ * dt;
             
-            if (this.ship.worldY < 500) { this.ship.worldY = 500; } // Chão de Titânio
+            if (this.ship.worldY < 500) { this.ship.worldY = 500; } // Chão 
             if (this.ship.worldY > 40000) this.ship.worldY = 40000; // Teto
 
             this.processCombat(dt, w, h);
 
-            // Spawner
+            // Spawner Otimizado
             if (this.entities.length < 8 && Math.random() < 0.04) {
                 let spawnDist = 25000 + Math.random() * 10000;
                 let sx = this.ship.worldX + forwardX * spawnDist + (Math.random()-0.5)*20000;
@@ -330,10 +331,10 @@
                 }
 
                 let relX = e.x - this.ship.worldX; let relY = this.ship.worldY - e.y; let relZ = e.z - this.ship.worldZ;
-                let camX = relX * cosY - relZ * sinY;
-                let camZ = relX * sinY + relZ * cosY;
+                let camX = relX * Math.cos(-this.ship.yaw) - relZ * Math.sin(-this.ship.yaw);
+                let camZ = relX * Math.sin(-this.ship.yaw) + relZ * Math.cos(-this.ship.yaw);
 
-                if (camZ < -8000 || Math.hypot(camX, camZ) > 60000) { e.hp = -1; continue; } 
+                if (camZ > 8000 || Math.hypot(camX, camZ) > 60000) { e.hp = -1; continue; } // Remove se passar por nós
 
                 // Inimigos Atiram
                 let distToShip = Math.hypot(relX, relY, relZ);
@@ -402,8 +403,8 @@
 
             // Nuvens e Partículas
             for (let c of this.clouds) {
-                let relZ = c.z - this.ship.worldZ; let camZ = (c.x - this.ship.worldX) * sinY + relZ * cosY;
-                if (camZ < -20000) {
+                let relZ = c.z - this.ship.worldZ; let camZ = (c.x - this.ship.worldX) * Math.sin(-this.ship.yaw) + relZ * Math.cos(-this.ship.yaw);
+                if (camZ > 5000) {
                     c.z = this.ship.worldZ + forwardZ * 70000 + (Math.random()-0.5)*40000;
                     c.x = this.ship.worldX + forwardX * 70000 + (Math.random()-0.5)*40000;
                 }
@@ -441,7 +442,7 @@
             }
         },
 
-        // --- MOTOR DE RENDERIZAÇÃO 360º LOOPING ---
+        // --- MOTOR DE RENDERIZAÇÃO 360º LOOPING VISUAL ---
         renderFrame: function(ctx, w, h) {
             ctx.save();
             if (this.shake > 0) { ctx.translate((Math.random()-0.5)*this.shake, (Math.random()-0.5)*this.shake); this.shake *= 0.9; }
@@ -453,9 +454,10 @@
 
         renderWorld: function(ctx, w, h) {
             ctx.save();
-            ctx.translate(w/2, h/2); ctx.rotate(this.ship.roll);
+            ctx.translate(w/2, h/2); 
+            ctx.rotate(-this.ship.roll); // Roll visual invertido (Correto para avião a curvar)
             
-            // O Segredo do Loop: O horizonte move-se e o mundo capota se formos para além de 90º
+            // Lógica de capotamento para loops 360
             let isUpsideDown = Math.cos(this.ship.pitch) < 0;
             let horizonOffset = Math.sin(this.ship.pitch) * h * 1.5; 
 
@@ -464,39 +466,44 @@
                 horizonOffset = -horizonOffset; 
             }
 
-            // CÉU REALISTA ATMOSFÉRICO
-            let skyGrad = ctx.createLinearGradient(0, -h*3, 0, horizonOffset);
-            skyGrad.addColorStop(0, '#020b1f');   
-            skyGrad.addColorStop(0.5, '#0b397a'); 
-            skyGrad.addColorStop(1, '#ff9a44');   
-            ctx.fillStyle = skyGrad; ctx.fillRect(-w*2, -h*3, w*4, horizonOffset + h*3);
+            // CÉU EXTREMAMENTE CLARO
+            let skyGrad = ctx.createLinearGradient(0, -h*4, 0, horizonOffset);
+            skyGrad.addColorStop(0, '#001133');   
+            skyGrad.addColorStop(0.5, '#0a4275'); 
+            skyGrad.addColorStop(1, '#81c0eb');   
+            ctx.fillStyle = skyGrad; ctx.fillRect(-w*3, -h*4, w*6, horizonOffset + h*4);
 
             // SOL
-            ctx.fillStyle = '#fff'; ctx.shadowBlur = 100; ctx.shadowColor = '#ffcc00';
-            ctx.beginPath(); ctx.arc(w*0.3, horizonOffset - 200, 80, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fff'; ctx.shadowBlur = 150; ctx.shadowColor = '#ffcc00';
+            ctx.beginPath(); ctx.arc(w*0.3, horizonOffset - 250, 100, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
 
-            // TERRENO
-            let groundGrad = ctx.createLinearGradient(0, horizonOffset, 0, h*3);
-            groundGrad.addColorStop(0, '#ff9a44'); 
-            groundGrad.addColorStop(0.1, '#1b2a1a'); 
-            groundGrad.addColorStop(1, '#090e09');   
-            ctx.fillStyle = groundGrad; ctx.fillRect(-w*2, horizonOffset, w*4, h*3);
+            // CHÃO CLARO
+            let groundGrad = ctx.createLinearGradient(0, horizonOffset, 0, h*4);
+            groundGrad.addColorStop(0, '#2e4a22'); 
+            groundGrad.addColorStop(1, '#0a1205');   
+            ctx.fillStyle = groundGrad; ctx.fillRect(-w*3, horizonOffset, w*6, h*4);
 
-            // PISO TRON 3D INFINITO (Perfeito para evitar clipping visual)
-            ctx.fillStyle = 'rgba(0, 255, 100, 0.4)';
-            let step = 5000;
-            let sx = Math.floor(this.ship.worldX / step) * step - (step * 15);
-            let sz = Math.floor(this.ship.worldZ / step) * step - (step * 15);
+            // LINHA NEON DO HORIZONTE
+            ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(-w*3, horizonOffset); ctx.lineTo(w*3, horizonOffset); ctx.stroke();
+
+            // PISO TRON 3D (Velocidade)
+            ctx.strokeStyle = 'rgba(0, 255, 200, 0.2)'; ctx.lineWidth = 2;
+            let step = 8000;
+            let sx = Math.floor(this.ship.worldX / step) * step - (step * 10);
+            let sz = Math.floor(this.ship.worldZ / step) * step - (step * 10);
             
-            for(let x = 0; x <= 30; x++) {
-                for(let z = 0; z <= 30; z++) {
+            ctx.beginPath();
+            for(let x = 0; x <= 20; x++) {
+                for(let z = 0; z <= 20; z++) {
                     let px = sx + (x * step); let pz = sz + (z * step);
                     let p = Math3D.projectFull(px, 0, pz, this.ship.worldX, this.ship.worldY, this.ship.worldZ, this.ship.pitch, this.ship.yaw, w, h);
-                    if (p.visible && p.s > 0.05) {
-                        ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 20 * p.s), 0, Math.PI*2); ctx.fill();
+                    if (p.visible && p.s > 0.02) {
+                        ctx.moveTo(p.x - 20*p.s, p.y); ctx.lineTo(p.x + 20*p.s, p.y);
                     }
                 }
             }
+            ctx.stroke();
             ctx.restore();
 
             // Z-BUFFER 3D
@@ -517,13 +524,13 @@
             toDraw.sort((a, b) => b.p.z - a.p.z);
 
             ctx.save();
-            ctx.translate(w/2, h/2); ctx.rotate(this.ship.roll); ctx.translate(-w/2, -h/2);
+            ctx.translate(w/2, h/2); ctx.rotate(-this.ship.roll); ctx.translate(-w/2, -h/2);
 
             toDraw.forEach(d => {
                 let p = d.p; let s = p.s; let obj = d.obj;
 
                 if (d.type === 'cloud') {
-                    ctx.fillStyle = 'rgba(255, 200, 150, 0.15)'; 
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'; 
                     ctx.beginPath(); ctx.arc(p.x, p.y, obj.size * s, 0, Math.PI*2); ctx.fill();
                 }
                 else if (d.type === 'entity') {
@@ -534,22 +541,23 @@
                         this.draw3DTank(ctx, p.x, p.y, 400 * s);
                     }
                     
-                    if (obj === this.combat.currentTarget) {
-                        let isFullyLocked = this.combat.isLocked;
-                        let color = isFullyLocked ? '#ff003c' : '#f1c40f';
-                        let size = 120 - (isFullyLocked ? 20 : (this.combat.lockTimer/2.0)*40); 
-                        
-                        ctx.strokeStyle = color; ctx.lineWidth = isFullyLocked ? 4 : 2;
-                        ctx.beginPath();
-                        ctx.moveTo(p.x - size, p.y - size/2); ctx.lineTo(p.x - size, p.y - size); ctx.lineTo(p.x - size/2, p.y - size);
-                        ctx.moveTo(p.x + size, p.y - size/2); ctx.lineTo(p.x + size, p.y - size); ctx.lineTo(p.x + size/2, p.y - size);
-                        ctx.moveTo(p.x - size, p.y + size/2); ctx.lineTo(p.x - size, p.y + size); ctx.lineTo(p.x - size/2, p.y + size);
-                        ctx.moveTo(p.x + size, p.y + size/2); ctx.lineTo(p.x + size, p.y + size); ctx.lineTo(p.x + size/2, p.y + size);
-                        ctx.stroke();
-                        
-                        if (isFullyLocked) {
-                            ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.font = "bold 16px 'Chakra Petch'"; ctx.fillText("LOCKED", p.x, p.y + size + 20);
-                        }
+                    // UI DE MIRA BEM VISÍVEL (Brackets [])
+                    let isLocked = (obj === this.combat.currentTarget);
+                    let isFullyLocked = isLocked && this.combat.isLocked;
+                    let bs = Math.max(30, 100 * s); // Tamanho Mínimo Sempre visível
+                    
+                    ctx.strokeStyle = isFullyLocked ? '#ff003c' : (isLocked ? '#f1c40f' : 'rgba(0, 255, 204, 0.6)');
+                    ctx.lineWidth = isFullyLocked ? 4 : 2;
+                    ctx.beginPath();
+                    ctx.moveTo(p.x - bs, p.y - bs/2); ctx.lineTo(p.x - bs, p.y - bs); ctx.lineTo(p.x - bs/2, p.y - bs);
+                    ctx.moveTo(p.x + bs, p.y - bs/2); ctx.lineTo(p.x + bs, p.y - bs); ctx.lineTo(p.x + bs/2, p.y - bs);
+                    ctx.moveTo(p.x - bs, p.y + bs/2); ctx.lineTo(p.x - bs, p.y + bs); ctx.lineTo(p.x - bs/2, p.y + bs);
+                    ctx.moveTo(p.x + bs, p.y + bs/2); ctx.lineTo(p.x + bs, p.y + bs); ctx.lineTo(p.x + bs/2, p.y + bs);
+                    ctx.stroke();
+                    
+                    if (isFullyLocked) {
+                        ctx.fillStyle = '#ff003c'; ctx.textAlign = 'center'; ctx.font = "bold 16px 'Chakra Petch'"; 
+                        ctx.fillText("LOCKED", p.x, p.y + bs + 20);
                     }
                 }
                 else if (d.type === 'bullet') {
@@ -616,9 +624,9 @@
             
             if (this.combat.isLocked) {
                 ctx.textAlign = "center"; ctx.fillStyle = "#ff003c"; ctx.font = "bold 28px 'Russo One'";
-                ctx.fillText("ALVO TRANCADO! AUTO-FIRE VULCAN!", w/2, h*0.2);
+                ctx.fillText("ALVO TRANCADO! METRALHADORA AUTOMÁTICA!", w/2, h*0.2);
                 ctx.fillStyle = "#00ffff"; ctx.font = "bold 20px 'Chakra Petch'";
-                ctx.fillText(this.combat.missileCooldown <= 0 ? "INCLINE CABEÇA PARA MÍSSIL" : "RECARREGANDO MÍSSIL...", w/2, h*0.25);
+                ctx.fillText(this.combat.missileCooldown <= 0 ? "INCLINE A CABEÇA PARA A DIREITA PARA MÍSSIL!" : "RECARREGANDO MÍSSIL...", w/2, h*0.25);
             }
 
             // TABLIER INTERIOR
@@ -632,36 +640,43 @@
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(w*0.15, panelY + 40, 150, 20);
             ctx.fillStyle = '#fff'; ctx.font = "14px Arial"; ctx.textAlign="left"; ctx.fillText("CASCO / BLINDAGEM", w*0.15, panelY + 30);
 
-            // MANCHE FLUTUANTE (YOKE)
+            // MANCHE FLUTUANTE MILITAR FURTIVO (F-35 Style)
             if (this.yoke.isHolding) {
                 ctx.save(); 
                 ctx.translate(this.yoke.x, this.yoke.y); 
                 ctx.rotate(this.yoke.angle);
                 ctx.scale(this.yoke.scale, this.yoke.scale);
 
-                // Desenho Moderno do Yoke
-                ctx.strokeStyle = 'rgba(25, 25, 25, 0.9)'; ctx.lineWidth = 40; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                ctx.beginPath(); ctx.moveTo(-150, -60); ctx.lineTo(-150, 40); ctx.lineTo(-80, 80); 
-                ctx.lineTo(80, 80); ctx.lineTo(150, 40); ctx.lineTo(150, -60); ctx.stroke(); 
-                ctx.strokeStyle = '#444'; ctx.lineWidth = 44; 
-                ctx.beginPath(); ctx.moveTo(-150, -50); ctx.lineTo(-150, 30); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(150, -50); ctx.lineTo(150, 30); ctx.stroke();
+                // Coluna Central
+                ctx.fillStyle = 'rgba(20, 25, 30, 0.9)'; ctx.strokeStyle = '#34495e'; ctx.lineWidth = 6;
+                ctx.fillRect(-25, 0, 50, h); ctx.strokeRect(-25, 0, 50, h);
+
+                // Formato W Agressivo
+                ctx.beginPath();
+                ctx.moveTo(-160, -70); ctx.lineTo(-140, 60); ctx.lineTo(-60, 100); 
+                ctx.lineTo(60, 100); ctx.lineTo(140, 60); ctx.lineTo(160, -70); 
+                ctx.lineTo(100, -50); ctx.lineTo(40, 30); ctx.lineTo(-40, 30); ctx.lineTo(-100, -50); 
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+
+                // Gatilhos Superiores
+                ctx.fillStyle = '#e74c3c';
+                ctx.beginPath(); ctx.arc(-140, -50, 15, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(140, -50, 15, 0, Math.PI*2); ctx.fill();
                 
-                // Hologramas visuais do Yoke
-                ctx.fillStyle = 'rgba(0, 255, 255, 0.2)'; ctx.beginPath(); ctx.arc(0, 60, 50, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 5; ctx.stroke();
-                ctx.fillStyle = '#fff'; ctx.font = "bold 14px Arial"; ctx.textAlign="center"; 
+                // Display Central
+                ctx.fillStyle = '#0a0a0a'; ctx.fillRect(-50, 45, 100, 45);
+                ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 2; ctx.strokeRect(-50, 45, 100, 45);
+                ctx.fillStyle = '#00ffcc'; ctx.font = "bold 14px 'Chakra Petch'"; ctx.textAlign="center"; 
                 
-                // Indicador de Profundidade
-                if (this.yoke.depthRatio < 1.0) ctx.fillText("⬇️ MERGULHO", 0, 65);
-                else if (this.yoke.depthRatio > 1.3) ctx.fillText("⬆️ SUBIDA", 0, 65);
-                else ctx.fillText("ESTÁVEL", 0, 65);
+                if (this.yoke.depthRatio < 0.9) ctx.fillText("MERGULHO", 0, 72);
+                else if (this.yoke.depthRatio > 1.2) ctx.fillText("SUBIDA", 0, 72);
+                else ctx.fillText("ESTÁVEL", 0, 72);
 
                 ctx.restore();
             } else {
                 ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,w,h);
                 ctx.fillStyle = '#fff'; ctx.textAlign="center"; ctx.font="bold 30px Arial";
-                ctx.fillText("LEVANTES AS MÃOS PARA AGARRAR O MANCHE", w/2, h/2);
+                ctx.fillText("LEVANTE AS MÃOS PARA AGARRAR O MANCHE", w/2, h/2);
             }
         }
     };
@@ -671,7 +686,7 @@
         if(window.System && window.System.registerGame) {
             window.System.registerGame('flight_sim', 'Aero Strike WAR', '🛩️', Game, {
                 camera: 'user',
-                phases: [ { id: 'mission1', name: 'ZONA DE COMBATE HD', desc: 'Pilote com 2 mãos! Estique os braços para descer. Encolha para subir (Loops). Tranque a mira e incline a cabeça para lançar Mísseis!', reqLvl: 1 } ]
+                phases: [ { id: 'mission1', name: 'ZONA DE COMBATE HD', desc: 'Pilote com 2 mãos (Manche Invertido)! Empurre para descer, puxe para subir (Loops). Tranque a mira e incline a cabeça para lançar Mísseis!', reqLvl: 1 } ]
             });
             clearInterval(regLoop);
         }
