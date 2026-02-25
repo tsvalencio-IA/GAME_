@@ -1,7 +1,7 @@
 // =============================================================================
-// AERO STRIKE AR: TITANIUM MILITARY SIMULATOR (V1.0)
+// AERO STRIKE AR: TITANIUM MILITARY SIMULATOR (V2.0 - MULTIPLAYER)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT & PARCEIRO DE PROGRAMAÇÃO
-// STATUS: TRUE 6DOF PHYSICS, REAR/FRONT ENEMY RENDERING, CLEAN MOBILE HUD
+// STATUS: TRUE 6DOF PHYSICS, REAR/FRONT ENEMY RENDERING, REAL-TIME PVP DOGFIGHT
 // =============================================================================
 
 (function() {
@@ -103,38 +103,158 @@
         
         // Avião do Jogador
         ship: { 
-            hp: 100, speed: 1200, // Velocidade constante de Combate Real
+            hp: 100, speed: 1200, 
             worldX: 0, worldY: 8000, worldZ: 0,
             pitch: 0, yaw: 0, roll: 0
         },
         
         entities: [], bullets: [], missiles: [], clouds: [], particles: [],
-        
-        // Tracking do Manche
         yoke: { x: 0, y: 0, active: false, depthRatio: 1.0, normX: 0 },
-        
         combat: { currentTarget: null, lockTimer: 0, isLocked: false, lastVulcanTime: 0, missileCooldown: 0, headTilted: false },
         shake: 0, damageFlash: 0,
 
-        init: function() {
-            this.state = 'PLAYING'; this.lastTime = performance.now();
+        // Variáveis Multiplayer
+        isMultiplayer: false,
+        isHost: false,
+        isReady: false,
+        myUid: null,
+        myName: "PILOT",
+        remotePlayers: {},
+        sessionRef: null,
+        playersRef: null,
+        syncInterval: null,
+
+        init: function(faseData) {
+            this.state = 'START'; 
+            this.lastTime = performance.now();
             this.mission.targetsDestroyed = 0;
             this.ship = { hp: 100, speed: 1200, worldX: 0, worldY: 8000, worldZ: 0, pitch: 0, yaw: 0, roll: 0 };
             this.entities = []; this.bullets = []; this.missiles = []; this.clouds = []; this.particles = [];
             this.combat = { currentTarget: null, lockTimer: 0, isLocked: false, lastVulcanTime: 0, missileCooldown: 0, headTilted: false };
             
-            // Gerar nuvens ambientes
+            this.myUid = window.System.playerId || "guest_" + Math.floor(Math.random()*10000);
+            this.myName = window.System.playerId ? "PILOT_" + this.myUid.substring(0,4) : "GUEST";
+
+            // Verificar se o modo é Multiplayer
+            if (faseData && faseData.mode === 'MULTIPLAYER') {
+                this.isMultiplayer = true;
+                this.initMultiplayer();
+            } else {
+                this.isMultiplayer = false;
+                this.startGame();
+            }
+        },
+
+        initMultiplayer: function() {
+            if (!window.DB) { alert("Erro: Conexão com Firebase indisponível."); window.System.home(); return; }
+            this.state = 'LOBBY';
+            this.remotePlayers = {};
+            this.sessionRef = window.DB.ref('game_sessions/flight_sim');
+            this.playersRef = this.sessionRef.child('players');
+
+            // Limpar jogador se a janela fechar
+            this.playersRef.child(this.myUid).onDisconnect().remove();
+
+            // Lógica de Host
+            this.sessionRef.child('host').once('value').then(snap => {
+                if (!snap.val()) {
+                    this.isHost = true;
+                    this.sessionRef.child('host').set(this.myUid);
+                    this.sessionRef.child('gameState').set('LOBBY');
+                    this.playersRef.remove(); // Limpa a sala
+                }
+                
+                // Juntar-se à sala
+                this.playersRef.child(this.myUid).set({
+                    name: this.myName, ready: false, hp: 100,
+                    x: 0, y: 8000, z: 0, pitch: 0, yaw: 0, roll: 0
+                });
+            });
+
+            // Escutar Jogadores
+            this.playersRef.on('value', snap => {
+                this.remotePlayers = snap.val() || {};
+            });
+
+            // Escutar Início da Partida
+            this.sessionRef.child('gameState').on('value', snap => {
+                if (snap.val() === 'PLAYING' && this.state === 'LOBBY') {
+                    this.startGame();
+                }
+            });
+
+            // Evento de Clique para o Lobby
+            this._lobbyClick = this.handleLobbyClick.bind(this);
+            window.System.canvas.addEventListener('pointerdown', this._lobbyClick);
+        },
+
+        handleLobbyClick: function(e) {
+            if (this.state !== 'LOBBY') return;
+            const rect = window.System.canvas.getBoundingClientRect();
+            const scaleX = window.System.canvas.width / rect.width;
+            const scaleY = window.System.canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            const w = window.System.canvas.width;
+            const h = window.System.canvas.height;
+
+            // Hitbox do Botão Central
+            if (x > w/2 - 160 && x < w/2 + 160 && y > h*0.85 && y < h*0.85 + 60) {
+                window.Sfx.click();
+                if (this.isHost) {
+                    const canStart = Object.keys(this.remotePlayers).length >= 2; // Precisa de pelo menos 2
+                    if (canStart) {
+                        this.sessionRef.child('gameState').set('PLAYING');
+                    }
+                } else {
+                    this.isReady = !this.isReady;
+                    this.playersRef.child(this.myUid).update({ ready: this.isReady });
+                }
+            }
+        },
+
+        startGame: function() {
+            this.state = 'PLAYING';
+            // Posição inicial ligeiramente aleatória para evitar colisões no spawn
+            this.ship.worldX = (Math.random() - 0.5) * 10000;
+            this.ship.worldZ = (Math.random() - 0.5) * 10000;
+
             for (let i = 0; i < 60; i++) {
                 this.clouds.push({ x: (Math.random() - 0.5) * 80000, y: 4000 + Math.random() * 15000, z: (Math.random() - 0.5) * 80000, size: 2000 + Math.random() * 5000 });
             }
 
             AudioEngine.init(); AudioEngine.startJet();
-            if(window.System && window.System.msg) window.System.msg("SIMULADOR ONLINE. ACELERAÇÃO FIXA. COMBATE ATIVO.");
+            
+            if (this.isMultiplayer) {
+                window.System.msg("DOGFIGHT INICIADO! DESTRUA OS PILOTOS INIMIGOS.");
+                // Sync Loop: Enviar dados ao Firebase a cada 100ms
+                this.syncInterval = setInterval(() => {
+                    if (this.state === 'PLAYING') {
+                        this.playersRef.child(this.myUid).update({
+                            x: this.ship.worldX, y: this.ship.worldY, z: this.ship.worldZ,
+                            pitch: this.ship.pitch, yaw: this.ship.yaw, roll: this.ship.roll,
+                            hp: this.ship.hp
+                        });
+                    }
+                }, 100);
+            } else {
+                window.System.msg("SIMULADOR ONLINE. ACELERAÇÃO FIXA. COMBATE ATIVO.");
+            }
         },
 
-        cleanup: function() { AudioEngine.stop(); },
+        cleanup: function() { 
+            AudioEngine.stop();
+            if (this.syncInterval) clearInterval(this.syncInterval);
+            if (this._lobbyClick) window.System.canvas.removeEventListener('pointerdown', this._lobbyClick);
+            if (this.isMultiplayer && this.playersRef) {
+                this.playersRef.off();
+                this.sessionRef.child('gameState').off();
+                this.playersRef.child(this.myUid).remove();
+                if (this.isHost) this.sessionRef.remove();
+            }
+        },
 
-        // --- RASTREAMENTO INTELIGENTE (MANCHE VIRTUAL E CABEÇA) ---
+        // --- RASTREAMENTO INTELIGENTE ---
         processTracking: function(pose, w, h, dt) {
             this.yoke.active = false;
             this.combat.headTilted = false;
@@ -177,18 +297,15 @@
                     // APLICAÇÃO FÍSICA AERONÁUTICA 
                     // ==========================================
                     
-                    // Yaw (Direção): Mãos p/ Direita -> Vira Direita
                     let targetYawVel = this.yoke.normX * 1.5;
                     this.ship.yaw += targetYawVel * dt;
 
-                    // Pitch (Elevação): Empurrar (Braços Esticados) -> Descer | Puxar (Encolhidos) -> Subir
                     let targetPitchVel = 0;
                     if (this.yoke.depthRatio < 0.85) targetPitchVel = -1.5; // Mergulho
                     else if (this.yoke.depthRatio > 1.2) targetPitchVel = 1.5; // Loop/Subida
                     this.ship.pitch += targetPitchVel * dt;
 
-                    // Roll (Inclinação Visual nas Curvas)
-                    let targetRoll = targetYawVel * 0.8; // O avião inclina para o lado que vira
+                    let targetRoll = targetYawVel * 0.8; 
                     this.ship.roll += (targetRoll - this.ship.roll) * 5 * dt;
                 }
             }
@@ -217,16 +334,31 @@
             let closestDist = Infinity;
             let targetOnSights = false;
 
-            // Hitbox Generosa no Ecrã
+            // Hitbox Generosa no Ecrã para Entidades Locais
             for (let e of this.entities) {
                 let p = Math3D.projectFull(e.x, e.y, e.z, this.ship.worldX, this.ship.worldY, this.ship.worldZ, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 if (p.visible && p.z > 1000 && p.z < 35000) {
-                    // Deteção pela posição no Ecrã (40% do centro)
                     if (Math.abs(p.x - w/2) < w * 0.25 && Math.abs(p.y - h/2) < h * 0.25) {
                         targetOnSights = true;
                         if (p.z < closestDist) { closestDist = p.z; this.combat.currentTarget = e; }
                     }
                 }
+            }
+
+            // Hitbox para Jogadores Remotos (Multiplayer)
+            if (this.isMultiplayer) {
+                Object.keys(this.remotePlayers).forEach(uid => {
+                    if (uid === this.myUid) return;
+                    let rp = this.remotePlayers[uid];
+                    if (rp.hp <= 0) return;
+                    let p = Math3D.projectFull(rp.x, rp.y, rp.z, this.ship.worldX, this.ship.worldY, this.ship.worldZ, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    if (p.visible && p.z > 1000 && p.z < 35000) {
+                        if (Math.abs(p.x - w/2) < w * 0.25 && Math.abs(p.y - h/2) < h * 0.25) {
+                            targetOnSights = true;
+                            if (p.z < closestDist) { closestDist = p.z; this.combat.currentTarget = { ...rp, isPlayer: true, uid: uid }; }
+                        }
+                    }
+                });
             }
 
             // Lock-on Timer de 1.5 Segundos
@@ -254,7 +386,11 @@
                     let spawnX = this.ship.worldX + (Math.cos(this.ship.yaw) * offset);
                     let spawnZ = this.ship.worldZ - (Math.sin(this.ship.yaw) * offset);
 
-                    this.bullets.push({ x: spawnX, y: this.ship.worldY - 20, z: spawnZ, vx: (dx/dist)*speed, vy: (dy/dist)*speed, vz: (dz/dist)*speed, isEnemy: false, life: 2.0 });
+                    this.bullets.push({ 
+                        x: spawnX, y: this.ship.worldY - 20, z: spawnZ, 
+                        vx: (dx/dist)*speed, vy: (dy/dist)*speed, vz: (dz/dist)*speed, 
+                        isEnemy: false, life: 2.0 
+                    });
                     AudioEngine.fireVulcan(); this.shake = 3;
                 }
             }
@@ -277,6 +413,11 @@
         update: function(ctx, w, h, pose) {
             const now = performance.now(); let dt = Math.min((now - this.lastTime) / 1000, 0.05); this.lastTime = now;
 
+            if (this.state === 'LOBBY') {
+                this.renderLobby(ctx, w, h);
+                return 0;
+            }
+
             if (this.state === 'GAMEOVER' || this.state === 'VICTORY') {
                 this.renderFrame(ctx, w, h);
                 ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.fillRect(0,0,w,h);
@@ -288,7 +429,6 @@
 
             this.processTracking(pose, w, h, dt);
             
-            // FÍSICA VETORIAL ABSOLUTA 3D 
             let cosP = Math.cos(this.ship.pitch); let sinP = Math.sin(this.ship.pitch);
             let cosY = Math.cos(this.ship.yaw); let sinY = Math.sin(this.ship.yaw);
 
@@ -301,44 +441,42 @@
             this.ship.worldY += speedUnits * forwardY * dt;
             this.ship.worldZ += speedUnits * forwardZ * dt;
             
-            // Limites de Altitude
-            if (this.ship.worldY < 500) { this.ship.worldY = 500; } // Chão 
-            if (this.ship.worldY > 60000) this.ship.worldY = 60000; // Teto Global
+            if (this.ship.worldY < 500) { this.ship.worldY = 500; } 
+            if (this.ship.worldY > 60000) this.ship.worldY = 60000; 
 
             this.processCombat(dt, w, h);
 
-            // Spawner de Inimigos Global
-            if (this.entities.length < 8 && Math.random() < 0.04) {
-                let spawnDist = 30000 + Math.random() * 10000;
-                let sx = this.ship.worldX + forwardX * spawnDist + (Math.random()-0.5)*20000;
-                let sz = this.ship.worldZ + forwardZ * spawnDist + (Math.random()-0.5)*20000;
-                
-                let r = Math.random();
-                if (r < 0.3) {
-                    this.entities.push({ type: 'tank', x: sx, y: 0, z: sz, vx: 0, vy: 0, vz: 0, hp: 200, yaw: Math.random()*Math.PI*2 });
-                } else if (r < 0.8) {
-                    this.entities.push({ type: 'jet_flee', x: sx, y: Math.max(2000, this.ship.worldY + (Math.random()-0.5)*5000), z: sz, 
-                        vx: forwardX * speedUnits * 0.9 + (Math.random()-0.5)*1500, vy: 0, vz: forwardZ * speedUnits * 0.9 + (Math.random()-0.5)*1500, hp: 150, yaw: this.ship.yaw });
-                } else {
-                    this.entities.push({ type: 'jet_attack', x: sx, y: Math.max(2000, this.ship.worldY + (Math.random()-0.5)*5000), z: sz, 
-                        vx: -forwardX * 15000, vy: -forwardY * 15000, vz: -forwardZ * 15000, hp: 150, yaw: this.ship.yaw + Math.PI });
+            // Spawner de Inimigos Global (Apenas no Single Player)
+            if (!this.isMultiplayer) {
+                if (this.entities.length < 8 && Math.random() < 0.04) {
+                    let spawnDist = 30000 + Math.random() * 10000;
+                    let sx = this.ship.worldX + forwardX * spawnDist + (Math.random()-0.5)*20000;
+                    let sz = this.ship.worldZ + forwardZ * spawnDist + (Math.random()-0.5)*20000;
+                    
+                    let r = Math.random();
+                    if (r < 0.3) {
+                        this.entities.push({ type: 'tank', x: sx, y: 0, z: sz, vx: 0, vy: 0, vz: 0, hp: 200, yaw: Math.random()*Math.PI*2 });
+                    } else if (r < 0.8) {
+                        this.entities.push({ type: 'jet_flee', x: sx, y: Math.max(2000, this.ship.worldY + (Math.random()-0.5)*5000), z: sz, 
+                            vx: forwardX * speedUnits * 0.9 + (Math.random()-0.5)*1500, vy: 0, vz: forwardZ * speedUnits * 0.9 + (Math.random()-0.5)*1500, hp: 150, yaw: this.ship.yaw });
+                    } else {
+                        this.entities.push({ type: 'jet_attack', x: sx, y: Math.max(2000, this.ship.worldY + (Math.random()-0.5)*5000), z: sz, 
+                            vx: -forwardX * 15000, vy: -forwardY * 15000, vz: -forwardZ * 15000, hp: 150, yaw: this.ship.yaw + Math.PI });
+                    }
                 }
             }
 
-            // Atualização de Inteligência Inimiga
+            // Atualização de Inteligência Inimiga (Single Player bots)
             for (let e of this.entities) {
                 e.x += e.vx * dt; e.y += e.vy * dt; e.z += e.vz * dt;
-
                 if (e.type === 'jet_flee') {
-                    e.vx += Math.sin(now * 0.003) * 800 * dt; e.x += e.vx * dt; // Ziguezague
+                    e.vx += Math.sin(now * 0.003) * 800 * dt; e.x += e.vx * dt; 
                 }
 
                 let dx = e.x - this.ship.worldX; let dy = e.y - this.ship.worldY; let dz = e.z - this.ship.worldZ;
                 let dist = Math.hypot(dx, dy, dz);
+                if (dist > 80000) { e.hp = -1; continue; } 
 
-                if (dist > 80000) { e.hp = -1; continue; } // Limpa Lixo muito longe
-
-                // Inimigos Atiram
                 if (dist > 1000 && dist < 12000) {
                     if ((e.type === 'jet_attack' && Math.random() < 0.05) || (e.type === 'tank' && Math.random() < 0.02)) {
                         let eSpeed = e.type === 'tank' ? 8000 : 18000;
@@ -348,7 +486,7 @@
             }
             this.entities = this.entities.filter(e => e.hp > 0);
 
-            // Dinâmica de Balas
+            // Dinâmica de Balas (Inclui PVP Dano)
             for (let i = this.bullets.length - 1; i >= 0; i--) {
                 let b = this.bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.life -= dt;
                 
@@ -359,6 +497,7 @@
                         b.life = 0;
                     }
                 } else {
+                    // Colisão com Bots Locais
                     for (let e of this.entities) {
                         if (Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z) < 800) {
                             e.hp -= 35; b.life = 0;
@@ -366,6 +505,20 @@
                             if (e.hp <= 0) this.destroyTarget(e);
                             break;
                         }
+                    }
+                    // Colisão com Jogadores Remotos (PVP Firebase)
+                    if (this.isMultiplayer && b.life > 0) {
+                        Object.keys(this.remotePlayers).forEach(uid => {
+                            if (uid === this.myUid) return;
+                            let rp = this.remotePlayers[uid];
+                            if (rp.hp > 0 && Math.hypot(b.x - rp.x, b.y - rp.y, b.z - rp.z) < 1000) {
+                                b.life = 0;
+                                this.spawnParticles(rp.x, rp.y, rp.z, '#f39c12', 4, 40);
+                                // Aplica dano direto na DB do inimigo
+                                window.DB.ref(`game_sessions/flight_sim/players/${uid}/hp`).set(rp.hp - 10);
+                                this.mission.targetsDestroyed++; // Conta Hits no Score
+                            }
+                        });
                     }
                     if (b.y < 0) { b.life = 0; this.spawnParticles(b.x, 0, b.z, '#7f8c8d', 3, 40); } 
                 }
@@ -377,13 +530,22 @@
                 let m = this.missiles[i];
                 m.vx += forwardX * 6000 * dt; m.vy += forwardY * 6000 * dt; m.vz += forwardZ * 6000 * dt; 
                 
-                if (m.target && m.target.hp > 0) {
+                if (m.target && (m.target.hp > 0 || m.target.isPlayer)) {
                     let dx = m.target.x - m.x; let dy = m.target.y - m.y; let dz = m.target.z - m.z;
                     let dist = Math.hypot(dx, dy, dz);
                     let turnSpeed = 25000 * dt; 
                     m.vx += (dx/dist) * turnSpeed; m.vy += (dy/dist) * turnSpeed; m.vz += (dz/dist) * turnSpeed;
                     
-                    if (dist < 1000) { m.target.hp -= 400; m.life = 0; if (m.target.hp <= 0) this.destroyTarget(m.target); }
+                    if (dist < 1000) { 
+                        if (m.target.isPlayer && this.isMultiplayer) {
+                            window.DB.ref(`game_sessions/flight_sim/players/${m.target.uid}/hp`).set(m.target.hp - 50);
+                            this.mission.targetsDestroyed += 5;
+                            this.spawnParticles(m.target.x, m.target.y, m.target.z, '#ff3300', 30, 250); 
+                        } else {
+                            m.target.hp -= 400; if (m.target.hp <= 0) this.destroyTarget(m.target); 
+                        }
+                        m.life = 0; 
+                    }
                 }
                 m.x += m.vx * dt; m.y += m.vy * dt; m.z += m.vz * dt; m.life -= dt;
                 
@@ -403,6 +565,11 @@
                 let p = this.particles[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.life -= dt;
                 if (p.life <= 0) this.particles.splice(i, 1);
             }
+            
+            // Check Death Multiplayer
+            if (this.isMultiplayer && this.ship.hp <= 0 && this.state !== 'GAMEOVER') {
+                this.endGame('GAMEOVER');
+            }
 
             this.renderFrame(ctx, w, h);
             return this.mission.targetsDestroyed * 100;
@@ -413,7 +580,7 @@
             this.spawnParticles(t.x, t.y, t.z, '#ff3300', 30, 250); 
             this.spawnParticles(t.x, t.y, t.z, '#2c3e50', 20, 400); 
             this.mission.targetsDestroyed++;
-            if (this.mission.targetsDestroyed >= this.mission.targetGoal) this.endGame('VICTORY');
+            if (this.mission.targetsDestroyed >= this.mission.targetGoal && !this.isMultiplayer) this.endGame('VICTORY');
         },
 
         endGame: function(result) {
@@ -431,6 +598,36 @@
         },
 
         // --- MOTOR DE RENDERIZAÇÃO MILITAR (CLEAN UI & 3D FALSO) ---
+        renderLobby: function(ctx, w, h) {
+            ctx.fillStyle = "rgba(10, 15, 25, 0.95)"; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = "#00ffcc"; ctx.textAlign = "center"; ctx.font = "bold 40px 'Russo One'";
+            ctx.fillText("SALA DE BRIEFING MULTIPLAYER", w/2, h*0.15);
+
+            const players = Object.values(this.remotePlayers);
+            ctx.font = "bold 24px 'Chakra Petch'";
+            ctx.fillStyle = "#fff";
+            ctx.fillText(`ESQUADRÃO ONLINE: ${players.length}`, w/2, h*0.25);
+
+            let py = h*0.35;
+            players.forEach((p, index) => {
+                ctx.fillStyle = p.ready ? "#2ecc71" : "#e74c3c";
+                ctx.fillText(`[ ${p.ready ? 'PRONTO' : 'PREPARANDO'} ] - ${p.name}`, w/2, py);
+                py += 40;
+            });
+
+            // Botão Start/Ready
+            if (this.isHost) {
+                const canStart = players.length >= 2;
+                ctx.fillStyle = canStart ? "#c0392b" : "#7f8c8d"; ctx.fillRect(w/2 - 160, h*0.85, 320, 60); 
+                ctx.fillStyle = "white"; ctx.font = "bold 22px 'Russo One'"; 
+                ctx.fillText(canStart ? "INICIAR MISSÃO" : "AGUARDANDO PILOTOS...", w/2, h*0.85 + 38);
+            } else {
+                ctx.fillStyle = this.isReady ? "#e67e22" : "#27ae60"; ctx.fillRect(w/2 - 160, h*0.85, 320, 60); 
+                ctx.fillStyle = "white"; ctx.font = "bold 22px 'Russo One'"; 
+                ctx.fillText(this.isReady ? "AGUARDANDO COMANDANTE" : "MARCAR PRONTO!", w/2, h*0.85 + 38);
+            }
+        },
+
         renderFrame: function(ctx, w, h) {
             ctx.save();
             if (this.shake > 0) { ctx.translate((Math.random()-0.5)*this.shake, (Math.random()-0.5)*this.shake); this.shake *= 0.9; }
@@ -507,9 +704,20 @@
             addDrawable(this.missiles, 'missile');
             addDrawable(this.particles, 'particle');
 
+            // Adicionar Jogadores Remotos ao Z-Buffer
+            if (this.isMultiplayer) {
+                Object.keys(this.remotePlayers).forEach(uid => {
+                    if (uid === this.myUid) return;
+                    let rp = this.remotePlayers[uid];
+                    if (rp.hp <= 0) return; // Nao desenha aviões destruídos
+                    let p = Math3D.projectFull(rp.x, rp.y, rp.z, this.ship.worldX, this.ship.worldY, this.ship.worldZ, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    if (p.visible) toDraw.push({ p: p, type: 'remote_player', obj: rp, uid: uid });
+                });
+            }
+
             toDraw.sort((a, b) => b.p.z - a.p.z);
 
-            // Como as rotações já estão no `projectFull`, os itens já estão na tela correta!
+            // RENDER LOOP
             toDraw.forEach(d => {
                 let p = d.p; let s = p.s; let obj = d.obj;
 
@@ -517,28 +725,44 @@
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; 
                     ctx.beginPath(); ctx.arc(p.x, p.y, obj.size * s, 0, Math.PI*2); ctx.fill();
                 }
-                else if (d.type === 'entity') {
-                    if (obj.type.startsWith('jet')) {
-                        this.drawMilitaryJet(ctx, p, obj.yaw, this.ship.yaw);
+                else if (d.type === 'entity' || d.type === 'remote_player') {
+                    let isRemote = d.type === 'remote_player';
+                    let renderRot = obj.yaw - this.ship.yaw;
+
+                    if (isRemote || obj.type.startsWith('jet')) {
+                        this.drawMilitaryJet(ctx, p, obj.yaw, this.ship.yaw, isRemote);
+                        
+                        // Desenhar NameTag do Player Inimigo
+                        if (isRemote) {
+                            ctx.fillStyle = '#00ffff'; ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
+                            ctx.fillText(obj.name, p.x, p.y - (300 * s) - 10);
+                            // HP do Inimigo visível por cima
+                            ctx.fillStyle = '#e74c3c'; ctx.fillRect(p.x - 20, p.y - (300 * s), 40, 5);
+                            ctx.fillStyle = '#2ecc71'; ctx.fillRect(p.x - 20, p.y - (300 * s), 40 * (obj.hp/100), 5);
+                        }
+
                     } else if (obj.type === 'tank') {
                         this.draw3DTank(ctx, p.x, p.y, 400 * s);
                     }
                     
-                    // BRACKETS TÁTICOS ( [ ] )
-                    let isLocked = (obj === this.combat.currentTarget);
+                    // BRACKETS TÁTICOS ( [ ] ) DE LOCK-ON
+                    let isLocked = false;
+                    if (this.combat.currentTarget) {
+                        if (isRemote && this.combat.currentTarget.uid === d.uid) isLocked = true;
+                        if (!isRemote && this.combat.currentTarget === obj) isLocked = true;
+                    }
+
                     let isFullyLocked = isLocked && this.combat.isLocked;
-                    let bs = Math.max(30, 150 * s); // Box Size
+                    let bs = Math.max(30, 150 * s); 
                     
-                    ctx.strokeStyle = isFullyLocked ? '#ff003c' : (isLocked ? '#f1c40f' : 'rgba(0, 255, 150, 0.4)');
+                    // Cor: Azul se for player online que não está focado, Vermelho trancado, Amarelo mirando
+                    let defaultBoxColor = isRemote ? 'rgba(0, 255, 255, 0.5)' : 'rgba(0, 255, 150, 0.4)';
+                    ctx.strokeStyle = isFullyLocked ? '#ff003c' : (isLocked ? '#f1c40f' : defaultBoxColor);
                     ctx.lineWidth = isFullyLocked ? 4 : 2;
                     ctx.beginPath();
-                    // Top Left
                     ctx.moveTo(p.x - bs, p.y - bs + 10); ctx.lineTo(p.x - bs, p.y - bs); ctx.lineTo(p.x - bs + 10, p.y - bs);
-                    // Top Right
                     ctx.moveTo(p.x + bs - 10, p.y - bs); ctx.lineTo(p.x + bs, p.y - bs); ctx.lineTo(p.x + bs, p.y - bs + 10);
-                    // Bottom Left
                     ctx.moveTo(p.x - bs, p.y + bs - 10); ctx.lineTo(p.x - bs, p.y + bs); ctx.lineTo(p.x - bs + 10, p.y + bs);
-                    // Bottom Right
                     ctx.moveTo(p.x + bs - 10, p.y + bs); ctx.lineTo(p.x + bs, p.y + bs); ctx.lineTo(p.x + bs, p.y + bs - 10);
                     ctx.stroke();
                     
@@ -563,28 +787,31 @@
         },
 
         // --- SISTEMA FALSO 3D DO INIMIGO ---
-        drawMilitaryJet: function(ctx, p, enemyYaw, playerYaw) {
+        drawMilitaryJet: function(ctx, p, enemyYaw, playerYaw, isRemote) {
             let relYaw = enemyYaw - playerYaw;
-            let isRearView = Math.cos(relYaw) > 0; // Se aponta para a mesma direção, vemos a traseira
+            let isRearView = Math.cos(relYaw) > 0; 
 
             let s = p.s * 400; 
             ctx.save(); ctx.translate(p.x, p.y); 
 
+            // Se for player remoto, mudar tom principal para distinguibilidade visual
+            let mainColor = isRemote ? '#0a3d62' : '#1e293b';
+
             if (isRearView) {
                 // TRASEIRA (Fugindo)
-                ctx.fillStyle = '#1e293b'; // Asas Delta
+                ctx.fillStyle = mainColor; // Asas Delta
                 ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-s, s*0.2); ctx.lineTo(-s*0.8, s*0.4); ctx.lineTo(s*0.8, s*0.4); ctx.lineTo(s, s*0.2); ctx.fill();
                 ctx.fillStyle = '#0f172a'; // Caudas Duplas
                 ctx.beginPath(); ctx.moveTo(-s*0.2, s*0.1); ctx.lineTo(-s*0.4, -s*0.6); ctx.lineTo(-s*0.1, -s*0.6); ctx.fill();
                 ctx.beginPath(); ctx.moveTo(s*0.2, s*0.1); ctx.lineTo(s*0.4, -s*0.6); ctx.lineTo(s*0.1, -s*0.6); ctx.fill();
                 ctx.fillStyle = '#000'; // Motores
                 ctx.beginPath(); ctx.arc(-s*0.15, s*0.2, s*0.15, 0, Math.PI*2); ctx.arc(s*0.15, s*0.2, s*0.15, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#00ffcc'; // Brilho Propulsor
-                ctx.shadowBlur = 10; ctx.shadowColor = '#00ffcc';
+                ctx.fillStyle = isRemote ? '#ff3300' : '#00ffcc'; // Brilho Propulsor Inimigo Multiplayer em Vermelho/Laranja
+                ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
                 ctx.beginPath(); ctx.arc(-s*0.15, s*0.2, s*0.1, 0, Math.PI*2); ctx.arc(s*0.15, s*0.2, s*0.1, 0, Math.PI*2); ctx.fill();
             } else {
                 // FRENTE (Atacando)
-                ctx.fillStyle = '#1e293b'; // Asas Delta Frontais
+                ctx.fillStyle = mainColor; // Asas Delta Frontais
                 ctx.beginPath(); ctx.moveTo(0, -s*0.2); ctx.lineTo(-s, s*0.4); ctx.lineTo(-s*0.2, s*0.5); ctx.lineTo(s*0.2, s*0.5); ctx.lineTo(s, s*0.4); ctx.fill();
                 ctx.fillStyle = '#334155'; // Bico/Corpo
                 ctx.beginPath(); ctx.moveTo(0, -s*0.8); ctx.lineTo(-s*0.2, s*0.3); ctx.lineTo(s*0.2, s*0.3); ctx.fill();
@@ -637,29 +864,21 @@
             if (this.yoke.active) {
                 ctx.save();
                 ctx.translate(w/2, h - 80);
-                // Vira visualmente o manche
                 ctx.rotate(this.yoke.normX * 0.4);
-                let sc = Math.max(0.6, Math.min(1.2, this.yoke.depthRatio)); // Aumenta/Diminui ligeiramente
+                let sc = Math.max(0.6, Math.min(1.2, this.yoke.depthRatio)); 
                 ctx.scale(sc, sc);
 
-                // Haste
                 ctx.fillStyle = '#111'; ctx.fillRect(-15, 0, 30, 200);
-                
-                // Manche Furtivo
                 ctx.strokeStyle = '#222'; ctx.lineWidth = 30; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
                 ctx.beginPath(); ctx.moveTo(-100, -40); ctx.lineTo(-60, 40); ctx.lineTo(60, 40); ctx.lineTo(100, -40); ctx.stroke();
-                
-                // Pegas de Borracha
                 ctx.strokeStyle = '#333'; ctx.lineWidth = 34;
                 ctx.beginPath(); ctx.moveTo(-100, -30); ctx.lineTo(-80, 10); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(100, -30); ctx.lineTo(80, 10); ctx.stroke();
 
-                // Gatilhos Vermelhos
                 ctx.fillStyle = '#e74c3c';
                 ctx.beginPath(); ctx.arc(-100, -45, 12, 0, Math.PI*2); ctx.fill();
                 ctx.beginPath(); ctx.arc(100, -45, 12, 0, Math.PI*2); ctx.fill();
 
-                // Tela Tática Central do Manche
                 ctx.fillStyle = '#0f172a'; ctx.fillRect(-35, 10, 70, 30);
                 ctx.strokeStyle = '#00ff66'; ctx.lineWidth = 2; ctx.strokeRect(-35, 10, 70, 30);
                 ctx.fillStyle = '#00ff66'; ctx.font = "bold 12px Arial"; ctx.textAlign="center";
@@ -675,11 +894,19 @@
                 ctx.fillText("LEVANTE AS MÃOS PARA AGARRAR O MANCHE", w/2, h - 25);
             }
 
-            // BARRA DE INTEGRIDADE (NO FUNDO)
+            // BARRA DE INTEGRIDADE E MISSÃO
             const hpW = Math.min(200, w * 0.4);
             ctx.fillStyle = '#222'; ctx.fillRect(20, h - 30, hpW, 10);
-            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c'; ctx.fillRect(20, h - 30, hpW * (this.ship.hp/100), 10);
+            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c'; ctx.fillRect(20, h - 30, hpW * (Math.max(0, this.ship.hp)/100), 10);
             ctx.fillStyle = '#fff'; ctx.font = "10px Arial"; ctx.textAlign="left"; ctx.fillText("CASCO / BLINDAGEM", 20, h - 35);
+            
+            // Score e Avisos MP
+            if (this.isMultiplayer) {
+                ctx.fillStyle = '#fff'; ctx.font = "bold 16px 'Chakra Petch'"; ctx.textAlign="right";
+                ctx.fillText(`ABATES PVP: ${this.mission.targetsDestroyed / 5}`, w - 20, h - 20);
+                ctx.fillStyle = '#e74c3c'; ctx.font = "bold 12px Arial";
+                ctx.fillText("DOGFIGHT ONLINE", w - 20, h - 40);
+            }
         }
     };
 
@@ -687,8 +914,11 @@
     const regLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
             window.System.registerGame('flight_sim', 'Aero Strike WAR', '🛩️', Game, {
-                camera: 'user', // Câmara frontal para rastrear braços/cabeça
-                phases: [ { id: 'mission1', name: 'TITANIUM SIMULATOR', desc: 'Pilote com as 2 mãos (empurre para descer). Tranque o alvo e incline a cabeça para mísseis!', reqLvl: 1 } ]
+                camera: 'user', 
+                phases: [ 
+                    { id: 'mission1', name: 'TITANIUM SIMULATOR', desc: 'Pilote com as 2 mãos (empurre para descer). Tranque o alvo e incline a cabeça para mísseis!', reqLvl: 1 },
+                    { id: 'pvp_dogfight', name: 'MULTIPLAYER ONLINE', desc: 'Dogfight em tempo real contra outros pilotos! Entre na sala e detone.', mode: 'MULTIPLAYER', reqLvl: 1 }
+                ]
             });
             clearInterval(regLoop);
         }
