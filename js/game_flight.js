@@ -241,7 +241,6 @@
             let realDt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
             
-            // Performance Tier Real
             this.fpsHistory.push(realDt);
             if(this.fpsHistory.length > 30) this.fpsHistory.shift();
             let avgDt = this.fpsHistory.reduce((a,b)=>a+b,0) / this.fpsHistory.length;
@@ -317,11 +316,13 @@
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             
-            // LIFT = K * speed^2, DRAG = f(AoA) * speed^2
+            // FÍSICA REAL: Lift Quadrático e Drag por Ângulo de Ataque
             let speedSq = this.ship.speed * this.ship.speed;
+            let pitchDeg = this.ship.pitch * 180 / Math.PI;
             let aoa = Math.abs(this.ship.pitchVel) * 10; 
             
-            let lift = 0.00005 * speedSq * Math.max(0, 1 - aoa * 0.2);
+            let liftK = 0.00005;
+            let lift = liftK * speedSq * Math.max(0, 1 - aoa * 0.2);
             let drag = (0.0001 + 0.005 * aoa) * speedSq;
             
             this.ship.gForce = 1 + ((this.ship.pitchVel * this.ship.speed) / 600);
@@ -332,7 +333,6 @@
 
             let maxSpeed = 3500 + (this.upgrades.engine * 500) - (this.ship.damage.engine * 20);
             
-            // Gravidade vs Lift
             let gravity = 9.8 * 60;
             let verticalForce = lift - gravity;
             
@@ -346,18 +346,16 @@
             }
 
             this.ship.speed -= drag * dt;
+            this.ship.speed += (fY * -600 * dt); // Gravidade mergulho
             this.ship.speed = Math.max(600, Math.min(maxSpeed * (this.pilot.isBoosting? 1.5 : 1), this.ship.speed));
 
-            // Dano Estrutural
             if (this.ship.speed > 4000 && fY < -0.5 && Math.abs(this.ship.gForce) > 7) {
                 this.ship.damage.body += 15 * dt;
                 window.Gfx?.shakeScreen(8);
                 if (Math.random() < 0.2) GameSfx.play('alarm');
             }
 
-            // Stall
-            let pitchDeg = Math.abs(this.ship.pitch * 180 / Math.PI);
-            if (this.ship.speed < 900 && pitchDeg > 25) {
+            if (this.ship.speed < 900 && Math.abs(pitchDeg) > 25) {
                 this.ship.pitchVel -= 2.5 * dt; 
                 window.Gfx?.shakeScreen(4);
                 if (Math.random() < 0.1) GameSfx.play('alarm');
@@ -770,7 +768,6 @@
                 }
             }
 
-            // Bullet Collisions
             for (let b of bullets) {
                 if (!this.entities[b.id]) continue; 
                 let bp = b.components.physics;
@@ -964,7 +961,7 @@
         },
 
         // =====================================================================
-        // RENDER / HUD
+        // HUD / RENDERING
         // =====================================================================
         _draw: function(ctx, w, h) {
             ctx.save();
