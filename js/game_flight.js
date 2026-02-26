@@ -1,6 +1,6 @@
 // =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V10 - DEFINITIVE ARCHITECTURE)
-// ENGINE: Engine3D, ECS (Entity Component System), G-Force Physics, Advanced AI
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V11 - PLATINUM MASTER)
+// ENGINE: 100% PURE ECS, REAL AERODYNAMIC PHYSICS, DYNAMIC PERFORMANCE TIER
 // =============================================================================
 (function() {
     "use strict";
@@ -80,7 +80,7 @@
         stop: function() { if (this.engineSrc) { try { this.engineSrc.stop(); } catch(e){} this.engineSrc = null; } }
     };
 
-    // --- CORE DO JOGO V10 ---
+    // --- CORE DO JOGO V11 ---
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE', slowMo: 1.0, slowMoTimer: 0, 
         fpsHistory: [], perfTier: 'HIGH',
@@ -88,12 +88,10 @@
         upgrades: { engine: 1, radar: 1, missile: 1, boost: 1, thermal: 1 },
         session: { kills: 0, goal: 30 },
         
-        // Entidades Globais
+        // --- 100% PURE ECS (ENTITY COMPONENT SYSTEM) ---
         entityIdCounter: 0,
-        entities: {}, 
-        bullets: [], missiles: [], clouds: [], fx: [], floaters: [], terrain: [],
+        entities: {}, // NENHUM array paralelo. Tudo vive aqui.
         
-        // Física e Dano
         ship: { 
             hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0,
             pitchVel: 0, yawVel: 0, rollVel: 0, boost: 100, overheat: 0, gForce: 1.0,
@@ -103,9 +101,15 @@
         timer: 4.0, hoverTime: 0, hoveredItem: null,
         
         combat: { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 },
-        net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, loop: null },
+        net: { isHost: false, uid: null, sessionRef: null, playersRef: null, loop: null },
         environment: { skyTop: '', skyBot: '', ground: '', isNight: false, stars: [] },
         cameraShake: 0,
+
+        _spawn: function(type, components) {
+            let id = type + '_' + this.entityIdCounter++;
+            this.entities[id] = Object.assign({ id: id, type: type }, components);
+            return id;
+        },
 
         init: function(faseData) {
             this.lastTime = performance.now();
@@ -113,6 +117,7 @@
             this.fpsHistory = [];
             this.perfTier = 'HIGH';
             this.entityIdCounter = 0;
+            this.entities = {}; 
             
             this.ship = { 
                 hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0,
@@ -120,18 +125,11 @@
                 damage: { lWing: 0, rWing: 0, engine: 0, body: 0 }
             };
             this.pilot = { active: false, targetRoll: 0, targetPitch: 0, headTilt: false, handL: {x:0,y:0}, handR: {x:0,y:0}, isBoosting: false };
-            this.entities = {}; this.bullets = []; this.missiles = []; this.clouds = []; this.fx = []; this.floaters = []; this.terrain = [];
             this.combat = { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 };
             this.slowMo = 1.0; this.slowMoTimer = 0; this.cameraShake = 0;
             
             this._setupEnvironment();
-            for (let i = 0; i < 60; i++) this.clouds.push({ id: 'c_'+i, x: (Math.random()-0.5)*120000, y: 8000+Math.random()*15000, z: (Math.random()-0.5)*120000, size: 4000+Math.random()*8000 });
-            for (let i = 0; i < 80; i++) {
-                this.terrain.push({
-                    x: (Math.random()-0.5)*200000, z: (Math.random()-0.5)*200000, w: 2000 + Math.random()*4000, h: 500 + Math.random()*3000,
-                    c: this.environment.isNight ? `rgb(${Math.random()*30},${30+Math.random()*40},${Math.random()*30})` : `rgb(${50+Math.random()*50},${60+Math.random()*40},${40+Math.random()*30})`
-                });
-            }
+            this._populateWorld();
 
             this.net.uid = window.System?.playerId || "p_" + Math.floor(Math.random()*9999);
             this.mode = faseData?.mode || 'SINGLE';
@@ -154,11 +152,24 @@
             }
         },
 
+        _populateWorld: function() {
+            let cloudCount = this.perfTier === 'LOW' ? 20 : (this.perfTier === 'MEDIUM' ? 40 : 60);
+            for (let i = 0; i < cloudCount; i++) {
+                this._spawn('cloud', { x: (Math.random()-0.5)*120000, y: 8000+Math.random()*15000, z: (Math.random()-0.5)*120000, size: 4000+Math.random()*8000 });
+            }
+            let terrainCount = this.perfTier === 'LOW' ? 30 : (this.perfTier === 'MEDIUM' ? 50 : 80);
+            for (let i = 0; i < terrainCount; i++) {
+                let c = this.environment.isNight ? `rgb(${Math.random()*30},${30+Math.random()*40},${Math.random()*30})` : `rgb(${50+Math.random()*50},${60+Math.random()*40},${40+Math.random()*30})`;
+                this._spawn('terrain', { x: (Math.random()-0.5)*200000, z: (Math.random()-0.5)*200000, w: 2000 + Math.random()*4000, h: 500 + Math.random()*3000, c: c });
+            }
+        },
+
         _initNet: function() {
-            this.state = 'LOBBY'; this.net.players = {};
+            this.state = 'LOBBY';
             this.net.sessionRef = window.DB.ref('br_army_sessions/aero_' + this.mode);
             this.net.playersRef = this.net.sessionRef.child('pilotos');
             this.net.playersRef.child(this.net.uid).onDisconnect().remove();
+            
             this.net.sessionRef.child('host').once('value').then(snap => {
                 if (!snap.val()) {
                     this.net.isHost = true; this.net.sessionRef.child('host').set(this.net.uid);
@@ -166,20 +177,27 @@
                 }
                 this.net.playersRef.child(this.net.uid).set({ name: window.Profile?.username || 'PILOTO', ready: false, hp: 100, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0 });
             });
-            // MULTIPLAYER SUAVE: Guardar target state em vez de hard-snap
+            
+            // LERP SUAVE VIA ECS
             this.net.playersRef.on('value', snap => { 
                 const data = snap.val() || {};
                 for (let uid in data) {
-                    if (!this.net.players[uid]) this.net.players[uid] = data[uid];
-                    else {
-                        let p = this.net.players[uid];
+                    if (uid === this.net.uid) continue;
+                    let entId = 'net_' + uid;
+                    if (!this.entities[entId]) {
+                        this._spawn('net_player', { id: entId, uid: uid, ...data[uid], tx: data[uid].x, ty: data[uid].y, tz: data[uid].z, tpitch: data[uid].pitch, tyaw: data[uid].yaw, troll: data[uid].roll });
+                    } else {
+                        let p = this.entities[entId];
                         p.tx = data[uid].x; p.ty = data[uid].y; p.tz = data[uid].z;
                         p.tpitch = data[uid].pitch; p.tyaw = data[uid].yaw; p.troll = data[uid].roll;
                         p.hp = data[uid].hp; p.name = data[uid].name; p.ready = data[uid].ready;
                     }
                 }
-                for (let uid in this.net.players) { if (!data[uid]) delete this.net.players[uid]; }
+                for (let id in this.entities) {
+                    if (this.entities[id].type === 'net_player' && !data[this.entities[id].uid]) delete this.entities[id];
+                }
             });
+            
             this.net.sessionRef.child('state').on('value', snap => {
                 if (snap.val() === 'PLAYING' && this.state === 'LOBBY') { this.state = 'HANGAR'; }
             });
@@ -190,31 +208,20 @@
             let realDt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
             
-            // OTIMIZAÇÃO MOBILE (Performance Adaptativa)
             this.fpsHistory.push(realDt);
             if(this.fpsHistory.length > 30) this.fpsHistory.shift();
             let avgDt = this.fpsHistory.reduce((a,b)=>a+b,0) / this.fpsHistory.length;
             let fps = 1 / avgDt;
+            
+            let oldTier = this.perfTier;
             if (fps >= 45) this.perfTier = 'HIGH'; else if (fps >= 25) this.perfTier = 'MEDIUM'; else this.perfTier = 'LOW';
+            if (oldTier !== this.perfTier && this.state === 'PLAYING') this._adjustECSForTier();
 
-            // CÂMERA CINEMÁTICA E SLOW MO
             if(this.slowMoTimer > 0) { this.slowMoTimer -= realDt; this.slowMo = 0.3; } 
             else { this.slowMo = 1.0; }
             if (this.cameraShake > 0) this.cameraShake *= 0.9;
             
             const dt = realDt * this.slowMo;
-
-            // MULTIPLAYER SUAVE LERP
-            if(this.mode !== 'SINGLE') {
-                for (let uid in this.net.players) {
-                    if (uid === this.net.uid) continue;
-                    let p = this.net.players[uid];
-                    if (p.tx !== undefined) {
-                        p.x += (p.tx - p.x) * dt * 10; p.y += (p.ty - p.y) * dt * 10; p.z += (p.tz - p.z) * dt * 10;
-                        p.pitch += (p.tpitch - p.pitch) * dt * 10; p.yaw += (p.tyaw - p.yaw) * dt * 10; p.roll += (p.troll - p.roll) * dt * 10;
-                    }
-                }
-            }
 
             if (this.state === 'LOBBY') { this._drawLobby(ctx, w, h); return 0; }
             
@@ -231,11 +238,7 @@
 
             this._processPhysics(dt);
             this._processCombat(dt, w, h, now);
-            this._processAI(dt);
-            this._updateEntities(dt, now);
-            this._updateBullets(dt);
-            this._updateMissiles(dt);
-            this._cleanupFx(dt);
+            this._processECS(dt, now); 
 
             if (this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
 
@@ -250,6 +253,17 @@
                 this.net.playersRef.off(); this.net.sessionRef?.child('state')?.off();
                 this.net.playersRef.child(this.net.uid)?.remove();
                 if (this.net.isHost) this.net.sessionRef?.remove();
+            }
+        },
+
+        _adjustECSForTier: function() {
+            let limit = this.perfTier === 'LOW' ? 20 : (this.perfTier === 'MEDIUM' ? 40 : 60);
+            let current = 0;
+            for(let id in this.entities) {
+                if (this.entities[id].type === 'cloud' || this.entities[id].type === 'terrain') {
+                    current++;
+                    if (current > limit) delete this.entities[id];
+                }
             }
         },
 
@@ -315,17 +329,15 @@
             }
         },
 
-        // --- FÍSICA AERODINÂMICA AVANÇADA ---
+        // --- FÍSICA AERODINÂMICA REAL (AOA, LIFT QUADRÁTICO, DRAG) ---
         _processPhysics: function(dt) {
             let yawDamping = 0.92, pitchDamping = 0.90, rollDamping = 0.88;
-            
-            // Dano Progressivo reduz controle
             let wingDmgRatio = (this.ship.damage.rWing - this.ship.damage.lWing) * 0.05;
             let controlLoss = Math.max(0.3, 1.0 - (this.ship.damage.body + this.ship.damage.engine) / 200);
             
             this.ship.rollVel += ((this.pilot.targetRoll - this.ship.roll) * 15 * controlLoss * dt) + (wingDmgRatio * dt);
             this.ship.pitchVel += (this.pilot.targetPitch - this.ship.pitch) * 10 * controlLoss * dt;
-            this.ship.yawVel += (this.ship.rollVel * 0.5) * dt; // Peso aerodinâmico
+            this.ship.yawVel += (this.ship.rollVel * 0.5) * dt; 
 
             this.ship.rollVel *= rollDamping;
             this.ship.pitchVel *= pitchDamping;
@@ -340,24 +352,30 @@
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             
-            // G-Force Calculation (Lift over Mass simplificado)
+            // FÍSICA REAL: Velocidade, AoA, Lift e Drag
+            let speedSq = this.ship.speed * this.ship.speed;
+            let aoa = Math.abs(this.ship.pitchVel) * 10; 
+            
+            // Lift = k * v^2 * (fator de ângulo de ataque)
+            let lift = 0.00005 * speedSq * Math.max(0, 1 - aoa * 0.2);
+            // Drag dependente de AoA
+            let drag = (0.0001 + 0.005 * aoa) * speedSq;
+            
+            // G-Force baseada em variação angular real e velocidade
             this.ship.gForce = 1 + ((this.ship.pitchVel * this.ship.speed) / 600);
             if (Math.abs(this.ship.gForce) > 6) {
                 this.cameraShake = Math.max(this.cameraShake, Math.abs(this.ship.gForce) - 5);
                 window.Gfx?.shakeScreen(this.cameraShake);
             }
 
-            // Lift & Drag dinâmicos
             let maxSpeed = 3500 + (this.upgrades.engine * 500) - (this.ship.damage.engine * 20);
-            let aoa = Math.abs(this.ship.pitchVel); // Ângulo de ataque (simplificado para velocidade angular)
-            let drag = (0.00015 + 0.0005 * aoa) * this.ship.speed * this.ship.speed; // Drag aumenta severamente em manobras
             
-            this.ship.speed += (fY * -600 * dt); // Gravidade no mergulho
+            this.ship.speed += (fY * -600 * dt); // Gravidade puxa em mergulho
             
             if (this.pilot.isBoosting && this.ship.boost > 0) {
                 this.ship.speed += 2500 * dt;
                 this.ship.boost -= (50 / this.upgrades.boost) * dt;
-                Engine3D.fov += (1000 - Engine3D.fov) * dt * 5; // Zoom dinâmico
+                Engine3D.fov += (1000 - Engine3D.fov) * dt * 5; 
             } else {
                 this.ship.boost = Math.min(100, this.ship.boost + 15 * dt);
                 Engine3D.fov += (800 - Engine3D.fov) * dt * 5;
@@ -366,17 +384,17 @@
             this.ship.speed -= drag * dt;
             this.ship.speed = Math.max(600, Math.min(maxSpeed * (this.pilot.isBoosting? 1.5 : 1), this.ship.speed));
 
-            // Risco Estrutural em Mergulho Extremo
-            if (this.ship.speed > 4800) {
-                this.ship.damage.body += 10 * dt;
-                window.Gfx?.shakeScreen(5);
+            // Dano Estrutural: Velocidade alta + mergulho extremo + G excessivo
+            if (this.ship.speed > 4000 && fY < -0.5 && Math.abs(this.ship.gForce) > 7) {
+                this.ship.damage.body += 15 * dt;
+                window.Gfx?.shakeScreen(8);
                 if (Math.random() < 0.2) GameSfx.play('alarm');
             }
 
-            // STALL SYSTEM CORRIGIDO (Velocidade baixa E Ângulo crítico)
+            // Perda de sustentação progressiva (Stall)
             let pitchDeg = Math.abs(this.ship.pitch * 180 / Math.PI);
             if (this.ship.speed < 900 && pitchDeg > 25) {
-                this.ship.pitchVel -= 2.5 * dt; // Nariz cai violentamente
+                this.ship.pitchVel -= 2.5 * dt; 
                 window.Gfx?.shakeScreen(4);
                 if (Math.random() < 0.1) GameSfx.play('alarm');
             }
@@ -389,7 +407,7 @@
             if (totalDmg > 30 && this.perfTier !== 'LOW') {
                 let sCol = totalDmg > 70 ? (Math.random()>0.5?'#e74c3c':'#333') : 'rgba(80,80,80,0.6)';
                 let sSize = totalDmg > 70 ? 400 : 200;
-                this.fx.push({x: this.ship.x, y: this.ship.y, z: this.ship.z, vx: 0, vy: 0, vz: 0, life: 2.0, c: sCol, size: sSize});
+                this._spawn('fx', {x: this.ship.x, y: this.ship.y, z: this.ship.z, vx: 0, vy: 0, vz: 0, life: 2.0, c: sCol, size: sSize});
             }
         },
 
@@ -449,54 +467,43 @@
             }
         },
 
-        // --- LOCK-ON AVANÇADO ---
+        // --- LOCK-ON AVANÇADO MULTIFATORIAL ---
         _processCombat: function(dt, w, h, now) {
             let radarRange = 100000 + (this.upgrades.radar * 20000);
             
-            // Verifica se o alvo atual ainda é válido
-            let currentTarget = null;
-            if (this.combat.targetId) {
-                let e = this.entities[this.combat.targetId];
-                if (e && e.hp > 0) currentTarget = e;
-                else if (this.net.players[this.combat.targetId] && this.net.players[this.combat.targetId].hp > 0) {
-                    currentTarget = this.net.players[this.combat.targetId];
-                    currentTarget.isPlayer = true;
-                    currentTarget.uid = this.combat.targetId;
-                }
-            }
+            let currentTarget = this.combat.targetId ? this.entities[this.combat.targetId] : null;
+            if (currentTarget && currentTarget.hp <= 0) currentTarget = null;
 
-            // Tracking contínuo e chance de acerto
             if (currentTarget) {
                 let dx = currentTarget.x - this.ship.x, dy = currentTarget.y - this.ship.y, dz = currentTarget.z - this.ship.z;
                 let dist = Math.hypot(dx, dy, dz);
                 let p = Engine3D.project(currentTarget.x, currentTarget.y, currentTarget.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 
-                // Perde o lock se sair do FOV por muito tempo ou ângulo extremo (alinhamento)
                 if (!p.visible || dist > radarRange || Math.abs(p.x - w/2) > w*0.45 || Math.abs(p.y - h/2) > h*0.45) {
                     this.combat.locked = false; this.combat.lockTimer = 0; this.combat.targetId = null; currentTarget = null;
                 } else {
-                    // Cálculo da Chance de Acerto
-                    let angleFactor = Math.abs(p.x - w/2) / (w/2); 
-                    this.combat.hitChance = Math.max(0, Math.min(100, 100 - (dist/radarRange * 50) - (angleFactor * 50)));
+                    // Cálculo Probabilístico de Chance de Acerto
+                    let distPenalty = (dist / radarRange) * 30;
+                    let anglePenalty = (Math.abs(p.x - w/2) / (w/2)) * 30;
+                    let relSpeedPenalty = Math.abs(this.ship.speed - (currentTarget.speed || 0)) / 1000 * 10;
+                    let gForcePenalty = Math.abs(this.ship.gForce - 1) * 5;
+                    let evadePenalty = (currentTarget.aiState === 'EVADE') ? 40 : 0;
+                    
+                    this.combat.hitChance = Math.max(0, Math.min(100, 100 - distPenalty - anglePenalty - relSpeedPenalty - gForcePenalty - evadePenalty));
                 }
             }
 
-            // Procura novo alvo
             if (!currentTarget) {
                 this.combat.hitChance = 0;
                 let closestZ = Infinity;
-                const scan = (obj, isPlayer, uid) => {
-                    let p = Engine3D.project(obj.x, obj.y, obj.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    if (p.visible && p.z > 500 && p.z < radarRange && Math.abs(p.x - w/2) < w*0.35 && Math.abs(p.y - h/2) < h*0.35 && p.z < closestZ) {
-                        closestZ = p.z; this.combat.targetId = isPlayer ? uid : obj.id; currentTarget = obj;
+                for (let id in this.entities) {
+                    let e = this.entities[id];
+                    if (e.type.startsWith('enemy') || e.type === 'boss' || e.type === 'net_player') {
+                        let p = Engine3D.project(e.x, e.y, e.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                        if (p.visible && p.z > 500 && p.z < radarRange && Math.abs(p.x - w/2) < w*0.35 && Math.abs(p.y - h/2) < h*0.35 && p.z < closestZ) {
+                            closestZ = p.z; this.combat.targetId = e.id; currentTarget = e;
+                        }
                     }
-                };
-                
-                Object.values(this.entities).forEach(e => scan(e, false, e.id));
-                if (this.mode === 'PVP') {
-                    Object.keys(this.net.players).forEach(id => {
-                        if (id !== this.net.uid && this.net.players[id]?.hp > 0) scan(this.net.players[id], true, id);
-                    });
                 }
             }
 
@@ -524,209 +531,247 @@
                 let dx = currentTarget.x - this.ship.x, dy = currentTarget.y - this.ship.y, dz = currentTarget.z - this.ship.z;
                 let dist = Math.hypot(dx,dy,dz);
                 dx += (Math.random()-0.5)*1500; dy += (Math.random()-0.5)*1500;
-                this.bullets.push({ x: this.ship.x, y: this.ship.y-30, z: this.ship.z, vx: dx/dist*spd, vy: dy/dist*spd, vz: dz/dist*spd, isEnemy: false, life: 2.5 });
+                
+                this._spawn('bullet', { x: this.ship.x, y: this.ship.y-30, z: this.ship.z, vx: dx/dist*spd, vy: dy/dist*spd, vz: dz/dist*spd, isEnemy: false, life: 2.5, c: '#ffff00', size: 250, tracer: true });
                 GameSfx.play('vulcan'); window.Gfx?.shakeScreen(1);
             } else if (!this.combat.locked && !this.combat.isJammed) {
                 this.ship.overheat = Math.max(0, this.ship.overheat - 10 * dt);
             }
 
-            // MÍSSIL POR ID
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0 && this.combat.targetId) {
                 this.combat.missileCd = 1.5;
                 let mSpd = this.ship.speed * 15 + 10000;
                 let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fY = Math.sin(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
                 
-                this.missiles.push({
+                this._spawn('missile', {
                     x: this.ship.x, y: this.ship.y-100, z: this.ship.z,
                     vx: fX*mSpd + (Math.random()-0.5)*5000, vy: fY*mSpd - 2000, vz: fZ*mSpd + (Math.random()-0.5)*5000,
                     targetId: this.combat.targetId,
-                    isPlayer: currentTarget.isPlayer === true,
+                    isPlayer: currentTarget.type === 'net_player',
                     life: 8, speed: mSpd
                 });
                 GameSfx.play('missile'); window.Gfx?.shakeScreen(5);
             }
         },
 
-        // --- SISTEMA CENTRAL DE ENTIDADES E IA COM ESTADOS ---
-        _spawnEnemies: function() {
-            if (Object.keys(this.entities).length >= 8 || Math.random() > 0.02) return;
-            let dist = 60000 + Math.random()*30000;
-            let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
-            let sx = this.ship.x + fX*dist + (Math.random()-0.5)*50000, sz = this.ship.z + fZ*dist + (Math.random()-0.5)*50000;
+        // --- CORE ECS LOOP ---
+        _processECS: function(dt, now) {
+            // Spawn dinâmico de inimigos
+            let enemyCount = 0;
+            for(let id in this.entities) if(this.entities[id].type.startsWith('enemy') || this.entities[id].type === 'boss') enemyCount++;
+            let maxEnemies = this.perfTier === 'LOW' ? 4 : 8;
             
-            let r = Math.random();
-            let id = 'e_' + this.entityIdCounter++;
-            
-            // BOSS MULTIFASE
-            if (this.session.kills > 10 && r < 0.1 && !Object.values(this.entities).find(e => e.type === 'boss')) {
-                this.entities[id] = { 
-                    id: id, type: 'boss', x: sx, y: 30000, z: sz, speed: 12000,
-                    hp: 3000, maxHp: 3000, yaw: this.ship.yaw + Math.PI, aiState: 'ENGAGE',
-                    phase: 1, timer: 0,
-                    weakPoints: { left: 800, right: 800, core: 1400 } // Pontos separados
-                };
-                window.System?.msg("FORTALEZA VOADORA DETECTADA!");
-                return;
+            if (enemyCount < maxEnemies && Math.random() < 0.02) {
+                let dist = 60000 + Math.random()*30000;
+                let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
+                let sx = this.ship.x + fX*dist + (Math.random()-0.5)*50000, sz = this.ship.z + fZ*dist + (Math.random()-0.5)*50000;
+                
+                let r = Math.random();
+                if (this.session.kills > 10 && r < 0.1 && !Object.values(this.entities).find(e => e.type === 'boss')) {
+                    this._spawn('boss', { x: sx, y: 30000, z: sz, speed: 12000, hp: 3000, maxHp: 3000, yaw: this.ship.yaw + Math.PI, aiState: 'ENGAGE', phase: 1, timer: 0, weakPoints: { left: 800, right: 800, core: 1400 } });
+                    window.System?.msg("FORTALEZA VOADORA DETECTADA!");
+                } else if (r < 0.3) {
+                    this._spawn('enemy_squadron_lead', { x: sx, y: this.ship.y, z: sz, hp: 200, maxHp: 200, yaw: this.ship.yaw + Math.PI, aiState: 'PATROL', timer: 0, speed: 20000 });
+                    this._spawn('enemy_squadron_wing', { x: sx+5000, y: this.ship.y+2000, z: sz, hp: 150, maxHp: 150, yaw: this.ship.yaw + Math.PI, aiState: 'FLANK', timer: 0, speed: 22000 });
+                } else if (r < 0.6) {
+                    this._spawn('enemy_interceptor', { x: sx, y: this.ship.y, z: sz, hp: 250, maxHp: 250, yaw: this.ship.yaw, aiState: 'PATROL', timer: 0, speed: 25000 });
+                } else if (r < 0.8) {
+                    this._spawn('enemy_evasive', { x: sx, y: this.ship.y, z: sz, hp: 150, maxHp: 150, yaw: this.ship.yaw + Math.PI, aiState: 'PATROL', timer: 0, speed: 28000 });
+                } else {
+                    this._spawn('enemy_tank', { x: sx, y: 0, z: sz, hp: 400, maxHp: 400, yaw: Math.random()*Math.PI*2, aiState: 'PATROL', timer: 0, speed: 0 });
+                }
             }
 
-            let ent = { id: id, x: sx, y: this.ship.y, z: sz, hp: 200, maxHp: 200, yaw: this.ship.yaw + Math.PI, aiState: 'PATROL', timer: 0, speed: 20000 };
-
-            if (r < 0.3) {
-                ent.type = 'squadron_lead';
-                let wingId = 'e_' + this.entityIdCounter++;
-                this.entities[id] = ent;
-                this.entities[wingId] = { id: wingId, type: 'squadron_wing', x: sx+5000, y: this.ship.y+2000, z: sz, hp: 150, yaw: this.ship.yaw + Math.PI, aiState: 'FLANK', timer: 0, speed: 22000 };
-            } else if (r < 0.6) {
-                ent.type = 'interceptor'; ent.hp = 250; ent.speed = 25000;
-                this.entities[id] = ent;
-            } else if (r < 0.8) {
-                ent.type = 'evasive'; ent.hp = 150; ent.speed = 28000;
-                this.entities[id] = ent;
-            } else {
-                ent.type = 'tank'; ent.y = 0; ent.hp = 400; ent.speed = 0;
-                this.entities[id] = ent;
-            }
-        },
-
-        _processAI: function(dt) {
-            Object.values(this.entities).forEach(e => {
-                let dx = this.ship.x - e.x, dy = this.ship.y - e.y, dz = this.ship.z - e.z;
-                let distToPlayer = Math.hypot(dx, dy, dz);
-                let incomingMissile = this.missiles.find(m => m.targetId === e.id);
-                
-                // IA de TANK
-                if (e.type === 'tank') {
-                    if (distToPlayer < 40000 && Math.random() < 0.04) {
-                        let bSpd = 18000;
-                        this.bullets.push({ x: e.x, y: e.y, z: e.z, vx: (dx)/distToPlayer*bSpd, vy: (dy)/distToPlayer*bSpd, vz: (dz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                    }
-                    return; // Tank não voa
-                }
-
-                // Avaliação de Energia e Transição de Estado
-                let energy = e.y + (e.speed * 0.5);
-                if (e.type !== 'boss') {
-                    if (energy < 5000) e.aiState = 'STALL_RECOVER';
-                    else if (incomingMissile) e.aiState = 'EVADE';
-                    else if (e.hp < e.maxHp * 0.3) e.aiState = 'RETREAT';
-                    else if (e.aiState === 'STALL_RECOVER' || e.aiState === 'EVADE') e.aiState = 'ENGAGE';
-                }
-
-                // Execução de Estados
-                if (e.aiState === 'STALL_RECOVER') {
-                    e.y -= 15000 * dt; // Mergulha para ganhar velocidade
-                    e.speed += 5000 * dt;
-                    e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                }
-                else if (e.aiState === 'EVADE') {
-                    e.yaw += Math.PI * dt; // Gira rapidamente
-                    e.x += Math.sin(e.yaw) * e.speed * 1.5 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.5 * dt;
-                    e.y += (Math.random() - 0.5) * 20000 * dt;
-                    if (Math.random() < 0.1 && this.perfTier !== 'LOW') { // Flares
-                        this.fx.push({x: e.x, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 1.0, c: '#f1c40f', size: 200});
-                    }
-                }
-                else if (e.aiState === 'RETREAT') {
-                    e.yaw = this.ship.yaw; 
-                    e.x += Math.sin(e.yaw) * e.speed * 1.2 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.2 * dt;
-                    e.y += 10000 * dt;
-                }
-                else if (e.aiState === 'FLANK') {
-                    // Tenta se posicionar na lateral do player
-                    let flankAngle = this.ship.yaw + Math.PI/2;
-                    e.yaw += (flankAngle - e.yaw) * dt;
-                    e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                }
-                else { // ENGAGE & PATROL
-                    if (e.type === 'interceptor') {
-                        // LEAD PURSUIT
-                        let estTime = distToPlayer / e.speed; 
-                        let pVelX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
-                        let pVelY = Math.sin(this.ship.pitch) * this.ship.speed * 20;
-                        let pVelZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
-
-                        let futureX = this.ship.x + (pVelX * estTime);
-                        let futureY = this.ship.y + (pVelY * estTime);
-                        let futureZ = this.ship.z + (pVelZ * estTime);
-
-                        e.yaw = Math.atan2(futureX - e.x, futureZ - e.z);
-                        e.y += (futureY - e.y) * 0.5 * dt;
-                    } else if (e.type === 'boss') {
-                        e.yaw = Math.atan2(dx, dz);
-                    } else {
-                        // Pursuit Normal
-                        e.yaw = Math.atan2(dx, dz);
-                    }
-                    e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                }
-
-                // BOSS FASES REAIS
-                if (e.type === 'boss') {
-                    if (e.phase === 1 && e.hp < e.maxHp * 0.66) { e.phase = 2; window.System?.msg("BOSS: MODO AGRESSIVO!"); e.speed = 18000; }
-                    if (e.phase === 2 && e.hp < e.maxHp * 0.33) { e.phase = 3; window.System?.msg("BOSS: NÚCLEO EXPOSTO!"); e.speed = 25000; }
-
-                    if(e.y < 15000) e.y += 5000*dt;
-                    
-                    if (e.phase === 3) e.x += Math.sin(now * 0.005) * 10000 * dt; // Movimento errático
-
-                    e.timer += dt;
-                    let fireRate = e.phase === 3 ? 0.3 : (e.phase === 2 ? 0.8 : 1.5);
-                    if (e.timer > fireRate && distToPlayer < 70000) {
-                        e.timer = 0; let bSpd = 45000;
-                        if (e.weakPoints.left > 0) {
-                            let cx = e.x + Math.cos(e.yaw) * 120; let cz = e.z - Math.sin(e.yaw) * 120;
-                            this.bullets.push({ x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                        }
-                        if (e.weakPoints.right > 0) {
-                            let cx = e.x - Math.cos(e.yaw) * 120; let cz = e.z + Math.sin(e.yaw) * 120;
-                            this.bullets.push({ x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                        }
-                        if (e.phase >= 2 && e.weakPoints.core > 0) {
-                            this.bullets.push({ x: e.x, y: e.y+50, z: e.z, vx: dx/distToPlayer*bSpd, vy: dy/distToPlayer*bSpd, vz: dz/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                        }
-                    }
-                }
-
-                // Despawn de Distância
-                if (distToPlayer > 200000) e.hp = -1;
-                
-                // Tiros de IA comum
-                if (e.type !== 'boss' && e.aiState === 'ENGAGE' && distToPlayer < 40000 && Math.random() < 0.05) {
-                    let bSpd = 35000;
-                    this.bullets.push({ x: e.x, y: e.y, z: e.z, vx: dx/distToPlayer*bSpd, vy: dy/distToPlayer*bSpd, vz: dz/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                }
-            });
+            // Listas para colisão
+            let bullets = []; let targets = [];
             
-            // Limpa Mortos do dicionário
+            // Loop Único do ECS
             for (let id in this.entities) {
-                if (this.entities[id].hp <= 0) delete this.entities[id];
+                let e = this.entities[id];
+                
+                if (e.type === 'cloud' || e.type === 'terrain') {
+                    if (Math.hypot(e.x-this.ship.x, e.z-this.ship.z) > 150000) {
+                        let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
+                        e.z = this.ship.z + fZ*120000 + (Math.random()-0.5)*80000; e.x = this.ship.x + fX*120000 + (Math.random()-0.5)*80000;
+                    }
+                }
+                else if (e.type === 'floater') {
+                    e.life -= dt; e.y -= 120*dt;
+                    if(e.life <= 0) delete this.entities[id];
+                }
+                else if (e.type === 'fx') {
+                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
+                    if(e.life <= 0) delete this.entities[id];
+                }
+                else if (e.type === 'net_player') {
+                    if (e.tx !== undefined) {
+                        e.x += (e.tx - e.x) * dt * 10; e.y += (e.ty - e.y) * dt * 10; e.z += (e.tz - e.z) * dt * 10;
+                        e.pitch += (e.tpitch - e.pitch) * dt * 10; e.yaw += (e.tyaw - e.yaw) * dt * 10; e.roll += (e.troll - e.roll) * dt * 10;
+                    }
+                    targets.push(e);
+                }
+                else if (e.type === 'bullet') {
+                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
+                    if (e.life <= 0 || e.y < 0) { 
+                        if(e.y < 0 && this.perfTier !== 'LOW') this._spawn('fx', {x:e.x, y:0, z:e.z, vx:0, vy:0, vz:0, life:1.0, c:'#789', size:100});
+                        delete this.entities[id]; 
+                    } else {
+                        bullets.push(e);
+                        if (this.perfTier === 'HIGH' || Math.random() < 0.5) this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:0.1, c: e.isEnemy?'#ff3300':'#ffff00', size: 250, tracer: true});
+                    }
+                }
+                else if (e.type === 'missile') {
+                    e.speed += 20000 * dt; 
+                    let activeTarget = this.entities[e.targetId];
+                    if (!activeTarget || activeTarget.hp <= 0) {
+                        e.life = 0; delete this.entities[id];
+                        if(this.perfTier !== 'LOW') this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'rgba(100,100,100,0.5)', size: 400});
+                        continue;
+                    }
+                    let dx = activeTarget.x - e.x, dy = activeTarget.y - e.y, dz = activeTarget.z - e.z;
+                    let d = Math.hypot(dx,dy,dz);
+                    let turn = (50000 + (this.upgrades.missile * 10000)) * dt; 
+                    e.vx += (dx/d)*turn; e.vy += (dy/d)*turn; e.vz += (dz/d)*turn;
+                    let velD = Math.hypot(e.vx, e.vy, e.vz);
+                    if(velD > e.speed) { e.vx = (e.vx/velD)*e.speed; e.vy = (e.vy/velD)*e.speed; e.vz = (e.vz/velD)*e.speed; }
+                    
+                    let hitbox = activeTarget.type === 'boss' ? 9000 : 3000;
+                    if (d < hitbox) {
+                        if (activeTarget.type === 'net_player' && this.mode === 'PVP') {
+                            window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${activeTarget.uid}/hp`).set(activeTarget.hp-60);
+                            this._spawn('fx', {x:activeTarget.x, y:activeTarget.y, z:activeTarget.z, vx:0, vy:0, vz:0, life:2.0, c:'#f33', size:400}); this.money += 800;
+                        } else if (activeTarget.type !== 'net_player') {
+                            this._applyDamageToEnemy(activeTarget, 500);
+                        }
+                        e.life = 0; delete this.entities[id]; GameSfx.play('boom'); window.Gfx?.shakeScreen(5);
+                        continue;
+                    }
+                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
+                    if(e.y < 0) { e.life = 0; delete this.entities[id]; this._spawn('fx', {x:e.x, y:0, z:e.z, vx:0, vy:0, vz:0, life:2.0, c:'#a55', size:200}); continue; }
+                    if (this.perfTier === 'HIGH' || Math.random() < 0.5) this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300, life: 1.5, c:'rgba(220,220,220,0.6)', size: 500}); 
+                }
+                else if (e.type.startsWith('enemy') || e.type === 'boss') {
+                    targets.push(e);
+                    let dx = this.ship.x - e.x, dy = this.ship.y - e.y, dz = this.ship.z - e.z;
+                    let distToPlayer = Math.hypot(dx, dy, dz);
+                    
+                    if (distToPlayer > 200000) { delete this.entities[id]; continue; }
+
+                    if (e.type === 'enemy_tank') {
+                        if (distToPlayer < 40000 && Math.random() < 0.04) {
+                            this._spawn('bullet', { x: e.x, y: e.y, z: e.z, vx: (dx)/distToPlayer*18000, vy: (dy)/distToPlayer*18000, vz: (dz)/distToPlayer*18000, isEnemy: true, life: 4.0 });
+                        }
+                        continue; 
+                    }
+
+                    // AI de Energia
+                    let energy = e.y + (e.speed * 0.5);
+                    let incomingMissile = false; // Busca se há missil vindo
+                    for(let mid in this.entities) if(this.entities[mid].type === 'missile' && this.entities[mid].targetId === id) incomingMissile = true;
+                    
+                    if (e.type !== 'boss') {
+                        if (energy < 5000) e.aiState = 'STALL_RECOVER';
+                        else if (incomingMissile) e.aiState = 'EVADE';
+                        else if (e.hp < e.maxHp * 0.3) e.aiState = 'RETREAT';
+                        else if (e.aiState === 'STALL_RECOVER' || e.aiState === 'EVADE') e.aiState = 'ENGAGE';
+                    }
+
+                    if (e.aiState === 'STALL_RECOVER') {
+                        e.y -= 15000 * dt; e.speed += 5000 * dt;
+                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
+                    }
+                    else if (e.aiState === 'EVADE') {
+                        e.yaw += Math.PI * dt; e.x += Math.sin(e.yaw) * e.speed * 1.5 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.5 * dt; e.y += (Math.random() - 0.5) * 20000 * dt;
+                        if (Math.random() < 0.1 && this.perfTier !== 'LOW') this._spawn('fx', {x: e.x, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 1.0, c: '#f1c40f', size: 200});
+                    }
+                    else if (e.aiState === 'RETREAT') {
+                        e.yaw = this.ship.yaw; e.x += Math.sin(e.yaw) * e.speed * 1.2 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.2 * dt; e.y += 10000 * dt;
+                    }
+                    else if (e.aiState === 'FLANK') {
+                        e.yaw += ((this.ship.yaw + Math.PI/2) - e.yaw) * dt;
+                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
+                    }
+                    else {
+                        if (e.type === 'enemy_interceptor') {
+                            let estTime = distToPlayer / e.speed; 
+                            let pVelX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
+                            let pVelZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
+                            e.yaw = Math.atan2((this.ship.x + pVelX * estTime) - e.x, (this.ship.z + pVelZ * estTime) - e.z);
+                            e.y += ((this.ship.y + Math.sin(this.ship.pitch) * this.ship.speed * 20 * estTime) - e.y) * 0.5 * dt;
+                        } else if (e.type === 'boss') {
+                            e.yaw = Math.atan2(dx, dz);
+                        } else {
+                            e.yaw = Math.atan2(dx, dz);
+                        }
+                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
+                    }
+
+                    if (e.type === 'boss') {
+                        if (e.phase === 1 && e.hp < e.maxHp * 0.66) { e.phase = 2; window.System?.msg("BOSS: MODO AGRESSIVO!"); e.speed = 18000; }
+                        if (e.phase === 2 && e.hp < e.maxHp * 0.33) { e.phase = 3; window.System?.msg("BOSS: NÚCLEO EXPOSTO!"); e.speed = 25000; }
+
+                        if(e.y < 15000) e.y += 5000*dt;
+                        
+                        if (e.phase === 3) {
+                            e.yaw += (Math.random() - 0.5) * 3 * dt; 
+                            e.x += Math.sin(now * 0.005) * 10000 * dt; 
+                            if (Math.random() < 0.1) this._spawn('fx', {x: e.x + (Math.random()-0.5)*200, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 1.0, c: '#e74c3c', size: 300});
+                        }
+
+                        e.timer += dt;
+                        let fireRate = e.phase === 3 ? 0.3 : (e.phase === 2 ? 0.8 : 1.5);
+                        if (e.timer > fireRate && distToPlayer < 70000) {
+                            e.timer = 0; let bSpd = 45000;
+                            if (e.weakPoints.left > 0) {
+                                let cx = e.x + Math.cos(e.yaw) * 120, cz = e.z - Math.sin(e.yaw) * 120;
+                                this._spawn('bullet', { x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
+                            }
+                            if (e.weakPoints.right > 0) {
+                                let cx = e.x - Math.cos(e.yaw) * 120, cz = e.z + Math.sin(e.yaw) * 120;
+                                this._spawn('bullet', { x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
+                            }
+                            if (e.phase >= 2 && e.weakPoints.core > 0) {
+                                this._spawn('bullet', { x: e.x, y: e.y+50, z: e.z, vx: dx/distToPlayer*bSpd, vy: dy/distToPlayer*bSpd, vz: dz/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
+                            }
+                        }
+                    }
+
+                    if (e.type !== 'boss' && e.aiState === 'ENGAGE' && distToPlayer < 40000 && Math.random() < 0.05) {
+                        this._spawn('bullet', { x: e.x, y: e.y, z: e.z, vx: dx/distToPlayer*35000, vy: dy/distToPlayer*35000, vz: dz/distToPlayer*35000, isEnemy: true, life: 4.0 });
+                    }
+                }
             }
-        },
 
-        _updateEntities: function(dt, now) {
-            // Movido para _processAI
-        },
-
-        _takeDamage: function(amount) {
-            this.ship.hp -= amount;
-            this.cameraShake = 15;
-            window.Gfx?.shakeScreen(15); 
-            this._fx(this.ship.x, this.ship.y, this.ship.z + 500, '#f00', 5, 200); 
-            GameSfx.play('boom');
-            
-            let parts = ['lWing', 'rWing', 'engine', 'body'];
-            let hitPart = parts[Math.floor(Math.random() * parts.length)];
-            this.ship.damage[hitPart] += amount * 0.5;
-            
-            if (this.ship.hp <= 0) this._endGame('GAMEOVER');
+            // Colisões Bullet x Player/Enemies
+            for (let b of bullets) {
+                if (!this.entities[b.id]) continue; 
+                if (b.isEnemy) {
+                    if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 1500) {
+                        this._takeDamage(10); delete this.entities[b.id];
+                    }
+                } else {
+                    for (let t of targets) {
+                        let hitbox = t.type === 'boss' ? 8000 : 2500;
+                        if (Math.hypot(b.x-t.x, b.y-t.y, b.z-t.z) < hitbox) { 
+                            delete this.entities[b.id]; this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:1.0,c:'#f90',size:100});
+                            if (t.type === 'net_player' && this.mode === 'PVP' && this.net.isHost) {
+                                window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${t.uid}/hp`).set(t.hp-10);
+                            } else if (t.type !== 'net_player') {
+                                this._applyDamageToEnemy(t, 35);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
         },
 
         _applyDamageToEnemy: function(e, amount) {
             if (e.type === 'boss') {
-                if (e.weakPoints.left > 0) { e.weakPoints.left -= amount; this._fx(e.x+100, e.y, e.z, '#ff3300', 10, 300); }
-                else if (e.weakPoints.right > 0) { e.weakPoints.right -= amount; this._fx(e.x-100, e.y, e.z, '#ff3300', 10, 300); }
-                else { e.weakPoints.core -= amount; this._fx(e.x, e.y, e.z, '#3498db', 20, 500); }
+                if (e.weakPoints.left > 0) { e.weakPoints.left -= amount; this._spawn('fx', {x:e.x+100, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'#ff3300', size:300}); }
+                else if (e.weakPoints.right > 0) { e.weakPoints.right -= amount; this._spawn('fx', {x:e.x-100, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'#ff3300', size:300}); }
+                else { e.weakPoints.core -= amount; this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:2.0, c:'#3498db', size:500}); }
                 e.hp -= amount; 
             } else {
                 e.hp -= amount;
@@ -734,128 +779,30 @@
             if (e.hp <= 0) this._kill(e);
         },
 
-        _updateBullets: function(dt) {
-            for (let i = this.bullets.length-1; i >= 0; i--) {
-                let b = this.bullets[i];
-                b.x += b.vx*dt; b.y += b.vy*dt; b.z += b.vz*dt; b.life -= dt;
-                
-                if (this.perfTier === 'HIGH' || Math.random() < 0.5) {
-                    this.fx.push({x:b.x, y:b.y, z:b.z, vx:0, vy:0, vz:0, life:0.1, c: b.isEnemy?'#ff3300':'#ffff00', size: 250, tracer: true});
-                }
-
-                if (b.isEnemy) {
-                    if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 1500) {
-                        this._takeDamage(10); b.life = 0;
-                    }
-                } else {
-                    for (let id in this.entities) {
-                        let e = this.entities[id];
-                        let hitbox = e.type === 'boss' ? 8000 : 2500;
-                        if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < hitbox) { 
-                            b.life = 0; this._fx(e.x,e.y,e.z,'#f90',3,100);
-                            this._applyDamageToEnemy(e, 35); break;
-                        }
-                    }
-                    if (this.mode==='PVP' && b.life>0) {
-                        Object.keys(this.net.players).forEach(uid => {
-                            if (uid!==this.net.uid && this.net.players[uid]?.hp>0 && Math.hypot(b.x-this.net.players[uid].x, b.y-this.net.players[uid].y, b.z-this.net.players[uid].z)<3000) {
-                                b.life=0; this._fx(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,'#f90',4,150);
-                                window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${uid}/hp`).set(this.net.players[uid].hp-10);
-                            }
-                        });
-                    }
-                    if (b.y < 0) { b.life = 0; this._fx(b.x,0,b.z,'#789',3,100); }
-                }
-                if (b.life <= 0) this.bullets.splice(i,1);
-            }
-        },
-
-        _updateMissiles: function(dt) {
-            for (let i = this.missiles.length-1; i >= 0; i--) {
-                let m = this.missiles[i];
-                m.speed += 20000 * dt; 
-                
-                // MÍSSIL POR ID
-                let activeTarget = null;
-                if (m.isPlayer && m.targetId && this.net.players[m.targetId] && this.net.players[m.targetId].hp > 0) {
-                    activeTarget = this.net.players[m.targetId];
-                    activeTarget.uid = m.targetId;
-                    activeTarget.isPlayer = true;
-                } else if (!m.isPlayer && m.targetId && this.entities[m.targetId]) {
-                    activeTarget = this.entities[m.targetId];
-                }
-
-                if (!activeTarget) {
-                    m.life = 0; 
-                    if(this.perfTier !== 'LOW') this.fx.push({x:m.x, y:m.y, z:m.z, vx:0, vy:0, vz:0, life:1.5, c:'rgba(100,100,100,0.5)', size: 400});
-                    this.missiles.splice(i,1);
-                    continue;
-                }
-
-                let dx = activeTarget.x - m.x, dy = activeTarget.y - m.y, dz = activeTarget.z - m.z;
-                let d = Math.hypot(dx,dy,dz);
-                let turn = (50000 + (this.upgrades.missile * 10000)) * dt; 
-                m.vx += (dx/d)*turn; m.vy += (dy/d)*turn; m.vz += (dz/d)*turn;
-                let velD = Math.hypot(m.vx, m.vy, m.vz);
-                if(velD > m.speed) { m.vx = (m.vx/velD)*m.speed; m.vy = (m.vy/velD)*m.speed; m.vz = (m.vz/velD)*m.speed; }
-                
-                let hitbox = activeTarget.type === 'boss' ? 9000 : 3000;
-                if (d < hitbox) {
-                    if (activeTarget.isPlayer && this.mode === 'PVP') {
-                        window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${activeTarget.uid}/hp`).set(activeTarget.hp-60);
-                        this._fx(activeTarget.x,activeTarget.y,activeTarget.z,'#f33',50,400); this.money += 800;
-                    } else if (!activeTarget.isPlayer) {
-                        this._applyDamageToEnemy(activeTarget, 500);
-                    }
-                    m.life = 0; GameSfx.play('boom'); window.Gfx?.shakeScreen(5);
-                }
-                
-                m.x += m.vx*dt; m.y += m.vy*dt; m.z += m.vz*dt; m.life -= dt;
-                if(m.y < 0) { m.life = 0; this._fx(m.x,0,m.z,'#a55',10,200); }
-                
-                if (this.perfTier === 'HIGH' || Math.random() < 0.5) {
-                    this.fx.push({x:m.x, y:m.y, z:m.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300, life: 1.5, c:'rgba(220,220,220,0.6)', size: 500}); 
-                }
-                if (m.life <= 0) this.missiles.splice(i,1);
-            }
-        },
-
-        _cleanupFx: function(dt) {
-            for (let c of this.clouds) {
-                if (Math.hypot(c.x-this.ship.x, c.z-this.ship.z) > 150000) {
-                    let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
-                    c.z = this.ship.z + fZ*120000 + (Math.random()-0.5)*80000; c.x = this.ship.x + fX*120000 + (Math.random()-0.5)*80000;
-                }
-            }
-            this.floaters = this.floaters.filter(f => { f.life -= dt; f.y -= 120*dt; return f.life > 0; });
-            this.fx = this.fx.filter(f => { f.x+=f.vx*dt; f.y+=f.vy*dt; f.z+=f.vz*dt; f.life-=dt; return f.life>0; });
-        },
-
         _kill: function(t) {
             let isBoss = t.type === 'boss';
-            let rew = isBoss ? 2500 : (t.type === 'tank' ? 300 : 200);
+            let rew = isBoss ? 2500 : (t.type === 'enemy_tank' ? 300 : 200);
             
             GameSfx.play('boom');
             this.cameraShake = isBoss ? 40 : 10;
             window.Gfx?.shakeScreen(this.cameraShake);
             
-            this._fx(t.x,t.y,t.z,'#ff3300', isBoss? 150 : 50, isBoss? 1500 : 400); 
-            this._fx(t.x,t.y,t.z,'#f1c40f', isBoss? 80 : 30, isBoss? 2000 : 600); 
-            this._fx(t.x,t.y,t.z,'#222233', isBoss? 100 : 40, isBoss? 2500 : 800); 
+            this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:2.0,c:'#ff3300',size:isBoss?1500:400});
+            this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:2.5,c:'#f1c40f',size:isBoss?2000:600});
             
-            // BOSS MULTIESTÁGIO EXPLOSÃO
             if (isBoss) {
                 let expTimer = setInterval(() => {
                     if(this.state !== 'PLAYING') clearInterval(expTimer);
-                    this._fx(t.x + (Math.random()-0.5)*5000, t.y + (Math.random()-0.5)*5000, t.z + (Math.random()-0.5)*5000, '#ff3300', 30, 800);
+                    this._spawn('fx', {x:t.x + (Math.random()-0.5)*5000, y:t.y + (Math.random()-0.5)*5000, z:t.z + (Math.random()-0.5)*5000, vx:0,vy:0,vz:0,life:2.0,c:'#ff3300',size:800});
                     GameSfx.play('boom');
                 }, 400);
                 setTimeout(() => clearInterval(expTimer), 3500);
             }
 
-            this.floaters.push({x:t.x,y:t.y,z:t.z,text:`+ R$${rew}`,life:2.5});
+            this._spawn('floater', {x:t.x,y:t.y,z:t.z,text:`+ R$${rew}`,life:2.5});
             this.session.kills++; this.money += rew;
             this.slowMoTimer = isBoss ? 4.0 : 1.0;
+            delete this.entities[t.id];
 
             if (this.session.kills >= this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
         },
@@ -866,11 +813,6 @@
                 if (window.System?.gameOver) window.System.gameOver(this.session.kills*150, res==='VICTORY', this.money);
                 else if (window.System?.home) window.System.home();
             }, 4000);
-        },
-
-        _fx: function(x,y,z,c,n,s) {
-            let limit = this.perfTier === 'HIGH' ? n : Math.floor(n * 0.4); 
-            for(let i=0;i<limit;i++) this.fx.push({x,y,z,vx:(Math.random()-0.5)*15000,vy:(Math.random()-0.5)*15000,vz:(Math.random()-0.5)*15000,life:1+Math.random(),c,size:s+Math.random()*300});
         },
 
         _startMission: function() {
@@ -901,7 +843,7 @@
             if (this.ship.speed > 2500 || this.pilot.isBoosting || this.ship.gForce > 5) {
                 let vGrad = ctx.createRadialGradient(w/2, h/2, h*0.4, w/2, h/2, h);
                 vGrad.addColorStop(0, 'transparent'); 
-                vGrad.addColorStop(1, this.ship.gForce > 5 ? 'rgba(150,0,0,0.6)' : 'rgba(0,0,0,0.7)'); // Efeito de G-Force Vermelho
+                vGrad.addColorStop(1, this.ship.gForce > 5 ? 'rgba(150,0,0,0.6)' : 'rgba(0,0,0,0.7)'); 
                 ctx.fillStyle = vGrad; ctx.fillRect(0,0,w,h);
             }
         },
@@ -925,31 +867,13 @@
             let gG = ctx.createLinearGradient(0,hy,0,h*4);
             gG.addColorStop(0, this.environment.isNight ? '#050505' : '#1e3020'); gG.addColorStop(1, this.environment.ground);
             ctx.fillStyle = gG; ctx.fillRect(-w*3,hy,w*6,h*4);
-            
-            if (this.ship.y < 50000) {
-                for(let t of this.terrain) {
-                    if (Math.hypot(t.x-this.ship.x, t.z-this.ship.z) > 120000) {
-                        let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
-                        t.x = this.ship.x + fX*100000 + (Math.random()-0.5)*80000; t.z = this.ship.z + fZ*100000 + (Math.random()-0.5)*80000;
-                    }
-                    let p1 = Engine3D.project(t.x, 0, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    let p2 = Engine3D.project(t.x, t.h, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    
-                    if(p1.visible && p1.s > 0.005) {
-                        let tw = t.w * p1.s;
-                        ctx.fillStyle = t.c; ctx.fillRect(p1.x - w/2 - tw/2, p2.y - h/2, tw, p1.y - p2.y);
-                        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeRect(p1.x - w/2 - tw/2, p2.y - h/2, tw, p1.y - p2.y);
-                    }
-                }
-            }
-
             ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1;
             ctx.beginPath(); ctx.moveTo(-w*3,hy); ctx.lineTo(w*3,hy); ctx.stroke();
             ctx.restore();
         },
 
         _drawMesh: function(ctx, meshData, obj, w, h) {
-            let scale = obj.type === 'boss' ? 200 : (obj.type === 'tank' ? 80 : 60); 
+            let scale = obj.type === 'boss' ? 200 : (obj.type === 'enemy_tank' ? 80 : 60); 
             let projectedFaces = [];
 
             for (let face of meshData.f) {
@@ -962,7 +886,6 @@
                     wPos.x += obj.x; wPos.y += obj.y; wPos.z += obj.z;
                     
                     let p = Engine3D.project(wPos.x, wPos.y, wPos.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    
                     if (!p.visible) visible = false;
                     pts.push(p); zSum += p.z;
                 }
@@ -979,70 +902,60 @@
                 ctx.closePath(); ctx.fill(); ctx.stroke();
             }
 
-            // Desenha fumaça de dano no inimigo
             if (obj.hp < obj.maxHp * 0.5 && this.perfTier !== 'LOW') {
                 let sCol = obj.hp < obj.maxHp * 0.2 ? '#e74c3c' : 'rgba(80,80,80,0.6)';
-                this.fx.push({x: obj.x, y: obj.y, z: obj.z, vx: 0, vy: 0, vz: 0, life: 0.5, c: sCol, size: scale*3});
+                this._spawn('fx', {x: obj.x, y: obj.y, z: obj.z, vx: 0, vy: 0, vz: 0, life: 0.5, c: sCol, size: scale*3});
             }
         },
 
         _drawEntities: function(ctx,w,h) {
             let buf=[];
             
-            const add = (list, t) => list.forEach((o, idx) => {
-                if(t === 'c' && this.perfTier === 'LOW' && idx % 2 === 0) return; 
-                let p = Engine3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                if(p.visible) buf.push({p, t, o});
-            });
-            
-            add(this.clouds,'c'); add(this.bullets,'b'); add(this.missiles,'m'); add(this.fx,'f'); add(this.floaters,'x');
-            Object.values(this.entities).forEach(e => {
-                let p = Engine3D.project(e.x,e.y,e.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                if(p.visible) buf.push({p, t:'e', o: e});
-            });
-            
-            if(this.mode!=='SINGLE') {
-                Object.keys(this.net.players).forEach(uid=>{
-                    if(uid!==this.net.uid && this.net.players[uid]?.hp>0){
-                        let p = Engine3D.project(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                        if(p.visible) buf.push({p, t:'p', o:this.net.players[uid], id:uid});
-                    }
-                });
+            for(let id in this.entities) {
+                let o = this.entities[id];
+                let p = Engine3D.project(o.x, o.y, o.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                if(p.visible) buf.push({p, o});
             }
             
             buf.sort((a,b)=>b.p.z-a.p.z); 
             
             buf.forEach(d=>{
                 let p=d.p, s=p.s, o=d.o;
-                if(d.t==='c') {
+                if(o.type==='cloud') {
                     ctx.fillStyle = this.environment.isNight ? 'rgba(50,50,60,0.08)' : 'rgba(255,255,255,0.2)';
                     ctx.beginPath(); ctx.arc(p.x, p.y, o.size*s, 0, Math.PI*2); ctx.fill();
                 }
-                else if(d.t==='x') {
+                else if (o.type === 'terrain') {
+                    let p2 = Engine3D.project(o.x, o.h, o.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    if(p2.visible) {
+                        let tw = o.w * s; ctx.fillStyle = o.c; ctx.fillRect(p.x - w/2 - tw/2, p2.y - h/2, tw, p.y - p2.y);
+                        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeRect(p.x - w/2 - tw/2, p2.y - h/2, tw, p.y - p2.y);
+                    }
+                }
+                else if(o.type==='floater') {
                     ctx.fillStyle='#f1c40f'; ctx.font=`bold ${Math.max(12, 2500*s)}px Arial`; ctx.textAlign='center'; 
                     ctx.fillText(o.text, p.x, p.y, w*0.9);
                 }
-                else if(d.t==='e' || d.t==='p') {
-                    let isNet = d.t==='p';
-                    let meshType = o.type === 'tank' ? MESHES.tank : (o.type === 'boss' ? MESHES.boss : MESHES.jet);
+                else if(o.type.startsWith('enemy') || o.type==='boss' || o.type==='net_player') {
+                    let isNet = o.type==='net_player';
+                    let meshType = o.type === 'enemy_tank' ? MESHES.tank : (o.type === 'boss' ? MESHES.boss : MESHES.jet);
                     this._drawMesh(ctx, meshType, o, w, h);
                     
                     if(isNet){ ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(o.name||'ALIADO',p.x,p.y-350*s-15, w*0.3); }
                     
-                    let locked = this.combat.targetId === (isNet ? d.id : o.id);
+                    let locked = this.combat.targetId === o.id;
                     let bs = Math.max(20, (o.type==='boss'? 800 : 250)*s);
                     
                     if (locked) {
-                        ctx.strokeStyle = '#f03'; ctx.lineWidth = 2;
-                        ctx.beginPath(); ctx.arc(p.x, p.y, bs*1.2, 0, Math.PI*2); ctx.stroke();
+                        ctx.strokeStyle = '#f03'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, bs*1.2, 0, Math.PI*2); ctx.stroke();
                         ctx.fillStyle = '#f03'; ctx.font = `bold ${Math.max(12, w*0.025)}px Arial`; ctx.textAlign = 'center'; 
                         ctx.fillText('TRAVADO', p.x, p.y + bs*1.2 + 15, w*0.3);
                     } else if (!isNet) {
-                        ctx.strokeStyle = o.type==='tank' ? 'rgba(243,156,18,0.8)' : 'rgba(231,76,60,0.6)'; ctx.lineWidth = 1;
+                        ctx.strokeStyle = o.type==='enemy_tank' ? 'rgba(243,156,18,0.8)' : 'rgba(231,76,60,0.6)'; ctx.lineWidth = 1;
                         ctx.strokeRect(p.x-bs, p.y-bs, bs*2, bs*2);
                     }
                 }
-                else if(d.t==='b') {
+                else if(o.type==='bullet') {
                     if (o.tracer) { 
                         ctx.strokeStyle = o.c; ctx.lineWidth = Math.max(1, o.size*s); ctx.lineCap='round';
                         ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - o.vx*0.01*s, p.y - o.vy*0.01*s); ctx.stroke();
@@ -1052,8 +965,8 @@
                         ctx.globalCompositeOperation = 'source-over';
                     }
                 }
-                else if(d.t==='m') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 40*s), 0, Math.PI*2); ctx.fill(); }
-                else if(d.t==='f') { 
+                else if(o.type==='missile') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 40*s), 0, Math.PI*2); ctx.fill(); }
+                else if(o.type==='fx') { 
                     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, o.life); ctx.fillStyle = o.c;
                     ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, o.size*s), 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
@@ -1139,7 +1052,6 @@
             ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `bold ${fz*0.8}px Arial`;
             ctx.fillText("BOOST", bX - 45, bY + 9); ctx.fillText("CALOR", bX - 45, bY + 24);
 
-            // G-Meter e Hit Chance
             ctx.fillStyle = '#0f6'; ctx.textAlign = 'right'; ctx.font = `bold ${fz}px Arial`;
             ctx.fillText(`G-FORCE: ${this.ship.gForce.toFixed(1)}`, altX + tapeW, cy + tapeH/2 + 20);
             if (this.combat.targetId) {
@@ -1201,18 +1113,23 @@
             ctx.fillStyle='#2ecc71';ctx.textAlign='center';ctx.font=`bold ${fz*1.5}px "Russo One"`;
             ctx.fillText('FORÇAS ARMADAS BR', w/2, h*0.15, w*0.9);
             
-            const ps=Object.values(this.net.players);
-            ctx.font=`bold ${fz}px Arial`;ctx.fillStyle='#fff';ctx.fillText(`PILOTOS NA BASE: ${ps.length}`, w/2, h*0.25, w*0.9);
+            let psCount = 0;
+            for(let id in this.entities) if (this.entities[id].type === 'net_player') psCount++;
+            ctx.font=`bold ${fz}px Arial`;ctx.fillStyle='#fff';ctx.fillText(`PILOTOS NA BASE: ${psCount+1}`, w/2, h*0.25, w*0.9);
             
             let py=h*0.35;
-            ps.forEach(p=>{
-                ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';
-                ctx.fillText(`[${p.ready?'PRONTO':'ESPERA'}] ${p.name}`, w/2, py, w*0.9); py+=35;
-            });
+            ctx.fillStyle='#2ecc71'; ctx.fillText(`[HOST] EU`, w/2, py, w*0.9); py+=35;
+            for(let id in this.entities) {
+                if (this.entities[id].type === 'net_player') {
+                    let p = this.entities[id];
+                    ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';
+                    ctx.fillText(`[${p.ready?'PRONTO':'ESPERA'}] ${p.name}`, w/2, py, w*0.9); py+=35;
+                }
+            }
 
             let btnW = Math.min(280, w * 0.8);
             if(this.net.isHost){
-                const r=ps.length>=1; 
+                const r=psCount>=0; 
                 ctx.fillStyle=r?'#c0392b':'#34495e'; ctx.fillRect(w/2 - btnW/2,h*0.80,btnW,50);
                 ctx.fillStyle='#fff';ctx.font=`bold ${fz}px "Russo One"`;
                 ctx.fillText(r?'LANÇAR':'AGUARDANDO...', w/2, h*0.80 + 32, btnW*0.9);
