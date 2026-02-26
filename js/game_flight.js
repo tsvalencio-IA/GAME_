@@ -84,7 +84,7 @@
     // =========================================================================
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE', slowMo: 1.0, slowMoTimer: 0, 
-        fpsHistory: [], perfTier: 'HIGH', money: 0, eId: 0, entities: {},
+        fpsHistory: [], perfTier: 'HIGH', money: 0, sessionMoney: 0, eId: 0, entities: {},
         upgrades: { engine: 1, radar: 1, missile: 1, boost: 1, thermal: 1 },
         session: { kills: 0, goal: 30 }, cameraShake: 0, radarTimer: 0,
         ship: { 
@@ -107,6 +107,8 @@
         init: function(faseData) {
             this.lastTime = performance.now(); this.session = { kills: 0, goal: 30 };
             this.fpsHistory = []; this.perfTier = 'HIGH'; this.eId = 0; this.entities = {}; this.radarTimer = 0;
+            this.money = (window.Profile && window.Profile.coins !== undefined) ? window.Profile.coins : 0;
+            this.sessionMoney = 0;
             this.ship = { hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0, pitchVel: 0, yawVel: 0, rollVel: 0, boost: 100, overheat: 0, gForce: 1.0, damage: { lWing: 0, rWing: 0, engine: 0, body: 0 } };
             this.pilot = { active: false, targetRoll: 0, targetPitch: 0, headTilt: false, handL: {x:0,y:0}, handR: {x:0,y:0}, isBoosting: false };
             this.combat = { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 };
@@ -248,7 +250,6 @@
                 let sx=this.ship.x+fX*d+(Math.random()-0.5)*50000, sz=this.ship.z+fZ*d+(Math.random()-0.5)*50000, r=Math.random();
                 if(this.session.kills>10 && r<0.1 && !hasBoss) {
                     this._spawn('boss', { p:{x:sx,y:30000,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:12000,vx:0,vy:0,vz:0}, c:{hp:3000,maxHp:3000,isEnemy:true,weakPoints:{left:800,right:800,core:1400}}, a:{state:'ENGAGE',timer:0,phase:1}, r:{radVisible:true} });
-                    if(window.System?.msg) window.System.msg("FORTALEZA VOADORA DETECTADA!");
                 } else if(r<0.3) {
                     this._spawn('enemy_squadron_lead', { p:{x:sx,y:this.ship.y,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:20000,vx:0,vy:0,vz:0}, c:{hp:200,maxHp:200,isEnemy:true}, a:{state:'PATROL',timer:0}, r:{radVisible:true} });
                     this._spawn('enemy_squadron_wing', { p:{x:sx+5000,y:this.ship.y+2000,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:22000,vx:0,vy:0,vz:0}, c:{hp:150,maxHp:150,isEnemy:true}, a:{state:'FLANK',timer:0}, r:{radVisible:true} });
@@ -389,7 +390,8 @@
                     if(d < (at.type==='boss'?9000:3000)) {
                         if(at.type==='net_player' && this.mode==='PVP') {
                             window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${at.n.uid}/hp`).set(at.c.hp-60);
-                            this._spawn('fx',{p:{x:at.p.x,y:at.p.y,z:at.p.z,vx:0,vy:0,vz:0},r:{life:2.0,color:'#f33',size:400}}); this.money+=800;
+                            this._spawn('fx',{p:{x:at.p.x,y:at.p.y,z:at.p.z,vx:0,vy:0,vz:0},r:{life:2.0,color:'#f33',size:400}}); 
+                            this.money+=800; this.sessionMoney+=800;
                         } else if(at.type!=='net_player') this._applyDamageToEnemy(at, 500);
                         delete this.entities[id]; GameSfx.play('boom'); window.Gfx?.shakeScreen(5); continue;
                     }
@@ -449,13 +451,13 @@
                 }, 400); setTimeout(() => clearInterval(expTimer), 3500);
             }
             this._spawn('floater',{p:{x:p.x,y:p.y,z:p.z},r:{life:2.5,text:`+ R$${rew}`}});
-            this.session.kills++; this.money+=rew; this.slowMoTimer=iB?4.0:1.0; delete this.entities[e.id];
+            this.session.kills++; this.money+=rew; this.sessionMoney+=rew; this.slowMoTimer=iB?4.0:1.0; delete this.entities[e.id];
             if(this.session.kills>=this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
         },
 
         _endGame: function(res) {
             this.state=res; GameSfx.stop();
-            setTimeout(() => { if(window.System?.gameOver) window.System.gameOver(this.session.kills*150,res==='VICTORY',this.money); else if(window.System?.home) window.System.home(); }, 4000);
+            setTimeout(() => { if(window.System?.gameOver) window.System.gameOver(this.session.kills*150,res==='VICTORY',this.sessionMoney); else if(window.System?.home) window.System.home(); }, 4000);
         },
 
         _startMission: function() {
@@ -534,7 +536,16 @@
                     this.hoverTime += dt; ctx.fillStyle = 'rgba(0, 255, 204, 0.3)'; ctx.fillRect(rect.x, rect.y, rect.w * Math.min(1, this.hoverTime / 1.5), rect.h);
                     if (this.hoverTime >= 1.5) {
                         if (item.isBtn) { this.state = 'CALIBRATION'; this.timer = 4.0; GameSfx.play('buy'); }
-                        else if (this.money >= item.cost && this.upgrades[item.id] < item.max) { this.money -= item.cost; this.upgrades[item.id]++; GameSfx.play('buy'); this.hoverTime = 0; } 
+                        else if (this.money >= item.cost && this.upgrades[item.id] < item.max) { 
+                            this.money -= item.cost; 
+                            if (window.Profile) {
+                                window.Profile.coins = this.money;
+                                if (window.DB && window.System?.playerId) {
+                                    window.DB.ref('users/' + window.System.playerId + '/coins').set(this.money);
+                                }
+                            }
+                            this.upgrades[item.id]++; GameSfx.play('buy'); this.hoverTime = 0; 
+                        } 
                         else { GameSfx.play('alarm'); this.hoverTime = 0; }
                     }
                 }
@@ -552,7 +563,9 @@
             this._drawWorld(ctx,w,h);
             this._drawGrid(ctx,w,h);
             this._drawEntities(ctx,w,h);
-            this._drawHUD(ctx,w,h,now); 
+            
+            this._drawVectorHUD(ctx,w,h,now); 
+            
             this._drawRadar(ctx,w,h,now);
             ctx.restore();
             ctx.fillStyle='rgba(0,0,0,0.15)'; for(let i=0;i<h;i+=4) ctx.fillRect(0,i,w,1);
@@ -624,8 +637,10 @@
                     let iN=e.type==='net_player', mT=e.type==='enemy_tank'?MESHES.tank:(e.type==='boss'?MESHES.boss:MESHES.jet);
                     this._drawMesh(ctx,mT,e,w,h);
                     if(iN) { ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(e.n.name||'ALIADO',pr.x,pr.y-350*s-15,w*0.3); }
+                    
                     let locked = this.combat.targetId === e.id;
                     let bs = Math.max(20, (e.type==='boss'?800:250)*s);
+                    
                     if (locked) {
                         ctx.strokeStyle = '#f03'; ctx.lineWidth = 3; let b = bs*1.2; ctx.beginPath();
                         ctx.moveTo(pr.x - b, pr.y - b + 10); ctx.lineTo(pr.x - b, pr.y - b); ctx.lineTo(pr.x - b + 10, pr.y - b);
@@ -634,7 +649,9 @@
                         ctx.moveTo(pr.x + b - 10, pr.y + b); ctx.lineTo(pr.x + b, pr.y + b); ctx.lineTo(pr.x + b, pr.y + b - 10);
                         ctx.stroke();
                         ctx.fillStyle='#f03'; ctx.font=`bold ${Math.max(12,w*0.025)}px Arial`; ctx.textAlign='center'; ctx.fillText('LOCK',pr.x,pr.y+b+15,w*0.3); 
-                    } else if(!iN) { ctx.strokeStyle=e.type==='enemy_tank'?'rgba(243,156,18,0.8)':'rgba(231,76,60,0.6)'; ctx.lineWidth=1; ctx.strokeRect(pr.x-bs,pr.y-bs,bs*2,bs*2); }
+                    } else if(!iN) { 
+                        ctx.strokeStyle=e.type==='enemy_tank'?'rgba(243,156,18,0.8)':'rgba(231,76,60,0.6)'; ctx.lineWidth=1; ctx.strokeRect(pr.x-bs,pr.y-bs,bs*2,bs*2); 
+                    }
                 }
                 else if(e.type==='bullet') { if(r.tracer) { ctx.strokeStyle=r.color; ctx.lineWidth=Math.max(1,r.size*s); ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(pr.x,pr.y); ctx.lineTo(pr.x-p.vx*0.01*s,pr.y-p.vy*0.01*s); ctx.stroke(); } else { ctx.globalCompositeOperation='lighter'; ctx.fillStyle=r.color; ctx.beginPath(); ctx.arc(pr.x,pr.y,Math.max(2,15*s),0,Math.PI*2); ctx.fill(); ctx.globalCompositeOperation='source-over'; } }
                 else if(e.type==='missile') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(pr.x,pr.y,Math.max(2,40*s),0,Math.PI*2); ctx.fill(); }
@@ -642,72 +659,87 @@
             });
         },
 
-        _drawHUD: function(ctx, w, h, now){
+        _drawVectorHUD: function(ctx, w, h, now){
             let cx=w/2, cy=h/2;
-            ctx.save(); ctx.strokeStyle='rgba(0,255,100,0.8)'; ctx.lineWidth=2;
+            ctx.strokeStyle='rgba(0,255,100,0.8)'; ctx.lineWidth=2;
             
-            // 1. MIRA CENTRAL ESTILO COLCHETES: [    ]
-            let s=25; ctx.beginPath(); 
-            ctx.moveTo(cx - s, cy - s/2); ctx.lineTo(cx - s, cy + s/2); 
-            ctx.moveTo(cx - s, cy - s/2); ctx.lineTo(cx - s/2, cy - s/2);
-            ctx.moveTo(cx - s, cy + s/2); ctx.lineTo(cx - s/2, cy + s/2);
-            ctx.moveTo(cx + s, cy - s/2); ctx.lineTo(cx + s, cy + s/2); 
-            ctx.moveTo(cx + s, cy - s/2); ctx.lineTo(cx + s/2, cy - s/2);
-            ctx.moveTo(cx + s, cy + s/2); ctx.lineTo(cx + s/2, cy + s/2);
-            ctx.stroke(); 
-            ctx.fillStyle = 'rgba(0, 255, 100, 0.8)'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); 
+            ctx.moveTo(cx - 30, cy - 10); ctx.lineTo(cx - 30, cy + 10); 
+            ctx.moveTo(cx - 30, cy - 10); ctx.lineTo(cx - 15, cy - 10);
+            ctx.moveTo(cx - 30, cy + 10); ctx.lineTo(cx - 15, cy + 10);
 
-            // 2. RISQUINHOS LATERAIS ANIMADOS COM ALTITUDE (PITCH LADDER LITE)
-            ctx.save(); ctx.translate(cx, cy); ctx.rotate(-this.ship.roll); ctx.beginPath(); ctx.rect(-w/2, -h/2, w, h); ctx.clip();
-            let pDeg = this.ship.pitch * 180 / Math.PI, spacing = h * 0.1; 
+            ctx.moveTo(cx + 30, cy - 10); ctx.lineTo(cx + 30, cy + 10); 
+            ctx.moveTo(cx + 30, cy - 10); ctx.lineTo(cx + 15, cy - 10);
+            ctx.moveTo(cx + 30, cy + 10); ctx.lineTo(cx + 15, cy + 10);
+            ctx.stroke(); 
+            ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
+            ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
+
+            ctx.save();
+            ctx.translate(cx, cy); 
+            ctx.rotate(-this.ship.roll);
+            ctx.beginPath(); ctx.rect(-w/2, -h/2, w, h); ctx.clip();
+            
+            let pDeg = this.ship.pitch * 180 / Math.PI;
+            let spacing = h * 0.1; 
             for(let i = -90; i <= 90; i += 10) {
                 if (i === 0) continue;
                 let yo = (pDeg - i) * (spacing / 10);
-                if (Math.abs(yo) > h*0.35) continue; // Culling
-                let rw = w * 0.15; 
-                ctx.beginPath(); if (i < 0) ctx.setLineDash([10, 10]); else ctx.setLineDash([]);
-                ctx.moveTo(-w*0.3, yo); ctx.lineTo(-w*0.3 + rw, yo); ctx.moveTo(w*0.3, yo); ctx.lineTo(w*0.3 - rw, yo); ctx.stroke();
-                ctx.setLineDash([]); ctx.font = `bold 12px 'Chakra Petch', Arial`; ctx.fillStyle = 'rgba(0,255,100,0.8)';
-                ctx.textAlign = 'left'; ctx.fillText(Math.abs(i), -w*0.3 + rw + 5, yo + 4); ctx.textAlign = 'right'; ctx.fillText(Math.abs(i), w*0.3 - rw - 5, yo + 4);
+                let rw = w * 0.2; 
+                
+                ctx.beginPath(); 
+                if (i < 0) ctx.setLineDash([10, 10]); else ctx.setLineDash([]);
+                ctx.moveTo(-cx + 20, yo); ctx.lineTo(-cx + 20 + rw, yo);
+                ctx.moveTo(cx - 20, yo); ctx.lineTo(cx - 20 - rw, yo);
+                ctx.stroke();
+                
+                ctx.setLineDash([]);
+                ctx.font = `bold 12px 'Chakra Petch'`; ctx.fillStyle = 'rgba(0,255,100,0.8)';
+                ctx.textAlign = 'left'; ctx.fillText(Math.abs(i), -cx + 25 + rw, yo + 4);
+                ctx.textAlign = 'right'; ctx.fillText(Math.abs(i), cx - 25 - rw, yo + 4);
             }
             ctx.restore();
 
-            // 3. NOVO MANCHE INFERIOR I____I (YOKE)
             ctx.save();
-            let yokeScale = Math.min(w * 0.15, 80); 
-            ctx.translate(cx + (this.pilot.targetRoll * w * 0.2), h - 40 + (this.pilot.targetPitch * 30)); 
+            let yokeScale = Math.min(w * 0.2, 100); 
+            ctx.translate(cx, h - 50 + (this.pilot.targetPitch * 30)); 
             ctx.rotate(this.pilot.targetRoll); 
+            
             ctx.strokeStyle = '#0f6'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 40); ctx.moveTo(-yokeScale, 0); ctx.lineTo(yokeScale, 0); ctx.moveTo(-yokeScale, 0); ctx.lineTo(-yokeScale, -yokeScale*0.5); ctx.moveTo(yokeScale, 0); ctx.lineTo(yokeScale, -yokeScale*0.5); ctx.stroke();
-            ctx.fillStyle = this.combat.locked ? '#f33' : '#a00'; ctx.beginPath(); ctx.arc(-yokeScale, -yokeScale*0.5, 6, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(yokeScale, -yokeScale*0.5, 6, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(0, 50);
+            ctx.moveTo(-yokeScale, 0); ctx.lineTo(yokeScale, 0);
+            ctx.moveTo(-yokeScale, 0); ctx.lineTo(-yokeScale, -yokeScale*0.5);
+            ctx.moveTo(yokeScale, 0); ctx.lineTo(yokeScale, -yokeScale*0.5);
+            ctx.stroke();
             ctx.restore();
 
-            // 4. TEXTOS DE VELOCIDADE E ALTITUDE
-            ctx.fillStyle = '#0f6'; ctx.textAlign = 'left'; ctx.font = `bold 14px 'Russo One', Arial`;
-            ctx.fillText(`VEL: ${Math.floor(this.ship.speed)} KT`, 15, 30); ctx.fillText(`ALT: ${Math.floor(this.ship.y)} FT`, 15, 50);
-            let hdg=(this.ship.yaw*180/Math.PI)%360; if(hdg<0) hdg+=360; ctx.fillText(`RUMO: ${Math.floor(hdg)}°`, 15, 70);
+            ctx.fillStyle = '#0f6'; ctx.textAlign = 'left'; ctx.font = `bold 16px 'Russo One'`;
+            ctx.fillText(`VEL: ${Math.floor(this.ship.speed)} KT`, 15, 30);
+            ctx.fillText(`ALT: ${Math.floor(this.ship.y)} FT`, 15, 50);
+            let hdg=(this.ship.yaw*180/Math.PI)%360; if(hdg<0) hdg+=360;
+            ctx.fillText(`RUMO: ${Math.floor(hdg)}°`, 15, 70);
 
-            // BARRAS
-            const bX = cx + 50, bY = h - 50, cW = Math.min(w * 0.3, 150); 
-            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bX, bY, cW, 8); ctx.fillRect(bX, bY + 12, cW, 8);
-            ctx.fillStyle = '#3498db'; ctx.fillRect(bX, bY, cW * (this.ship.boost/100), 8); 
-            ctx.fillStyle = this.combat.isJammed ? '#e74c3c' : '#e67e22'; ctx.fillRect(bX, bY + 12, cW * (this.ship.overheat/100), 8); 
-            ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = `bold 9px Arial`; ctx.fillText("BOOST", bX - 5, bY + 8); ctx.fillText("CALOR", bX - 5, bY + 20);
+            const bX = cx + 50, bY = h - 60, cW = w * 0.3; 
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bX, bY, cW, 10); ctx.fillRect(bX, bY + 15, cW, 10);
+            ctx.fillStyle = '#3498db'; ctx.fillRect(bX, bY, cW * (this.ship.boost/100), 10); 
+            ctx.fillStyle = this.combat.isJammed ? '#e74c3c' : '#e67e22'; ctx.fillRect(bX, bY + 15, cW * (this.ship.overheat/100), 10); 
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `bold 10px Arial`;
+            ctx.fillText("BOOST", bX - 45, bY + 9); ctx.fillText("CALOR", bX - 45, bY + 24);
 
-            // G-Force & HP
-            ctx.fillStyle = '#0f6'; ctx.textAlign = 'right'; ctx.font = `bold 14px Arial`; ctx.fillText(`G-FORCE: ${this.ship.gForce.toFixed(1)}`, w - 15, 30);
-            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c'; ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, w - 15, 50);
+            ctx.fillStyle = '#0f6'; ctx.textAlign = 'right'; ctx.font = `bold 14px Arial`;
+            ctx.fillText(`G-FORCE: ${this.ship.gForce.toFixed(1)}`, w - 15, 30);
+            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c';
+            ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, w - 15, 50);
             ctx.fillStyle = '#f1c40f'; ctx.fillText(`R$: ${this.money}`, w - 15, 70);
             
-            // TRAVA E AVISOS
             ctx.textAlign='center';
             if(this.combat.targetId && this.combat.locked) { 
-                ctx.fillStyle='#f03'; ctx.font=`bold 18px 'Russo One', Arial`; ctx.fillText("TRAVADO - FOGO!",cx, cy + h*0.25); 
-                if(this.combat.missileCd<=0) { ctx.fillStyle='#0ff'; ctx.font=`bold 12px Arial`; ctx.fillText("INCLINE A CABEÇA: MÍSSIL",cx, cy + h*0.25 + 20); } 
+                ctx.fillStyle='#f03'; ctx.font=`bold 20px 'Russo One'`; ctx.fillText("FOGO AUTORIZADO!",cx,h*0.70); 
+                if(this.combat.missileCd<=0) { ctx.fillStyle='#0ff'; ctx.font=`bold 12px Arial`; ctx.fillText("INCLINE CABEÇA P/ MÍSSIL",cx,h*0.75); } 
             }
-            if(this.combat.isJammed) { ctx.fillStyle='#f00'; ctx.font=`bold 20px 'Russo One', Arial`; ctx.fillText("ARMA SOBREAQUECIDA!",cx, cy + h*0.2); }
-            if(!this.pilot.active) { ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0, cy - 20, w, 40); ctx.fillStyle='#f00'; ctx.font=`bold 16px Arial`; ctx.fillText("MÃOS NÃO DETECTADAS!",cx, cy + 6); }
-            ctx.restore();
+            if(this.combat.isJammed) { ctx.fillStyle='#f00'; ctx.font=`bold 24px 'Russo One'`; ctx.fillText("ARMA SOBREAQUECIDA!",cx,h*0.65); }
+            if(!this.pilot.active) { ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,cy-20,w,40); ctx.fillStyle='#f00'; ctx.font=`bold 16px Arial`; ctx.textAlign='center'; ctx.fillText("MÃOS NÃO DETECTADAS!",cx,cy+5); }
         },
 
         _drawCalib: function(ctx,w,h){
@@ -732,7 +764,7 @@
         _drawEnd: function(ctx,w,h){
             this._draw(ctx,w,h,performance.now()); ctx.fillStyle='rgba(0,0,0,0.9)'; ctx.fillRect(0,0,w,h);
             const fz=Math.min(w*0.06,35); ctx.textAlign='center'; ctx.font=`bold ${fz}px "Russo One"`; ctx.fillStyle=this.state==='VICTORY'?'#2ecc71':'#e74c3c'; ctx.fillText(this.state==='VICTORY'?'SUCESSO':'DESTRUÍDO',w/2,h/2-fz,w*0.9);
-            ctx.fillStyle='#f1c40f'; ctx.font=`bold ${fz*0.6}px Arial`; ctx.fillText(`R$ ${this.money}`,w/2,h/2+fz,w*0.9); ctx.fillStyle='#fff'; ctx.fillText(`ABATES: ${this.session.kills}`,w/2,h/2+fz*2,w*0.9);
+            ctx.fillStyle='#f1c40f'; ctx.font=`bold ${fz*0.6}px Arial`; ctx.fillText(`+ R$ ${this.sessionMoney}`,w/2,h/2+fz,w*0.9); ctx.fillStyle='#fff'; ctx.fillText(`ABATES: ${this.session.kills}`,w/2,h/2+fz*2,w*0.9);
         }
     };
 
