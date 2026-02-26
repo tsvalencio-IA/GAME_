@@ -1,13 +1,24 @@
 // =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (PLATINUM V7.0)
-// ENGINE: Yoke Fixo Absolute, Física Ombro-Pulso, HUD Ultra-Responsivo, Auto-Combat
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (PLATINUM V8.0 FINAL)
+// ENGINE: PS1-Style 3D Polygon Rendering, Absolute Physics, Perfect Steering
 // =============================================================================
 (function() {
     "use strict";
 
-    // --- ENGINE MATEMÁTICA 3D ---
-    const Engine3D = {
+    // --- ENGINE MATEMÁTICA E POLIGONAL 3D (NÍVEL CONSOLE) ---
+    const Math3D = {
         fov: 800,
+        rotate: (x, y, z, pitch, yaw, roll) => {
+            // Rotação Roll (Z)
+            let cr = Math.cos(roll), sr = Math.sin(roll);
+            let x1 = x * cr - y * sr, y1 = x * sr + y * cr, z1 = z;
+            // Rotação Pitch (X)
+            let cp = Math.cos(pitch), sp = Math.sin(pitch);
+            let x2 = x1, y2 = y1 * cp - z1 * sp, z2 = y1 * sp + z1 * cp;
+            // Rotação Yaw (Y)
+            let cy = Math.cos(yaw), sy = Math.sin(yaw);
+            return { x: x2 * cy + z2 * sy, y: y2, z: -x2 * sy + z2 * cy };
+        },
         project: (objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) => {
             let dx = objX - camX, dy = objY - camY, dz = objZ - camZ;
             let cy = Math.cos(-yaw), sy = Math.sin(-yaw);
@@ -17,8 +28,41 @@
             if (z2 < 10) return { visible: false };
             let cr = Math.cos(roll), sr = Math.sin(roll);
             let finalX = x1 * cr - y2 * sr, finalY = x1 * sr + y2 * cr;
-            let scale = Engine3D.fov / z2;
+            let scale = Math3D.fov / z2;
             return { x: (w/2) + (finalX * scale), y: (h/2) - (finalY * scale), s: scale, z: z2, visible: true };
+        }
+    };
+
+    // --- MODELOS 3D DOS INIMIGOS (FIM DAS CAIXAS QUADRADAS) ---
+    const MESHES = {
+        jet: {
+            v: [
+                {x: 0, y: 0, z: 40},    // 0: Bico
+                {x: 0, y: 15, z: -30},  // 1: Topo Cauda
+                {x: -35, y: 0, z: -10}, // 2: Asa Esq
+                {x: 35, y: 0, z: -10},  // 3: Asa Dir
+                {x: 0, y: -10, z: -20}, // 4: Fundo
+                {x: 0, y: 10, z: 10}    // 5: Cockpit
+            ],
+            f: [
+                [0, 2, 5, '#7f8c8d'], [0, 5, 3, '#95a5a6'], // Bico Topo
+                [0, 4, 2, '#34495e'], [0, 3, 4, '#2c3e50'], // Bico Fundo
+                [5, 2, 1, '#bdc3c7'], [5, 1, 3, '#ecf0f1'], // Cauda Topo
+                [4, 1, 2, '#2c3e50'], [4, 3, 1, '#34495e']  // Cauda Fundo
+            ]
+        },
+        tank: {
+            v: [
+                {x: -20, y: 0, z: 30}, {x: 20, y: 0, z: 30}, {x: 20, y: 15, z: 30}, {x: -20, y: 15, z: 30},       // Frente Chassi
+                {x: -20, y: 0, z: -30}, {x: 20, y: 0, z: -30}, {x: 20, y: 15, z: -30}, {x: -20, y: 15, z: -30},   // Fundo Chassi
+                {x: -10, y: 15, z: 10}, {x: 10, y: 15, z: 10}, {x: 10, y: 25, z: -10}, {x: -10, y: 25, z: -10},   // Torreta
+                {x: -2, y: 20, z: 10}, {x: 2, y: 20, z: 10}, {x: 2, y: 20, z: 50}, {x: -2, y: 20, z: 50}          // Canhão
+            ],
+            f: [
+                [0, 1, 2, 3, '#27ae60'], [1, 5, 6, 2, '#2ecc71'], [5, 4, 7, 6, '#1e8449'], [4, 0, 3, 7, '#229954'], [3, 2, 6, 7, '#52be80'], // Chassi
+                [8, 9, 10, 11, '#117a65'], // Torreta Topo
+                [12, 13, 14, 15, '#111']   // Canhão
+            ]
         }
     };
 
@@ -150,7 +194,7 @@
                 return this.session.cash;
             }
 
-            // FÍSICA E MOVIMENTO
+            // FÍSICA E MOVIMENTO (Comportamento de Voo Real)
             let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch);
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
@@ -161,6 +205,7 @@
             let units = this.ship.speed * 20;
             this.ship.x += units * fX * dt; this.ship.y += units * fY * dt; this.ship.z += units * fZ * dt;
             
+            // Colisão com o solo (Dano e Quique)
             if (this.ship.y < 100) { 
                 this.ship.y = 100; 
                 if(this.ship.pitch < -0.1) { this.ship.hp -= 20; window.Gfx?.shakeScreen(20); GameSfx.play('boom'); this.ship.pitch = 0.2; }
@@ -190,7 +235,7 @@
             }
         },
 
-        // --- LÓGICA DE CONTROLE PLATINUM: OMBROS VS PULSOS (INFALÍVEL) ---
+        // --- LÓGICA DE CONTROLE PLATINUM: Mapeamento Espacial Absoluto (FIM DA INVERSÃO) ---
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false;
@@ -201,8 +246,6 @@
                 const rs = kp('right_shoulder'), ls = kp('left_shoulder');
                 const rEar = kp('right_ear'), lEar = kp('left_ear');
                 
-                // Conversão resolvendo o espelhamento da câmera: w - (k.x / 640 * w)
-                const pX = x => w - ((x / 640) * w); 
                 const pY = y => (y / 480) * h;
                 
                 // Míssil Head Tilt
@@ -213,35 +256,33 @@
                 if (rw?.score > 0.3 && lw?.score > 0.3 && rs?.score > 0.3 && ls?.score > 0.3) {
                     inputDetected = true;
                     
-                    let w1 = { x: pX(rw.x), y: pY(rw.y) };
-                    let w2 = { x: pX(lw.x), y: pY(lw.y) };
+                    // Não importa a câmera espelhada. Pegamos os pulsos e ordenamos pelo X absoluto da imagem bruta.
+                    let hands = [{x: rw.x, y: pY(rw.y)}, {x: lw.x, y: pY(lw.y)}].sort((a,b) => a.x - b.x);
                     
-                    // Identifica visualmente qual mão está na Esquerda/Direita da TELA
-                    let hands = [w1, w2].sort((a,b) => a.x - b.x);
-                    let sLeft = hands[0]; 
-                    let sRight = hands[1]; 
+                    // Em uma câmera frontal, a mão que aparece na esquerda da imagem bruta (menor X)
+                    // é a mão fisicamente do lado direito do jogador.
+                    // Para girar para a DIREITA como um volante: O lado direito desce (Y maior), o lado esquerdo sobe (Y menor).
+                    let imgLeftHand = hands[0];  // Mão visível à esquerda
+                    let imgRightHand = hands[1]; // Mão visível à direita
                     
-                    // 1. ROLL (Giro): Se a mão direita da tela subir (Y menor), vira pra esquerda (Negativo).
-                    let dy = sRight.y - sLeft.y;
-                    let dx = sRight.x - sLeft.x;
-                    // Multiplicado por -1 para que Subir Mão Direita = Curva para Direita.
-                    trgRoll = -Math.atan2(dy, dx);
-                    // Limite angular realista
+                    let dy = imgRightHand.y - imgLeftHand.y; 
+                    let dx = imgRightHand.x - imgLeftHand.x;
+                    
+                    // Se a mão da direita estiver mais baixa (Y maior), dy é positivo -> Roll Positivo -> Vira Direita.
+                    trgRoll = Math.atan2(dy, dx);
                     trgRoll = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, trgRoll));
                     
-                    // 2. PITCH (Subir/Descer): Referência Absoluta nos Ombros do Jogador.
+                    // 2. PITCH (Subir/Descer): Referência Absoluta nos Ombros.
                     let avgShoulderY = (pY(rs.y) + pY(ls.y)) / 2;
-                    let avgWristY = (sLeft.y + sRight.y) / 2;
+                    let avgWristY = (imgLeftHand.y + imgRightHand.y) / 2;
                     
-                    // Y da tela cresce para baixo. 
-                    // Se os pulsos estão ACIMA dos ombros, deltaY é negativo -> Sobe.
                     let deltaY = avgWristY - avgShoulderY;
-                    let deadzone = h * 0.05; // Margem de segurança na altura do peito
+                    let deadzone = h * 0.05; 
                     
                     if (deltaY < -deadzone) {
-                        trgPitch = 1.0; // Puxa Manche = Sobe
+                        trgPitch = 1.0; // Mãos ACIMA dos ombros = Puxa Manche = Sobe
                     } else if (deltaY > deadzone) {
-                        trgPitch = -1.0; // Empurra Manche = Desce
+                        trgPitch = -1.0; // Mãos ABAIXO dos ombros = Empurra Manche = Desce
                     } else {
                         trgPitch = 0; // Nivelado
                     }
@@ -254,7 +295,6 @@
                 this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 8 * dt;
                 
                 if (this.state === 'PLAYING') {
-                    // Yaw acompanha o giro do Roll suavemente
                     this.ship.yaw += this.pilot.targetRoll * 1.5 * dt;
                     this.ship.roll += (this.pilot.targetRoll - this.ship.roll) * 5 * dt;
                     this.ship.pitch += this.pilot.targetPitch * dt;
@@ -267,13 +307,12 @@
             this.ship.pitch %= Math.PI * 2; this.ship.yaw %= Math.PI * 2;
         },
 
-        // --- COMBATE AUTÔNOMO (METRALHADORA + MÍSSIL HOMING) ---
+        // --- COMBATE AUTÔNOMO ---
         _processCombat: function(dt, w, h, now) {
             this.combat.target = null; this.combat.locked = false; let closestZ = Infinity;
             
             const scan = (obj, isPlayer, uid) => {
-                let p = Engine3D.project(obj.x, obj.y, obj.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                // Área de trava central de 40% da tela
+                let p = Math3D.project(obj.x, obj.y, obj.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 if (p.visible && p.z > 500 && p.z < 100000 && Math.abs(p.x - w/2) < w*0.35 && Math.abs(p.y - h/2) < h*0.35 && p.z < closestZ) {
                     closestZ = p.z; this.combat.target = isPlayer ? {...obj, isPlayer: true, uid} : obj;
                 }
@@ -296,6 +335,7 @@
                 this.combat.lockTimer -= dt * 3; if (this.combat.lockTimer < 0) this.combat.lockTimer = 0;
             }
 
+            // AUTO-VULCAN
             if (this.combat.locked && this.combat.target && now - this.combat.vulcanCd > 120) {
                 this.combat.vulcanCd = now;
                 let spd = this.ship.speed * 20 + 45000;
@@ -306,6 +346,7 @@
                 GameSfx.play('vulcan'); window.Gfx?.shakeScreen(2);
             }
 
+            // MISSEL HOMING
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0) {
                 this.combat.missileCd = 1.5;
@@ -321,7 +362,7 @@
         },
 
         _spawnEnemies: function() {
-            if (this.entities.length >= 12 || Math.random() > 0.03) return;
+            if (this.entities.length >= 10 || Math.random() > 0.03) return;
             let dist = 50000 + Math.random()*30000, r = Math.random();
             let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             let sx = this.ship.x + fX*dist + (Math.random()-0.5)*40000, sz = this.ship.z + fZ*dist + (Math.random()-0.5)*40000;
@@ -352,7 +393,9 @@
             for (let i = this.bullets.length-1; i >= 0; i--) {
                 let b = this.bullets[i];
                 b.x += b.vx*dt; b.y += b.vy*dt; b.z += b.vz*dt; b.life -= dt;
-                this.fx.push({x:b.x, y:b.y, z:b.z, vx:0, vy:0, vz:0, life:0.1, c: b.isEnemy?'#ff3300':'#ffff00', size: 150, tracer: true});
+                
+                // Traçante de bala (Linha e luz)
+                this.fx.push({x:b.x, y:b.y, z:b.z, vx:0, vy:0, vz:0, life:0.1, c: b.isEnemy?'#ff3300':'#ffff00', size: 250, tracer: true});
 
                 if (b.isEnemy) {
                     if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 1200) {
@@ -361,15 +404,15 @@
                     }
                 } else {
                     for (let e of this.entities) {
-                        if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < 2000) {
-                            e.hp -= 35; b.life = 0; this._fx(e.x,e.y,e.z,'#f90',3,80);
+                        if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < 2500) { // Aumentei hitbox
+                            e.hp -= 35; b.life = 0; this._fx(e.x,e.y,e.z,'#f90',3,100);
                             if (e.hp <= 0) this._kill(e, e.type==='tank'?300:150); break;
                         }
                     }
                     if (this.mode==='PVP' && b.life>0) {
                         Object.keys(this.net.players).forEach(uid => {
-                            if (uid!==this.net.uid && this.net.players[uid]?.hp>0 && Math.hypot(b.x-this.net.players[uid].x, b.y-this.net.players[uid].y, b.z-this.net.players[uid].z)<2500) {
-                                b.life=0; this._fx(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,'#f90',4,100);
+                            if (uid!==this.net.uid && this.net.players[uid]?.hp>0 && Math.hypot(b.x-this.net.players[uid].x, b.y-this.net.players[uid].y, b.z-this.net.players[uid].z)<3000) {
+                                b.life=0; this._fx(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,'#f90',4,150);
                                 window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${uid}/hp`).set(this.net.players[uid].hp-10);
                             }
                         });
@@ -404,7 +447,7 @@
                 }
                 m.x += m.vx*dt; m.y += m.vy*dt; m.z += m.vz*dt; m.life -= dt;
                 if(m.y < 0) { m.life = 0; this._fx(m.x,0,m.z,'#a55',10,200); }
-                this.fx.push({x:m.x, y:m.y, z:m.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300, life: 1.5, c:'rgba(220,220,220,0.6)', size: 300});
+                this.fx.push({x:m.x, y:m.y, z:m.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300, life: 1.5, c:'rgba(220,220,220,0.6)', size: 400}); // Fumaça densa do míssil
                 if (m.life <= 0) this.missiles.splice(i,1);
             }
         },
@@ -455,7 +498,11 @@
         _draw: function(ctx, w, h) {
             ctx.save();
             if (window.Gfx?.shake > 0.5) ctx.translate((Math.random()-0.5)*window.Gfx.shake, (Math.random()-0.5)*window.Gfx.shake);
+            
+            // Fundo
             this._drawWorld(ctx,w,h);
+            
+            // Desenha as Entidades (Renderizador de Polígonos e Partículas)
             this._drawEntities(ctx,w,h);
             
             // Renderização Rigorosa: Manche Atrás, HUD de Vidro na Frente
@@ -463,6 +510,7 @@
             this._drawHUD(ctx,w,h); 
             ctx.restore();
             
+            // Efeito Scanline CRT Leve
             ctx.fillStyle='rgba(0,0,0,0.15)'; for(let i=0;i<h;i+=4) ctx.fillRect(0,i,w,1);
         },
 
@@ -489,8 +537,8 @@
                         let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
                         t.x = this.ship.x + fX*100000 + (Math.random()-0.5)*80000; t.z = this.ship.z + fZ*100000 + (Math.random()-0.5)*80000;
                     }
-                    let p1 = Engine3D.project(t.x, 0, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    let p2 = Engine3D.project(t.x, t.h, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    let p1 = Math3D.project(t.x, 0, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    let p2 = Math3D.project(t.x, t.h, t.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                     
                     if(p1.visible && p1.s > 0.005) {
                         let tw = t.w * p1.s;
@@ -505,25 +553,99 @@
             ctx.restore();
         },
 
+        // --- RENDERIZADOR 3D: PINTANDO OS MODELOS VETORIAIS ---
+        _drawMesh: function(ctx, meshData, obj, w, h) {
+            let scale = obj.type === 'tank' ? 80 : 60; // Tamanho dos polígonos
+            let projectedFaces = [];
+
+            // Para cada face, projetamos os vértices no espaço da câmera e da tela
+            for (let face of meshData.f) {
+                let color = face[face.length - 1]; // Último item é a cor
+                let pts = [];
+                let zSum = 0;
+                let visible = true;
+
+                for (let i = 0; i < face.length - 1; i++) {
+                    let v = meshData.v[face[i]];
+                    
+                    // 1. Gira o vértice localmente (Yaw do inimigo)
+                    let wPos = Math3D.rotate(v.x * scale, v.y * scale, v.z * scale, 0, obj.yaw, 0);
+                    // 2. Translada para o mundo
+                    wPos.x += obj.x; wPos.y += obj.y; wPos.z += obj.z;
+                    
+                    // 3. Projeta na tela usando a câmera do Jogador
+                    let p = Math3D.project(wPos.x, wPos.y, wPos.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    
+                    if (!p.visible) visible = false;
+                    pts.push(p);
+                    zSum += p.z;
+                }
+
+                if (visible) {
+                    projectedFaces.push({ pts: pts, z: zSum / (face.length - 1), color: color });
+                }
+            }
+
+            // Painter's Algorithm: Ordena as faces de trás para frente para não bugar os polígonos
+            projectedFaces.sort((a, b) => b.z - a.z);
+
+            // Desenha as faces
+            for (let pf of projectedFaces) {
+                ctx.fillStyle = pf.color;
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)'; // Linha sutil nas bordas estilo PS1
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(pf.pts[0].x, pf.pts[0].y);
+                for (let i = 1; i < pf.pts.length; i++) {
+                    ctx.lineTo(pf.pts[i].x, pf.pts[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+        },
+
         _drawEntities: function(ctx,w,h) {
             let buf=[];
-            const add=(list,t)=>list.forEach(o=>{
-                let p=Engine3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                if(p.visible)buf.push({p,t,o});
+            
+            // Filtra e prepara tudo o que vai renderizar
+            this.clouds.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'c', o});
+            });
+            this.bullets.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'b', o});
+            });
+            this.missiles.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'m', o});
+            });
+            this.fx.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'f', o});
+            });
+            this.floaters.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'x', o});
             });
             
-            add(this.clouds,'c'); add(this.entities,'e'); add(this.bullets,'b'); add(this.missiles,'m'); add(this.fx,'f'); add(this.floaters,'x');
+            // Entidades 3D (Z-Sorting é resolvido dentro do _drawMesh, mas precisamos delas ordenadas com as partículas)
+            this.entities.forEach(o => {
+                let p = Math3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                if(p.visible) buf.push({p, t:'e', o});
+            });
             
             if(this.mode!=='SINGLE') {
                 Object.keys(this.net.players).forEach(uid=>{
                     if(uid!==this.net.uid && this.net.players[uid]?.hp>0){
-                        let p=Engine3D.project(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                        if(p.visible)buf.push({p,t:'p',o:this.net.players[uid],id:uid});
+                        let p = Math3D.project(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
+                        if(p.visible) buf.push({p, t:'p', o:this.net.players[uid], id:uid});
                     }
                 });
             }
             
-            buf.sort((a,b)=>b.p.z-a.p.z); 
+            buf.sort((a,b)=>b.p.z-a.p.z); // Z-Buffer manual global
             
             buf.forEach(d=>{
                 let p=d.p, s=p.s, o=d.o;
@@ -538,8 +660,8 @@
                 else if(d.t==='e' || d.t==='p') {
                     let isNet = d.t==='p', isTank = o.type==='tank';
                     
-                    if(isNet || o.type?.startsWith('jet')) this._renderJet(ctx, p, o.yaw-this.ship.yaw-this.ship.roll, isNet);
-                    else if(isTank) this._renderTank(ctx, p, o.yaw-this.ship.yaw, -this.ship.roll);
+                    // ADEUS CAIXAS QUADRADAS! Renderizando modelo poligonal 3D
+                    this._drawMesh(ctx, isTank ? MESHES.tank : MESHES.jet, o, w, h);
                     
                     if(isNet){ ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(o.name||'ALIADO',p.x,p.y-350*s-15, w*0.3); }
                     
@@ -557,8 +679,9 @@
                     }
                 }
                 else if(d.t==='b') {
-                    if (o.tracer) {
-                        ctx.fillStyle = o.c; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, o.size*s), 0, Math.PI*2); ctx.fill();
+                    if (o.tracer) { // Traçante das metralhadoras
+                        ctx.strokeStyle = o.c; ctx.lineWidth = Math.max(1, o.size*s); ctx.lineCap='round';
+                        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - o.vx*0.01*s, p.y - o.vy*0.01*s); ctx.stroke();
                     } else {
                         ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = o.isEnemy ? '#ff3300' : '#ffff00';
                         ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 15*s), 0, Math.PI*2); ctx.fill();
@@ -568,28 +691,12 @@
                 else if(d.t==='m') {
                     ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 40*s), 0, Math.PI*2); ctx.fill();
                 }
-                else if(d.t==='f') {
+                else if(d.t==='f') { // Partículas/Fumaça
                     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, o.life); ctx.fillStyle = o.c;
                     ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, o.size*s), 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
                 }
             });
-        },
-
-        _renderJet: function(ctx,p,ry,net){
-            let s=p.s*1200; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(ry);
-            let mc = net ? (this.mode==='COOP'?'#2980b9':'#8e44ad') : '#4b6584'; let ec = net ? (this.mode==='COOP'?'#00ffff':'#ff00ff') : '#e74c3c';
-            ctx.fillStyle=mc; ctx.beginPath(); ctx.moveTo(0,-s*0.8); ctx.lineTo(-s*0.3, s*0.2); ctx.lineTo(-s, s*0.6); ctx.lineTo(0, s*0.4); ctx.lineTo(s, s*0.6); ctx.lineTo(s*0.3, s*0.2); ctx.fill();
-            ctx.fillStyle='#111'; ctx.beginPath(); ctx.ellipse(0, -s*0.2, s*0.15, s*0.4, 0, 0, Math.PI*2); ctx.fill();
-            if(Math.cos(ry) > 0) { ctx.fillStyle=ec; ctx.globalCompositeOperation='lighter'; ctx.beginPath(); ctx.arc(-s*0.2, s*0.4, s*0.15, 0, Math.PI*2); ctx.arc(s*0.2, s*0.4, s*0.15, 0, Math.PI*2); ctx.fill(); ctx.globalCompositeOperation='source-over'; }
-            ctx.restore();
-        },
-
-        _renderTank: function(ctx,p,ry,vRoll){
-            let s=p.s*1500; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(vRoll);
-            ctx.fillStyle='#2c3e50'; ctx.fillRect(-s,-s*0.8,s*2,s*1.6); ctx.fillStyle='#111'; ctx.fillRect(-s*1.2,-s*0.9,s*0.3,s*1.8); ctx.fillRect(s*0.9,-s*0.9,s*0.3,s*1.8);
-            ctx.rotate(ry); ctx.fillStyle='#34495e'; ctx.beginPath(); ctx.arc(0,0,s*0.6,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#111'; ctx.fillRect(-s*0.1,-s*1.8,s*0.2,s*1.8);
-            ctx.restore();
         },
         
         // MANCHE PLATINUM: BASE 100% PREGADA NO RODAPÉ, APENAS O VOLANTE GIRA.
@@ -618,6 +725,7 @@
             ctx.roundRect(yokeScale*0.65, -yokeScale*0.5, yokeScale*0.25, yokeScale*0.7, yokeScale*0.1); 
             ctx.fill();
 
+            // Botões de Gatilho
             ctx.fillStyle = this.combat.locked ? '#f33' : '#a00';
             ctx.beginPath(); ctx.arc(-yokeScale*0.77, -yokeScale*0.4, yokeScale*0.06, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(yokeScale*0.77, -yokeScale*0.4, yokeScale*0.06, 0, Math.PI*2); ctx.fill();
@@ -633,7 +741,7 @@
             ctx.strokeStyle = 'rgba(0, 255, 100, 0.8)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
             ctx.font = `bold ${fz}px 'Chakra Petch', sans-serif`;
             
-            // Mira Central
+            // Mira Central Fixa
             ctx.beginPath(); 
             ctx.moveTo(cx - 15, cy); ctx.lineTo(cx - 5, cy); ctx.moveTo(cx + 15, cy); ctx.lineTo(cx + 5, cy);
             ctx.moveTo(cx, cy - 15); ctx.lineTo(cx, cy - 5); ctx.moveTo(cx, cy + 15); ctx.lineTo(cx, cy + 5); 
