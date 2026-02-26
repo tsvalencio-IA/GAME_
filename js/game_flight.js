@@ -316,7 +316,6 @@
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             
-            // FÍSICA REAL: Lift Quadrático e Drag por Ângulo de Ataque
             let speedSq = this.ship.speed * this.ship.speed;
             let pitchDeg = this.ship.pitch * 180 / Math.PI;
             let aoa = Math.abs(this.ship.pitchVel) * 10; 
@@ -346,7 +345,7 @@
             }
 
             this.ship.speed -= drag * dt;
-            this.ship.speed += (fY * -600 * dt); // Gravidade mergulho
+            this.ship.speed += (fY * -600 * dt); 
             this.ship.speed = Math.max(600, Math.min(maxSpeed * (this.pilot.isBoosting? 1.5 : 1), this.ship.speed));
 
             if (this.ship.speed > 4000 && fY < -0.5 && Math.abs(this.ship.gForce) > 7) {
@@ -553,7 +552,6 @@
                     p.x += Math.sin(p.yaw) * p.speed * dt; p.z += Math.cos(p.yaw) * p.speed * dt;
                 }
 
-                // BOSS MULTIFASE CAÓTICA
                 if (e.type === 'boss') {
                     if (a.phase === 1 && c.hp < c.maxHp * 0.66) { a.phase = 2; window.System?.msg("BOSS: MODO AGRESSIVO!"); p.speed = 18000; }
                     if (a.phase === 2 && c.hp < c.maxHp * 0.33) { a.phase = 3; window.System?.msg("BOSS: NÚCLEO EXPOSTO!"); p.speed = 25000; }
@@ -713,7 +711,7 @@
                 else if (e.type === 'floater' || e.type === 'fx') {
                     if(p.vx !== undefined) { p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt; }
                     r.life -= dt;
-                    if (e.type === 'floater') p.y -= 120*dt;
+                    if (e.type === 'floater') p.y += 120*dt; 
                     if(r.life <= 0) delete this.entities[id];
                 }
                 else if (e.type === 'bullet') {
@@ -777,6 +775,7 @@
                     }
                 } else {
                     for (let t of targets) {
+                        if (!this.entities[t.id]) continue; 
                         let tp = t.components.physics;
                         let tc = t.components.combat;
                         let hitbox = t.type === 'boss' ? 8000 : 2500;
@@ -1301,12 +1300,12 @@
 
     const register = () => {
         if (window.System?.registerGame) {
-            window.System.registerGame('usarmy_flight_sim', 'Simulador Militar', '✈️', Game, {
+            window.System.registerGame('flight_sim', 'Aero Strike WAR', '🚀', Game, {
                 camera: 'user',
                 phases: [
-                    { id: 'training', name: 'TREINO', desc: 'Destrua alvos.', mode: 'SINGLE', reqLvl: 1 },
-                    { id: 'coop', name: 'ESQUADRÃO', desc: 'Junte-se.', mode: 'COOP', reqLvl: 1 },
-                    { id: 'pvp', name: 'DOGFIGHT', desc: 'Combate aéreo.', mode: 'PVP', reqLvl: 1 }
+                    { id: 'mission1', name: 'TREINO VS. IA', desc: 'Passo Atrás = Sobe. Passo Frente = Desce. Mira Automática Instântanea. Incline a Cabeça = Míssil!', mode: 'SINGLE', reqLvl: 1 },
+                    { id: 'coop', name: 'SQUADRON CO-OP', desc: 'Junte-se a aliados contra a IA.', mode: 'COOP', reqLvl: 1 },
+                    { id: 'pvp', name: 'DOGFIGHT PVP', desc: 'Combate aéreo contra outros jogadores reais.', mode: 'PVP', reqLvl: 1 }
                 ]
             });
             return true;
