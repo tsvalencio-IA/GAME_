@@ -1,11 +1,13 @@
 // =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V12 - TACTICAL MINIMAP)
-// ENGINE: 100% PURE ECS, REAL AERODYNAMIC PHYSICS, AAA TACTICAL RADAR
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V13 - LOCKED ARCHITECT)
+// ENGINE: 100% PURE ECS, REAL AERODYNAMICS, TACTICAL MINIMAP, STATE MACHINE AI
 // =============================================================================
 (function() {
     "use strict";
 
-    // --- ENGINE MATEMÁTICA E POLIGONAL 3D (NÍVEL CONSOLE) ---
+    // =========================================================================
+    // ENGINE
+    // =========================================================================
     const Engine3D = {
         fov: 800,
         rotate: (x, y, z, pitch, yaw, roll) => {
@@ -30,7 +32,6 @@
         }
     };
 
-    // --- MODELOS 3D DOS INIMIGOS ---
     const MESHES = {
         jet: {
             v: [{x: 0, y: 0, z: 40}, {x: 0, y: 15, z: -30}, {x: -35, y: 0, z: -10}, {x: 35, y: 0, z: -10}, {x: 0, y: -10, z: -20}, {x: 0, y: 10, z: 10}],
@@ -46,7 +47,6 @@
         }
     };
 
-    // --- SISTEMA DE ÁUDIO ---
     const GameSfx = {
         ctx: null, engineSrc: null, ready: false,
         init: function() { if (this.ready) return; try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); this.ready = true; } catch(e) {} },
@@ -80,18 +80,23 @@
         stop: function() { if (this.engineSrc) { try { this.engineSrc.stop(); } catch(e){} this.engineSrc = null; } }
     };
 
-    // --- CORE DO JOGO V12 ---
+    // =========================================================================
+    // GAME LOOP & CORE
+    // =========================================================================
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE', slowMo: 1.0, slowMoTimer: 0, 
         fpsHistory: [], perfTier: 'HIGH',
         money: 0,
         upgrades: { engine: 1, radar: 1, missile: 1, boost: 1, thermal: 1 },
         session: { kills: 0, goal: 30 },
+        cameraShake: 0,
         
-        // --- 100% PURE ECS (ENTITY COMPONENT SYSTEM) ---
+        // =====================================================================
+        // ECS - ENTITY COMPONENT SYSTEM (100% PURE)
+        // =====================================================================
         entityIdCounter: 0,
-        entities: {}, // NENHUM array paralelo. Tudo vive aqui.
-        
+        entities: {}, 
+
         ship: { 
             hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0,
             pitchVel: 0, yawVel: 0, rollVel: 0, boost: 100, overheat: 0, gForce: 1.0,
@@ -103,11 +108,20 @@
         combat: { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 },
         net: { isHost: false, uid: null, sessionRef: null, playersRef: null, loop: null },
         environment: { skyTop: '', skyBot: '', ground: '', isNight: false, stars: [] },
-        cameraShake: 0,
 
-        _spawn: function(type, components) {
+        _spawn: function(type, compData) {
             let id = type + '_' + this.entityIdCounter++;
-            this.entities[id] = Object.assign({ id: id, type: type }, components);
+            this.entities[id] = {
+                id: id,
+                type: type,
+                components: {
+                    physics: compData.physics || null,
+                    combat: compData.combat || null,
+                    ai: compData.ai || null,
+                    render: compData.render || null,
+                    network: compData.network || null
+                }
+            };
             return id;
         },
 
@@ -154,17 +168,24 @@
         },
 
         _populateWorld: function() {
-            let cloudCount = this.perfTier === 'LOW' ? 20 : (this.perfTier === 'MEDIUM' ? 40 : 60);
-            for (let i = 0; i < cloudCount; i++) {
-                this._spawn('cloud', { x: (Math.random()-0.5)*120000, y: 8000+Math.random()*15000, z: (Math.random()-0.5)*120000, size: 4000+Math.random()*8000 });
+            for (let i = 0; i < 60; i++) {
+                this._spawn('cloud', {
+                    physics: { x: (Math.random()-0.5)*120000, y: 8000+Math.random()*15000, z: (Math.random()-0.5)*120000 },
+                    render: { size: 4000+Math.random()*8000 }
+                });
             }
-            let terrainCount = this.perfTier === 'LOW' ? 30 : (this.perfTier === 'MEDIUM' ? 50 : 80);
-            for (let i = 0; i < terrainCount; i++) {
+            for (let i = 0; i < 80; i++) {
                 let c = this.environment.isNight ? `rgb(${Math.random()*30},${30+Math.random()*40},${Math.random()*30})` : `rgb(${50+Math.random()*50},${60+Math.random()*40},${40+Math.random()*30})`;
-                this._spawn('terrain', { x: (Math.random()-0.5)*200000, z: (Math.random()-0.5)*200000, w: 2000 + Math.random()*4000, h: 500 + Math.random()*3000, c: c });
+                this._spawn('terrain', {
+                    physics: { x: (Math.random()-0.5)*200000, y: 0, z: (Math.random()-0.5)*200000 },
+                    render: { w: 2000 + Math.random()*4000, h: 500 + Math.random()*3000, color: c }
+                });
             }
         },
 
+        // =====================================================================
+        // NETWORK
+        // =====================================================================
         _initNet: function() {
             this.state = 'LOBBY';
             this.net.sessionRef = window.DB.ref('br_army_sessions/aero_' + this.mode);
@@ -179,23 +200,34 @@
                 this.net.playersRef.child(this.net.uid).set({ name: window.Profile?.username || 'PILOTO', ready: false, hp: 100, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0 });
             });
             
-            // LERP SUAVE VIA ECS
             this.net.playersRef.on('value', snap => { 
                 const data = snap.val() || {};
                 for (let uid in data) {
                     if (uid === this.net.uid) continue;
-                    let entId = 'net_' + uid;
-                    if (!this.entities[entId]) {
-                        this._spawn('net_player', { id: entId, uid: uid, ...data[uid], tx: data[uid].x, ty: data[uid].y, tz: data[uid].z, tpitch: data[uid].pitch, tyaw: data[uid].yaw, troll: data[uid].roll });
+                    
+                    let foundId = null;
+                    for(let id in this.entities) {
+                        if(this.entities[id].type === 'net_player' && this.entities[id].components.network.uid === uid) foundId = id;
+                    }
+
+                    if (!foundId) {
+                        this._spawn('net_player', {
+                            physics: { x: data[uid].x, y: data[uid].y, z: data[uid].z, pitch: data[uid].pitch, yaw: data[uid].yaw, roll: data[uid].roll, speed: 0 },
+                            combat: { hp: data[uid].hp, maxHp: 100, isEnemy: this.mode === 'PVP' },
+                            network: { uid: uid, name: data[uid].name, ready: data[uid].ready, tx: data[uid].x, ty: data[uid].y, tz: data[uid].z, tpitch: data[uid].pitch, tyaw: data[uid].yaw, troll: data[uid].roll },
+                            render: {}
+                        });
                     } else {
-                        let p = this.entities[entId];
-                        p.tx = data[uid].x; p.ty = data[uid].y; p.tz = data[uid].z;
-                        p.tpitch = data[uid].pitch; p.tyaw = data[uid].yaw; p.troll = data[uid].roll;
-                        p.hp = data[uid].hp; p.name = data[uid].name; p.ready = data[uid].ready;
+                        let netC = this.entities[foundId].components.network;
+                        let comC = this.entities[foundId].components.combat;
+                        netC.tx = data[uid].x; netC.ty = data[uid].y; netC.tz = data[uid].z;
+                        netC.tpitch = data[uid].pitch; netC.tyaw = data[uid].yaw; netC.troll = data[uid].roll;
+                        comC.hp = data[uid].hp; netC.name = data[uid].name; netC.ready = data[uid].ready;
                     }
                 }
                 for (let id in this.entities) {
-                    if (this.entities[id].type === 'net_player' && !data[this.entities[id].uid]) delete this.entities[id];
+                    let e = this.entities[id];
+                    if (e.type === 'net_player' && !data[e.components.network.uid]) delete this.entities[id];
                 }
             });
             
@@ -209,6 +241,7 @@
             let realDt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
             
+            // Performance Tier Real
             this.fpsHistory.push(realDt);
             if(this.fpsHistory.length > 30) this.fpsHistory.shift();
             let avgDt = this.fpsHistory.reduce((a,b)=>a+b,0) / this.fpsHistory.length;
@@ -239,7 +272,8 @@
 
             this._processPhysics(dt);
             this._processCombat(dt, w, h, now);
-            this._processECS(dt, now); 
+            this._processAI(dt, now);
+            this._processECS(dt); 
             this._updateRadar(dt);
 
             if (this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
@@ -248,90 +282,19 @@
             return this.money;
         },
 
-        cleanup: function() {
-            GameSfx.stop();
-            if (this.net.loop) clearInterval(this.net.loop);
-            if (this.mode !== 'SINGLE' && this.net.playersRef) {
-                this.net.playersRef.off(); this.net.sessionRef?.child('state')?.off();
-                this.net.playersRef.child(this.net.uid)?.remove();
-                if (this.net.isHost) this.net.sessionRef?.remove();
-            }
-        },
-
         _adjustECSForTier: function() {
             let limit = this.perfTier === 'LOW' ? 20 : (this.perfTier === 'MEDIUM' ? 40 : 60);
-            let current = 0;
+            let currentC = 0, currentT = 0;
             for(let id in this.entities) {
-                if (this.entities[id].type === 'cloud' || this.entities[id].type === 'terrain') {
-                    current++;
-                    if (current > limit) delete this.entities[id];
-                }
+                let e = this.entities[id];
+                if (e.type === 'cloud') { currentC++; if (currentC > limit) delete this.entities[id]; }
+                if (e.type === 'terrain') { currentT++; if (currentT > limit) delete this.entities[id]; }
             }
         },
 
-        _drawHangar: function(ctx, w, h, dt) {
-            ctx.fillStyle = 'rgba(15, 20, 25, 0.98)'; ctx.fillRect(0, 0, w, h);
-            const fz = Math.min(w * 0.04, 20);
-            ctx.fillStyle = '#f1c40f'; ctx.textAlign = 'center'; ctx.font = `bold ${fz*1.5}px "Russo One"`;
-            ctx.fillText('HANGAR - UPGRADES', w/2, h*0.1);
-            ctx.fillStyle = '#2ecc71'; ctx.fillText(`SALDO: R$ ${this.money}`, w/2, h*0.18);
-
-            const items = [
-                { id: 'engine', name: 'MOTOR TURBO', cost: this.upgrades.engine * 500, lvl: this.upgrades.engine, max: 5, y: h*0.3 },
-                { id: 'radar', name: 'RADAR LOCK', cost: this.upgrades.radar * 400, lvl: this.upgrades.radar, max: 5, y: h*0.42 },
-                { id: 'missile', name: 'MÍSSIL AGIL', cost: this.upgrades.missile * 600, lvl: this.upgrades.missile, max: 5, y: h*0.54 },
-                { id: 'thermal', name: 'RESIST. TÉRMICA', cost: this.upgrades.thermal * 300, lvl: this.upgrades.thermal, max: 5, y: h*0.66 },
-                { id: 'start', name: '>> INICIAR MISSÃO <<', cost: 0, lvl: 0, max: 0, y: h*0.85, isBtn: true }
-            ];
-
-            let isHoveringAny = false;
-
-            items.forEach(item => {
-                let rect = { x: w*0.1, y: item.y - h*0.04, w: w*0.8, h: h*0.08 };
-                ctx.fillStyle = '#2c3e50'; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-                
-                let hx = this.pilot.handR.x, hy = this.pilot.handR.y;
-                if (this.pilot.active && hx > rect.x && hx < rect.x + rect.w && hy > rect.y && hy < rect.y + rect.h) {
-                    ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 3; ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-                    isHoveringAny = true;
-                    if (this.hoveredItem !== item.id) { this.hoveredItem = item.id; this.hoverTime = 0; }
-                    this.hoverTime += dt;
-
-                    ctx.fillStyle = 'rgba(0, 255, 204, 0.3)';
-                    ctx.fillRect(rect.x, rect.y, rect.w * Math.min(1, this.hoverTime / 1.5), rect.h);
-
-                    if (this.hoverTime >= 1.5) {
-                        if (item.isBtn) { this.state = 'CALIBRATION'; this.timer = 4.0; GameSfx.play('buy'); }
-                        else if (this.money >= item.cost && this.upgrades[item.id] < item.max) {
-                            this.money -= item.cost;
-                            this.upgrades[item.id]++; GameSfx.play('buy'); this.hoverTime = 0; 
-                        } else {
-                            GameSfx.play('alarm'); this.hoverTime = 0;
-                        }
-                    }
-                }
-
-                ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `bold ${fz}px Arial`;
-                if (item.isBtn) {
-                    ctx.textAlign = 'center'; ctx.fillStyle = '#e74c3c';
-                    ctx.fillText(item.name, w/2, item.y + fz*0.3);
-                } else {
-                    ctx.fillText(`${item.name} (LVL ${item.lvl}/${item.max})`, rect.x + 20, item.y + fz*0.3);
-                    ctx.textAlign = 'right';
-                    ctx.fillStyle = (this.money >= item.cost && item.lvl < item.max) ? '#f1c40f' : '#7f8c8d';
-                    ctx.fillText(item.lvl >= item.max ? 'MÁXIMO' : `R$ ${item.cost}`, rect.x + rect.w - 20, item.y + fz*0.3);
-                }
-            });
-
-            if (!isHoveringAny) this.hoverTime = 0;
-
-            if (this.pilot.active) {
-                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(this.pilot.handR.x, this.pilot.handR.y, 15, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = `bold 12px Arial`; ctx.fillText("CURSOR", this.pilot.handR.x, this.pilot.handR.y - 20);
-            }
-        },
-
-        // --- FÍSICA AERODINÂMICA REAL (AOA, LIFT QUADRÁTICO, DRAG) ---
+        // =====================================================================
+        // PHYSICS - AERODINÂMICA REAL
+        // =====================================================================
         _processPhysics: function(dt) {
             let yawDamping = 0.92, pitchDamping = 0.90, rollDamping = 0.88;
             let wingDmgRatio = (this.ship.damage.rWing - this.ship.damage.lWing) * 0.05;
@@ -354,7 +317,7 @@
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
             
-            // FÍSICA REAL: Velocidade, AoA, Lift e Drag
+            // LIFT = K * speed^2, DRAG = f(AoA) * speed^2
             let speedSq = this.ship.speed * this.ship.speed;
             let aoa = Math.abs(this.ship.pitchVel) * 10; 
             
@@ -369,7 +332,9 @@
 
             let maxSpeed = 3500 + (this.upgrades.engine * 500) - (this.ship.damage.engine * 20);
             
-            this.ship.speed += (fY * -600 * dt); 
+            // Gravidade vs Lift
+            let gravity = 9.8 * 60;
+            let verticalForce = lift - gravity;
             
             if (this.pilot.isBoosting && this.ship.boost > 0) {
                 this.ship.speed += 2500 * dt;
@@ -383,12 +348,14 @@
             this.ship.speed -= drag * dt;
             this.ship.speed = Math.max(600, Math.min(maxSpeed * (this.pilot.isBoosting? 1.5 : 1), this.ship.speed));
 
+            // Dano Estrutural
             if (this.ship.speed > 4000 && fY < -0.5 && Math.abs(this.ship.gForce) > 7) {
                 this.ship.damage.body += 15 * dt;
                 window.Gfx?.shakeScreen(8);
                 if (Math.random() < 0.2) GameSfx.play('alarm');
             }
 
+            // Stall
             let pitchDeg = Math.abs(this.ship.pitch * 180 / Math.PI);
             if (this.ship.speed < 900 && pitchDeg > 25) {
                 this.ship.pitchVel -= 2.5 * dt; 
@@ -397,13 +364,18 @@
             }
 
             let units = this.ship.speed * 20;
-            this.ship.x += units * fX * dt; this.ship.y += units * fY * dt; this.ship.z += units * fZ * dt;
+            this.ship.x += units * fX * dt; 
+            this.ship.y += (units * fY * dt) + (verticalForce * dt * 0.1); 
+            this.ship.z += units * fZ * dt;
             
             let totalDmg = this.ship.damage.body + this.ship.damage.engine;
             if (totalDmg > 30 && this.perfTier !== 'LOW') {
                 let sCol = totalDmg > 70 ? (Math.random()>0.5?'#e74c3c':'#333') : 'rgba(80,80,80,0.6)';
                 let sSize = totalDmg > 70 ? 400 : 200;
-                this._spawn('fx', {x: this.ship.x, y: this.ship.y, z: this.ship.z, vx: 0, vy: 0, vz: 0, life: 2.0, c: sCol, size: sSize});
+                this._spawn('fx', {
+                    physics: {x: this.ship.x, y: this.ship.y, z: this.ship.z, vx: 0, vy: 0, vz: 0},
+                    render: {life: 2.0, color: sCol, size: sSize}
+                });
             }
         },
 
@@ -426,7 +398,6 @@
                 
                 if (rw?.score > 0.3 && lw?.score > 0.3 && rs?.score > 0.3 && ls?.score > 0.3) {
                     inputDetected = true;
-                    
                     let w1 = { x: pX(rw.x), y: pY(rw.y) }; let w2 = { x: pX(lw.x), y: pY(lw.y) };
                     this.pilot.handR = { x: pX(rw.x), y: pY(rw.y) }; 
                     this.pilot.handL = { x: pX(lw.x), y: pY(lw.y) };
@@ -464,60 +435,194 @@
             }
         },
 
-        // --- UPDATE DO MINIMAP TÁTICO ---
-        _updateRadar: function(dt) {
-            this.radarTimer += dt;
-            let updateRate = this.perfTier === 'LOW' ? 0.3 : (this.perfTier === 'MEDIUM' ? 0.1 : 0);
-            
-            if (this.radarTimer >= updateRate) {
-                this.radarTimer = 0;
-                let range = this.perfTier === 'LOW' ? 40000 : 80000;
-                let rangeSq = range * range;
-                let cosY = Math.cos(-this.ship.yaw), sinY = Math.sin(-this.ship.yaw);
+        // =====================================================================
+        // AI - STATE MACHINE & MULTIPHASE BOSS
+        // =====================================================================
+        _processAI: function(dt, now) {
+            let maxEnemies = this.perfTier === 'LOW' ? 4 : 8;
+            let enemyCount = 0;
+            for(let id in this.entities) {
+                let type = this.entities[id].type;
+                if(type.startsWith('enemy') || type === 'boss') enemyCount++;
+            }
 
-                for (let id in this.entities) {
-                    let e = this.entities[id];
-                    if (e.type === 'cloud' || e.type === 'terrain' || e.type === 'fx' || e.type === 'floater' || e.type === 'bullet') {
-                        e._radVisible = false;
-                        continue;
+            if (enemyCount < maxEnemies && Math.random() < 0.02) {
+                let dist = 60000 + Math.random()*30000;
+                let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
+                let sx = this.ship.x + fX*dist + (Math.random()-0.5)*50000, sz = this.ship.z + fZ*dist + (Math.random()-0.5)*50000;
+                
+                let r = Math.random();
+                let hasBoss = false;
+                for(let id in this.entities) if (this.entities[id].type === 'boss') hasBoss = true;
+
+                if (this.session.kills > 10 && r < 0.1 && !hasBoss) {
+                    this._spawn('boss', { 
+                        physics: { x: sx, y: 30000, z: sz, pitch: 0, yaw: this.ship.yaw + Math.PI, roll: 0, speed: 12000, vx:0, vy:0, vz:0 },
+                        combat: { hp: 3000, maxHp: 3000, isEnemy: true, weakPoints: { left: 800, right: 800, core: 1400 } },
+                        ai: { state: 'ENGAGE', timer: 0, phase: 1 },
+                        render: {}
+                    });
+                    window.System?.msg("FORTALEZA VOADORA DETECTADA!");
+                } else if (r < 0.3) {
+                    this._spawn('enemy_squadron_lead', {
+                        physics: { x: sx, y: this.ship.y, z: sz, pitch: 0, yaw: this.ship.yaw + Math.PI, roll: 0, speed: 20000, vx:0, vy:0, vz:0 },
+                        combat: { hp: 200, maxHp: 200, isEnemy: true }, ai: { state: 'PATROL', timer: 0 }, render: {}
+                    });
+                    this._spawn('enemy_squadron_wing', {
+                        physics: { x: sx+5000, y: this.ship.y+2000, z: sz, pitch: 0, yaw: this.ship.yaw + Math.PI, roll: 0, speed: 22000, vx:0, vy:0, vz:0 },
+                        combat: { hp: 150, maxHp: 150, isEnemy: true }, ai: { state: 'FLANK', timer: 0 }, render: {}
+                    });
+                } else if (r < 0.6) {
+                    this._spawn('enemy_interceptor', {
+                        physics: { x: sx, y: this.ship.y, z: sz, pitch: 0, yaw: this.ship.yaw, roll: 0, speed: 25000, vx:0, vy:0, vz:0 },
+                        combat: { hp: 250, maxHp: 250, isEnemy: true }, ai: { state: 'PATROL', timer: 0 }, render: {}
+                    });
+                } else if (r < 0.8) {
+                    this._spawn('enemy_evasive', {
+                        physics: { x: sx, y: this.ship.y, z: sz, pitch: 0, yaw: this.ship.yaw + Math.PI, roll: 0, speed: 28000, vx:0, vy:0, vz:0 },
+                        combat: { hp: 150, maxHp: 150, isEnemy: true }, ai: { state: 'PATROL', timer: 0 }, render: {}
+                    });
+                } else {
+                    this._spawn('enemy_tank', {
+                        physics: { x: sx, y: 0, z: sz, pitch: 0, yaw: Math.random()*Math.PI*2, roll: 0, speed: 0, vx:0, vy:0, vz:0 },
+                        combat: { hp: 400, maxHp: 400, isEnemy: true }, ai: { state: 'PATROL', timer: 0 }, render: {}
+                    });
+                }
+            }
+
+            for (let id in this.entities) {
+                let e = this.entities[id];
+                if (!e.components.ai) continue;
+                
+                let p = e.components.physics;
+                let c = e.components.combat;
+                let a = e.components.ai;
+
+                let dx = this.ship.x - p.x, dy = this.ship.y - p.y, dz = this.ship.z - p.z;
+                let distToPlayer = Math.hypot(dx, dy, dz);
+                
+                if (distToPlayer > 200000) { delete this.entities[id]; continue; }
+
+                if (e.type === 'enemy_tank') {
+                    if (distToPlayer < 40000 && Math.random() < 0.04) {
+                        this._spawn('bullet', { 
+                            physics: { x: p.x, y: p.y, z: p.z, vx: (dx)/distToPlayer*18000, vy: (dy)/distToPlayer*18000, vz: (dz)/distToPlayer*18000 },
+                            combat: { isEnemy: true, life: 4.0 },
+                            render: { color: '#ff3300', size: 150, tracer: true }
+                        });
                     }
-                    
-                    let dx = e.x - this.ship.x;
-                    let dz = e.z - this.ship.z;
-                    let distSq = dx*dx + dz*dz;
-                    
-                    if (distSq <= rangeSq) {
-                        e._radVisible = true;
-                        e._radX = dx * cosY - dz * sinY;
-                        e._radZ = dx * sinY + dz * cosY;
-                        e._radDy = e.y - this.ship.y;
+                    continue; 
+                }
+
+                let energy = p.y + (p.speed * 0.5);
+                let incomingMissile = false; 
+                for(let mid in this.entities) if(this.entities[mid].type === 'missile' && this.entities[mid].components.combat.targetId === id) incomingMissile = true;
+                
+                if (e.type !== 'boss') {
+                    if (energy < 5000) a.state = 'STALL_RECOVER';
+                    else if (incomingMissile) a.state = 'EVADE';
+                    else if (c.hp < c.maxHp * 0.3) a.state = 'RETREAT';
+                    else if (a.state === 'STALL_RECOVER' || a.state === 'EVADE') a.state = 'ENGAGE';
+                }
+
+                if (a.state === 'STALL_RECOVER') {
+                    p.y -= 15000 * dt; p.speed += 5000 * dt;
+                    p.x += Math.sin(p.yaw) * p.speed * dt; p.z += Math.cos(p.yaw) * p.speed * dt;
+                }
+                else if (a.state === 'EVADE') {
+                    p.yaw += Math.PI * dt; p.x += Math.sin(p.yaw) * p.speed * 1.5 * dt; p.z += Math.cos(p.yaw) * p.speed * 1.5 * dt; p.y += (Math.random() - 0.5) * 20000 * dt;
+                    if (Math.random() < 0.1 && this.perfTier !== 'LOW') {
+                        this._spawn('fx', { physics: { x: p.x, y: p.y, z: p.z, vx:0, vy:0, vz:0 }, render: { life: 1.0, color: '#f1c40f', size: 200 } });
+                    }
+                }
+                else if (a.state === 'RETREAT') {
+                    p.yaw = this.ship.yaw; p.x += Math.sin(p.yaw) * p.speed * 1.2 * dt; p.z += Math.cos(p.yaw) * p.speed * 1.2 * dt; p.y += 10000 * dt;
+                }
+                else if (a.state === 'FLANK') {
+                    p.yaw += ((this.ship.yaw + Math.PI/2) - p.yaw) * dt;
+                    p.x += Math.sin(p.yaw) * p.speed * dt; p.z += Math.cos(p.yaw) * p.speed * dt;
+                }
+                else {
+                    if (e.type === 'enemy_interceptor') {
+                        let estTime = distToPlayer / p.speed; 
+                        let pVelX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
+                        let pVelZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
+                        p.yaw = Math.atan2((this.ship.x + pVelX * estTime) - p.x, (this.ship.z + pVelZ * estTime) - p.z);
+                        p.y += ((this.ship.y + Math.sin(this.ship.pitch) * this.ship.speed * 20 * estTime) - p.y) * 0.5 * dt;
                     } else {
-                        e._radVisible = false;
+                        p.yaw = Math.atan2(dx, dz);
                     }
+                    p.x += Math.sin(p.yaw) * p.speed * dt; p.z += Math.cos(p.yaw) * p.speed * dt;
+                }
+
+                // BOSS MULTIFASE CAÓTICA
+                if (e.type === 'boss') {
+                    if (a.phase === 1 && c.hp < c.maxHp * 0.66) { a.phase = 2; window.System?.msg("BOSS: MODO AGRESSIVO!"); p.speed = 18000; }
+                    if (a.phase === 2 && c.hp < c.maxHp * 0.33) { a.phase = 3; window.System?.msg("BOSS: NÚCLEO EXPOSTO!"); p.speed = 25000; }
+
+                    if(p.y < 15000) p.y += 5000*dt;
+                    
+                    if (a.phase === 3) {
+                        p.yaw += (Math.random() - 0.5) * 3 * dt; 
+                        p.x += Math.sin(now * 0.005) * 10000 * dt; 
+                        if (Math.random() < 0.15) {
+                            this._spawn('fx', { physics: { x: p.x + (Math.random()-0.5)*300, y: p.y, z: p.z + (Math.random()-0.5)*300, vx:0, vy:0, vz:0 }, render: { life: 1.0, color: '#e74c3c', size: 400 }});
+                        }
+                    }
+
+                    a.timer += dt;
+                    let fireRate = a.phase === 3 ? 0.3 : (a.phase === 2 ? 0.8 : 1.5);
+                    if (a.timer > fireRate && distToPlayer < 70000) {
+                        a.timer = 0; let bSpd = 45000;
+                        if (c.weakPoints.left > 0) {
+                            let cx = p.x + Math.cos(p.yaw) * 120, cz = p.z - Math.sin(p.yaw) * 120;
+                            this._spawn('bullet', { physics: { x: cx, y: p.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - p.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd }, combat: { isEnemy: true, life: 4.0 }, render: { color: '#ff3300', size: 250, tracer: true }});
+                        }
+                        if (c.weakPoints.right > 0) {
+                            let cx = p.x - Math.cos(p.yaw) * 120, cz = p.z + Math.sin(p.yaw) * 120;
+                            this._spawn('bullet', { physics: { x: cx, y: p.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - p.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd }, combat: { isEnemy: true, life: 4.0 }, render: { color: '#ff3300', size: 250, tracer: true }});
+                        }
+                        if (a.phase >= 2 && c.weakPoints.core > 0) {
+                            this._spawn('bullet', { physics: { x: p.x, y: p.y+50, z: p.z, vx: dx/distToPlayer*bSpd, vy: dy/distToPlayer*bSpd, vz: dz/distToPlayer*bSpd }, combat: { isEnemy: true, life: 4.0 }, render: { color: '#ff3300', size: 250, tracer: true }});
+                        }
+                        if (a.phase === 3) {
+                            for (let i = -1; i <= 1; i+=2) {
+                                let sy = p.yaw + (i * 0.2);
+                                this._spawn('bullet', { physics: { x: p.x, y: p.y, z: p.z, vx: Math.sin(sy)*bSpd, vy: dy/distToPlayer*bSpd, vz: Math.cos(sy)*bSpd }, combat: { isEnemy: true, life: 4.0 }, render: { color: '#ff3300', size: 250, tracer: true }});
+                            }
+                        }
+                    }
+                }
+
+                if (e.type !== 'boss' && a.state === 'ENGAGE' && distToPlayer < 40000 && Math.random() < 0.05) {
+                    this._spawn('bullet', { physics: { x: p.x, y: p.y, z: p.z, vx: dx/distToPlayer*35000, vy: dy/distToPlayer*35000, vz: dz/distToPlayer*35000 }, combat: { isEnemy: true, life: 4.0 }, render: { color: '#ff3300', size: 150, tracer: true }});
                 }
             }
         },
 
-        // --- LOCK-ON AVANÇADO MULTIFATORIAL ---
+        // =====================================================================
+        // COMBAT
+        // =====================================================================
         _processCombat: function(dt, w, h, now) {
             let radarRange = 100000 + (this.upgrades.radar * 20000);
             
             let currentTarget = this.combat.targetId ? this.entities[this.combat.targetId] : null;
-            if (currentTarget && currentTarget.hp <= 0) currentTarget = null;
+            if (currentTarget && currentTarget.components.combat && currentTarget.components.combat.hp <= 0) currentTarget = null;
 
             if (currentTarget) {
-                let dx = currentTarget.x - this.ship.x, dy = currentTarget.y - this.ship.y, dz = currentTarget.z - this.ship.z;
+                let cp = currentTarget.components.physics;
+                let dx = cp.x - this.ship.x, dy = cp.y - this.ship.y, dz = cp.z - this.ship.z;
                 let dist = Math.hypot(dx, dy, dz);
-                let p = Engine3D.project(currentTarget.x, currentTarget.y, currentTarget.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                let p = Engine3D.project(cp.x, cp.y, cp.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 
                 if (!p.visible || dist > radarRange || Math.abs(p.x - w/2) > w*0.45 || Math.abs(p.y - h/2) > h*0.45) {
                     this.combat.locked = false; this.combat.lockTimer = 0; this.combat.targetId = null; currentTarget = null;
                 } else {
                     let distPenalty = (dist / radarRange) * 30;
                     let anglePenalty = (Math.abs(p.x - w/2) / (w/2)) * 30;
-                    let relSpeedPenalty = Math.abs(this.ship.speed - (currentTarget.speed || 0)) / 1000 * 10;
+                    let relSpeedPenalty = Math.abs(this.ship.speed - (cp.speed || 0)) / 1000 * 10;
                     let gForcePenalty = Math.abs(this.ship.gForce - 1) * 5;
-                    let evadePenalty = (currentTarget.aiState === 'EVADE') ? 40 : 0;
+                    let evadePenalty = (currentTarget.components.ai && currentTarget.components.ai.state === 'EVADE') ? 40 : 0;
                     
                     this.combat.hitChance = Math.max(0, Math.min(100, 100 - distPenalty - anglePenalty - relSpeedPenalty - gForcePenalty - evadePenalty));
                 }
@@ -529,7 +634,8 @@
                 for (let id in this.entities) {
                     let e = this.entities[id];
                     if (e.type.startsWith('enemy') || e.type === 'boss' || e.type === 'net_player') {
-                        let p = Engine3D.project(e.x, e.y, e.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                        let cp = e.components.physics;
+                        let p = Engine3D.project(cp.x, cp.y, cp.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                         if (p.visible && p.z > 500 && p.z < radarRange && Math.abs(p.x - w/2) < w*0.35 && Math.abs(p.y - h/2) < h*0.35 && p.z < closestZ) {
                             closestZ = p.z; this.combat.targetId = e.id; currentTarget = e;
                         }
@@ -558,11 +664,16 @@
                 if (this.ship.overheat >= 100) { this.ship.overheat = 100; this.combat.isJammed = true; GameSfx.play('alarm'); }
 
                 let spd = this.ship.speed * 20 + 45000;
-                let dx = currentTarget.x - this.ship.x, dy = currentTarget.y - this.ship.y, dz = currentTarget.z - this.ship.z;
+                let cp = currentTarget.components.physics;
+                let dx = cp.x - this.ship.x, dy = cp.y - this.ship.y, dz = cp.z - this.ship.z;
                 let dist = Math.hypot(dx,dy,dz);
                 dx += (Math.random()-0.5)*1500; dy += (Math.random()-0.5)*1500;
                 
-                this._spawn('bullet', { x: this.ship.x, y: this.ship.y-30, z: this.ship.z, vx: dx/dist*spd, vy: dy/dist*spd, vz: dz/dist*spd, isEnemy: false, life: 2.5, c: '#ffff00', size: 250, tracer: true });
+                this._spawn('bullet', { 
+                    physics: { x: this.ship.x, y: this.ship.y-30, z: this.ship.z, vx: dx/dist*spd, vy: dy/dist*spd, vz: dz/dist*spd },
+                    combat: { isEnemy: false, life: 2.5 },
+                    render: { color: '#ffff00', size: 250, tracer: true }
+                });
                 GameSfx.play('vulcan'); window.Gfx?.shakeScreen(1);
             } else if (!this.combat.locked && !this.combat.isJammed) {
                 this.ship.overheat = Math.max(0, this.ship.overheat - 10 * dt);
@@ -575,213 +686,108 @@
                 let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fY = Math.sin(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
                 
                 this._spawn('missile', {
-                    x: this.ship.x, y: this.ship.y-100, z: this.ship.z,
-                    vx: fX*mSpd + (Math.random()-0.5)*5000, vy: fY*mSpd - 2000, vz: fZ*mSpd + (Math.random()-0.5)*5000,
-                    targetId: this.combat.targetId,
-                    isPlayer: currentTarget.type === 'net_player',
-                    life: 8, speed: mSpd
+                    physics: { x: this.ship.x, y: this.ship.y-100, z: this.ship.z, vx: fX*mSpd + (Math.random()-0.5)*5000, vy: fY*mSpd - 2000, vz: fZ*mSpd + (Math.random()-0.5)*5000, speed: mSpd },
+                    combat: { targetId: this.combat.targetId, life: 8 },
+                    render: { size: 40, color: '#fff' }
                 });
                 GameSfx.play('missile'); window.Gfx?.shakeScreen(5);
             }
         },
 
-        // --- CORE ECS LOOP ---
-        _processECS: function(dt, now) {
-            let enemyCount = 0;
-            for(let id in this.entities) if(this.entities[id].type.startsWith('enemy') || this.entities[id].type === 'boss') enemyCount++;
-            let maxEnemies = this.perfTier === 'LOW' ? 4 : 8;
-            
-            if (enemyCount < maxEnemies && Math.random() < 0.02) {
-                let dist = 60000 + Math.random()*30000;
-                let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
-                let sx = this.ship.x + fX*dist + (Math.random()-0.5)*50000, sz = this.ship.z + fZ*dist + (Math.random()-0.5)*50000;
-                
-                let r = Math.random();
-                if (this.session.kills > 10 && r < 0.1 && !Object.values(this.entities).find(e => e.type === 'boss')) {
-                    this._spawn('boss', { x: sx, y: 30000, z: sz, speed: 12000, hp: 3000, maxHp: 3000, yaw: this.ship.yaw + Math.PI, aiState: 'ENGAGE', phase: 1, timer: 0, weakPoints: { left: 800, right: 800, core: 1400 } });
-                    window.System?.msg("FORTALEZA VOADORA DETECTADA!");
-                } else if (r < 0.3) {
-                    this._spawn('enemy_squadron_lead', { x: sx, y: this.ship.y, z: sz, hp: 200, maxHp: 200, yaw: this.ship.yaw + Math.PI, aiState: 'PATROL', timer: 0, speed: 20000 });
-                    this._spawn('enemy_squadron_wing', { x: sx+5000, y: this.ship.y+2000, z: sz, hp: 150, maxHp: 150, yaw: this.ship.yaw + Math.PI, aiState: 'FLANK', timer: 0, speed: 22000 });
-                } else if (r < 0.6) {
-                    this._spawn('enemy_interceptor', { x: sx, y: this.ship.y, z: sz, hp: 250, maxHp: 250, yaw: this.ship.yaw, aiState: 'PATROL', timer: 0, speed: 25000 });
-                } else if (r < 0.8) {
-                    this._spawn('enemy_evasive', { x: sx, y: this.ship.y, z: sz, hp: 150, maxHp: 150, yaw: this.ship.yaw + Math.PI, aiState: 'PATROL', timer: 0, speed: 28000 });
-                } else {
-                    this._spawn('enemy_tank', { x: sx, y: 0, z: sz, hp: 400, maxHp: 400, yaw: Math.random()*Math.PI*2, aiState: 'PATROL', timer: 0, speed: 0 });
-                }
-            }
-
+        // =====================================================================
+        // CORE ECS PROCESSING & COLLISIONS
+        // =====================================================================
+        _processECS: function(dt) {
             let bullets = []; let targets = [];
             
             for (let id in this.entities) {
                 let e = this.entities[id];
-                
+                let p = e.components.physics;
+                let c = e.components.combat;
+                let r = e.components.render;
+
                 if (e.type === 'cloud' || e.type === 'terrain') {
-                    if (Math.hypot(e.x-this.ship.x, e.z-this.ship.z) > 150000) {
+                    if (Math.hypot(p.x-this.ship.x, p.z-this.ship.z) > 150000) {
                         let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch), fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
-                        e.z = this.ship.z + fZ*120000 + (Math.random()-0.5)*80000; e.x = this.ship.x + fX*120000 + (Math.random()-0.5)*80000;
+                        p.z = this.ship.z + fZ*120000 + (Math.random()-0.5)*80000; p.x = this.ship.x + fX*120000 + (Math.random()-0.5)*80000;
                     }
                 }
-                else if (e.type === 'floater') {
-                    e.life -= dt; e.y -= 120*dt;
-                    if(e.life <= 0) delete this.entities[id];
-                }
-                else if (e.type === 'fx') {
-                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
-                    if(e.life <= 0) delete this.entities[id];
-                }
-                else if (e.type === 'net_player') {
-                    if (e.tx !== undefined) {
-                        e.x += (e.tx - e.x) * dt * 10; e.y += (e.ty - e.y) * dt * 10; e.z += (e.tz - e.z) * dt * 10;
-                        e.pitch += (e.tpitch - e.pitch) * dt * 10; e.yaw += (e.tyaw - e.yaw) * dt * 10; e.roll += (e.troll - e.roll) * dt * 10;
-                    }
-                    targets.push(e);
+                else if (e.type === 'floater' || e.type === 'fx') {
+                    if(p.vx !== undefined) { p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt; }
+                    r.life -= dt;
+                    if (e.type === 'floater') p.y -= 120*dt;
+                    if(r.life <= 0) delete this.entities[id];
                 }
                 else if (e.type === 'bullet') {
-                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
-                    if (e.life <= 0 || e.y < 0) { 
-                        if(e.y < 0 && this.perfTier !== 'LOW') this._spawn('fx', {x:e.x, y:0, z:e.z, vx:0, vy:0, vz:0, life:1.0, c:'#789', size:100});
+                    p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt; c.life -= dt;
+                    if (c.life <= 0 || p.y < 0) { 
+                        if(p.y < 0 && this.perfTier !== 'LOW') this._spawn('fx', { physics: {x:p.x, y:0, z:p.z, vx:0, vy:0, vz:0}, render: {life:1.0, color:'#789', size:100} });
                         delete this.entities[id]; 
                     } else {
                         bullets.push(e);
-                        if (this.perfTier === 'HIGH' || Math.random() < 0.5) this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:0.1, c: e.isEnemy?'#ff3300':'#ffff00', size: 250, tracer: true});
+                        if (this.perfTier === 'HIGH' || Math.random() < 0.5) {
+                            this._spawn('fx', { physics: {x:p.x, y:p.y, z:p.z, vx:0, vy:0, vz:0}, render: {life:0.1, color: c.isEnemy?'#ff3300':'#ffff00', size: 250, tracer: true} });
+                        }
                     }
                 }
                 else if (e.type === 'missile') {
-                    e.speed += 20000 * dt; 
-                    let activeTarget = this.entities[e.targetId];
-                    if (!activeTarget || activeTarget.hp <= 0) {
-                        e.life = 0; delete this.entities[id];
-                        if(this.perfTier !== 'LOW') this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'rgba(100,100,100,0.5)', size: 400});
+                    p.speed += 20000 * dt; 
+                    let activeTarget = this.entities[c.targetId];
+                    if (!activeTarget || (activeTarget.components.combat && activeTarget.components.combat.hp <= 0)) {
+                        c.life = 0; delete this.entities[id];
+                        if(this.perfTier !== 'LOW') this._spawn('fx', { physics: {x:p.x, y:p.y, z:p.z, vx:0, vy:0, vz:0}, render: {life:1.5, color:'rgba(100,100,100,0.5)', size: 400} });
                         continue;
                     }
-                    let dx = activeTarget.x - e.x, dy = activeTarget.y - e.y, dz = activeTarget.z - e.z;
+                    let tp = activeTarget.components.physics;
+                    let dx = tp.x - p.x, dy = tp.y - p.y, dz = tp.z - p.z;
                     let d = Math.hypot(dx,dy,dz);
                     let turn = (50000 + (this.upgrades.missile * 10000)) * dt; 
-                    e.vx += (dx/d)*turn; e.vy += (dy/d)*turn; e.vz += (dz/d)*turn;
-                    let velD = Math.hypot(e.vx, e.vy, e.vz);
-                    if(velD > e.speed) { e.vx = (e.vx/velD)*e.speed; e.vy = (e.vy/velD)*e.speed; e.vz = (e.vz/velD)*e.speed; }
+                    p.vx += (dx/d)*turn; p.vy += (dy/d)*turn; p.vz += (dz/d)*turn;
+                    let velD = Math.hypot(p.vx, p.vy, p.vz);
+                    if(velD > p.speed) { p.vx = (p.vx/velD)*p.speed; p.vy = (p.vy/velD)*p.speed; p.vz = (p.vz/velD)*p.speed; }
                     
                     let hitbox = activeTarget.type === 'boss' ? 9000 : 3000;
                     if (d < hitbox) {
                         if (activeTarget.type === 'net_player' && this.mode === 'PVP') {
-                            window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${activeTarget.uid}/hp`).set(activeTarget.hp-60);
-                            this._spawn('fx', {x:activeTarget.x, y:activeTarget.y, z:activeTarget.z, vx:0, vy:0, vz:0, life:2.0, c:'#f33', size:400}); this.money += 800;
+                            window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${activeTarget.components.network.uid}/hp`).set(activeTarget.components.combat.hp-60);
+                            this._spawn('fx', { physics: {x:tp.x, y:tp.y, z:tp.z, vx:0, vy:0, vz:0}, render: {life:2.0, color:'#f33', size:400} }); this.money += 800;
                         } else if (activeTarget.type !== 'net_player') {
                             this._applyDamageToEnemy(activeTarget, 500);
                         }
-                        e.life = 0; delete this.entities[id]; GameSfx.play('boom'); window.Gfx?.shakeScreen(5);
+                        c.life = 0; delete this.entities[id]; GameSfx.play('boom'); window.Gfx?.shakeScreen(5);
                         continue;
                     }
-                    e.x += e.vx*dt; e.y += e.vy*dt; e.z += e.vz*dt; e.life -= dt;
-                    if(e.y < 0) { e.life = 0; delete this.entities[id]; this._spawn('fx', {x:e.x, y:0, z:e.z, vx:0, vy:0, vz:0, life:2.0, c:'#a55', size:200}); continue; }
-                    if (this.perfTier === 'HIGH' || Math.random() < 0.5) this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300, life: 1.5, c:'rgba(220,220,220,0.6)', size: 500}); 
+                    p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt; c.life -= dt;
+                    if(p.y < 0) { c.life = 0; delete this.entities[id]; this._spawn('fx', { physics: {x:p.x, y:0, z:p.z, vx:0, vy:0, vz:0}, render: {life:2.0, color:'#a55', size:200} }); continue; }
+                    if (this.perfTier === 'HIGH' || Math.random() < 0.5) {
+                        this._spawn('fx', { physics: {x:p.x, y:p.y, z:p.z, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300, vz:(Math.random()-0.5)*300}, render: {life: 1.5, color:'rgba(220,220,220,0.6)', size: 500} });
+                    }
+                    if (c.life <= 0) delete this.entities[id];
                 }
-                else if (e.type.startsWith('enemy') || e.type === 'boss') {
+                
+                if (e.type.startsWith('enemy') || e.type === 'boss' || e.type === 'net_player') {
                     targets.push(e);
-                    let dx = this.ship.x - e.x, dy = this.ship.y - e.y, dz = this.ship.z - e.z;
-                    let distToPlayer = Math.hypot(dx, dy, dz);
-                    
-                    if (distToPlayer > 200000) { delete this.entities[id]; continue; }
-
-                    if (e.type === 'enemy_tank') {
-                        if (distToPlayer < 40000 && Math.random() < 0.04) {
-                            this._spawn('bullet', { x: e.x, y: e.y, z: e.z, vx: (dx)/distToPlayer*18000, vy: (dy)/distToPlayer*18000, vz: (dz)/distToPlayer*18000, isEnemy: true, life: 4.0 });
-                        }
-                        continue; 
-                    }
-
-                    let energy = e.y + (e.speed * 0.5);
-                    let incomingMissile = false; 
-                    for(let mid in this.entities) if(this.entities[mid].type === 'missile' && this.entities[mid].targetId === id) incomingMissile = true;
-                    
-                    if (e.type !== 'boss') {
-                        if (energy < 5000) e.aiState = 'STALL_RECOVER';
-                        else if (incomingMissile) e.aiState = 'EVADE';
-                        else if (e.hp < e.maxHp * 0.3) e.aiState = 'RETREAT';
-                        else if (e.aiState === 'STALL_RECOVER' || e.aiState === 'EVADE') e.aiState = 'ENGAGE';
-                    }
-
-                    if (e.aiState === 'STALL_RECOVER') {
-                        e.y -= 15000 * dt; e.speed += 5000 * dt;
-                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                    }
-                    else if (e.aiState === 'EVADE') {
-                        e.yaw += Math.PI * dt; e.x += Math.sin(e.yaw) * e.speed * 1.5 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.5 * dt; e.y += (Math.random() - 0.5) * 20000 * dt;
-                        if (Math.random() < 0.1 && this.perfTier !== 'LOW') this._spawn('fx', {x: e.x, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 1.0, c: '#f1c40f', size: 200});
-                    }
-                    else if (e.aiState === 'RETREAT') {
-                        e.yaw = this.ship.yaw; e.x += Math.sin(e.yaw) * e.speed * 1.2 * dt; e.z += Math.cos(e.yaw) * e.speed * 1.2 * dt; e.y += 10000 * dt;
-                    }
-                    else if (e.aiState === 'FLANK') {
-                        e.yaw += ((this.ship.yaw + Math.PI/2) - e.yaw) * dt;
-                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                    }
-                    else {
-                        if (e.type === 'enemy_interceptor') {
-                            let estTime = distToPlayer / e.speed; 
-                            let pVelX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
-                            let pVelZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch) * this.ship.speed * 20;
-                            e.yaw = Math.atan2((this.ship.x + pVelX * estTime) - e.x, (this.ship.z + pVelZ * estTime) - e.z);
-                            e.y += ((this.ship.y + Math.sin(this.ship.pitch) * this.ship.speed * 20 * estTime) - e.y) * 0.5 * dt;
-                        } else if (e.type === 'boss') {
-                            e.yaw = Math.atan2(dx, dz);
-                        } else {
-                            e.yaw = Math.atan2(dx, dz);
-                        }
-                        e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt;
-                    }
-
-                    if (e.type === 'boss') {
-                        if (e.phase === 1 && e.hp < e.maxHp * 0.66) { e.phase = 2; window.System?.msg("BOSS: MODO AGRESSIVO!"); e.speed = 18000; }
-                        if (e.phase === 2 && e.hp < e.maxHp * 0.33) { e.phase = 3; window.System?.msg("BOSS: NÚCLEO EXPOSTO!"); e.speed = 25000; }
-
-                        if(e.y < 15000) e.y += 5000*dt;
-                        
-                        if (e.phase === 3) {
-                            e.yaw += (Math.random() - 0.5) * 3 * dt; 
-                            e.x += Math.sin(now * 0.005) * 10000 * dt; 
-                            if (Math.random() < 0.1) this._spawn('fx', {x: e.x + (Math.random()-0.5)*200, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 1.0, c: '#e74c3c', size: 300});
-                        }
-
-                        e.timer += dt;
-                        let fireRate = e.phase === 3 ? 0.3 : (e.phase === 2 ? 0.8 : 1.5);
-                        if (e.timer > fireRate && distToPlayer < 70000) {
-                            e.timer = 0; let bSpd = 45000;
-                            if (e.weakPoints.left > 0) {
-                                let cx = e.x + Math.cos(e.yaw) * 120, cz = e.z - Math.sin(e.yaw) * 120;
-                                this._spawn('bullet', { x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                            }
-                            if (e.weakPoints.right > 0) {
-                                let cx = e.x - Math.cos(e.yaw) * 120, cz = e.z + Math.sin(e.yaw) * 120;
-                                this._spawn('bullet', { x: cx, y: e.y, z: cz, vx: (this.ship.x - cx)/distToPlayer*bSpd, vy: (this.ship.y - e.y)/distToPlayer*bSpd, vz: (this.ship.z - cz)/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                            }
-                            if (e.phase >= 2 && e.weakPoints.core > 0) {
-                                this._spawn('bullet', { x: e.x, y: e.y+50, z: e.z, vx: dx/distToPlayer*bSpd, vy: dy/distToPlayer*bSpd, vz: dz/distToPlayer*bSpd, isEnemy: true, life: 4.0 });
-                            }
-                        }
-                    }
-
-                    if (e.type !== 'boss' && e.aiState === 'ENGAGE' && distToPlayer < 40000 && Math.random() < 0.05) {
-                        this._spawn('bullet', { x: e.x, y: e.y, z: e.z, vx: dx/distToPlayer*35000, vy: dy/distToPlayer*35000, vz: dz/distToPlayer*35000, isEnemy: true, life: 4.0 });
-                    }
                 }
             }
 
+            // Bullet Collisions
             for (let b of bullets) {
                 if (!this.entities[b.id]) continue; 
-                if (b.isEnemy) {
-                    if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 1500) {
+                let bp = b.components.physics;
+                if (b.components.combat.isEnemy) {
+                    if (Math.hypot(bp.x-this.ship.x, bp.y-this.ship.y, bp.z-this.ship.z) < 1500) {
                         this._takeDamage(10); delete this.entities[b.id];
                     }
                 } else {
                     for (let t of targets) {
+                        let tp = t.components.physics;
+                        let tc = t.components.combat;
                         let hitbox = t.type === 'boss' ? 8000 : 2500;
-                        if (Math.hypot(b.x-t.x, b.y-t.y, b.z-t.z) < hitbox) { 
-                            delete this.entities[b.id]; this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:1.0,c:'#f90',size:100});
+                        if (Math.hypot(bp.x-tp.x, bp.y-tp.y, bp.z-tp.z) < hitbox) { 
+                            delete this.entities[b.id]; 
+                            this._spawn('fx', { physics: {x:tp.x, y:tp.y, z:tp.z, vx:0, vy:0, vz:0}, render: {life:1.0, color:'#f90', size:100} });
                             if (t.type === 'net_player' && this.mode === 'PVP' && this.net.isHost) {
-                                window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${t.uid}/hp`).set(t.hp-10);
+                                window.DB?.ref(`br_army_sessions/aero_${this.mode}/pilotos/${t.components.network.uid}/hp`).set(tc.hp-10);
                             } else if (t.type !== 'net_player') {
                                 this._applyDamageToEnemy(t, 35);
                             }
@@ -793,41 +799,58 @@
         },
 
         _applyDamageToEnemy: function(e, amount) {
+            let p = e.components.physics;
+            let c = e.components.combat;
             if (e.type === 'boss') {
-                if (e.weakPoints.left > 0) { e.weakPoints.left -= amount; this._spawn('fx', {x:e.x+100, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'#ff3300', size:300}); }
-                else if (e.weakPoints.right > 0) { e.weakPoints.right -= amount; this._spawn('fx', {x:e.x-100, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:1.5, c:'#ff3300', size:300}); }
-                else { e.weakPoints.core -= amount; this._spawn('fx', {x:e.x, y:e.y, z:e.z, vx:0, vy:0, vz:0, life:2.0, c:'#3498db', size:500}); }
-                e.hp -= amount; 
+                if (c.weakPoints.left > 0) { c.weakPoints.left -= amount; this._spawn('fx', { physics:{x:p.x+100, y:p.y, z:p.z, vx:0, vy:0, vz:0}, render:{life:1.5, color:'#ff3300', size:300} }); }
+                else if (c.weakPoints.right > 0) { c.weakPoints.right -= amount; this._spawn('fx', { physics:{x:p.x-100, y:p.y, z:p.z, vx:0, vy:0, vz:0}, render:{life:1.5, color:'#ff3300', size:300} }); }
+                else { c.weakPoints.core -= amount; this._spawn('fx', { physics:{x:p.x, y:p.y, z:p.z, vx:0, vy:0, vz:0}, render:{life:2.0, color:'#3498db', size:500} }); }
+                c.hp -= amount; 
             } else {
-                e.hp -= amount;
+                c.hp -= amount;
             }
-            if (e.hp <= 0) this._kill(e);
+            if (c.hp <= 0) this._kill(e);
         },
 
-        _kill: function(t) {
-            let isBoss = t.type === 'boss';
-            let rew = isBoss ? 2500 : (t.type === 'enemy_tank' ? 300 : 200);
+        _takeDamage: function(amount) {
+            this.ship.hp -= amount;
+            this.cameraShake = 15;
+            window.Gfx?.shakeScreen(15); 
+            this._spawn('fx', { physics:{x:this.ship.x, y:this.ship.y, z:this.ship.z+500, vx:0,vy:0,vz:0}, render:{life:1.0, color:'#f00', size:200} }); 
+            GameSfx.play('boom');
+            
+            let parts = ['lWing', 'rWing', 'engine', 'body'];
+            let hitPart = parts[Math.floor(Math.random() * parts.length)];
+            this.ship.damage[hitPart] += amount * 0.5;
+            
+            if (this.ship.hp <= 0) this._endGame('GAMEOVER');
+        },
+
+        _kill: function(e) {
+            let isBoss = e.type === 'boss';
+            let rew = isBoss ? 2500 : (e.type === 'enemy_tank' ? 300 : 200);
+            let p = e.components.physics;
             
             GameSfx.play('boom');
             this.cameraShake = isBoss ? 40 : 10;
             window.Gfx?.shakeScreen(this.cameraShake);
             
-            this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:2.0,c:'#ff3300',size:isBoss?1500:400});
-            this._spawn('fx', {x:t.x,y:t.y,z:t.z,vx:0,vy:0,vz:0,life:2.5,c:'#f1c40f',size:isBoss?2000:600});
+            this._spawn('fx', { physics:{x:p.x, y:p.y, z:p.z, vx:0,vy:0,vz:0}, render:{life:2.0, color:'#ff3300', size:isBoss?1500:400} });
+            this._spawn('fx', { physics:{x:p.x, y:p.y, z:p.z, vx:0,vy:0,vz:0}, render:{life:2.5, color:'#f1c40f', size:isBoss?2000:600} });
             
             if (isBoss) {
                 let expTimer = setInterval(() => {
                     if(this.state !== 'PLAYING') clearInterval(expTimer);
-                    this._spawn('fx', {x:t.x + (Math.random()-0.5)*5000, y:t.y + (Math.random()-0.5)*5000, z:t.z + (Math.random()-0.5)*5000, vx:0,vy:0,vz:0,life:2.0,c:'#ff3300',size:800});
+                    this._spawn('fx', { physics:{x:p.x + (Math.random()-0.5)*5000, y:p.y + (Math.random()-0.5)*5000, z:p.z + (Math.random()-0.5)*5000, vx:0,vy:0,vz:0}, render:{life:2.0, color:'#ff3300', size:800} });
                     GameSfx.play('boom');
                 }, 400);
                 setTimeout(() => clearInterval(expTimer), 3500);
             }
 
-            this._spawn('floater', {x:t.x,y:t.y,z:t.z,text:`+ R$${rew}`,life:2.5});
+            this._spawn('floater', { physics:{x:p.x, y:p.y, z:p.z}, render:{life:2.5, text:`+ R$${rew}`} });
             this.session.kills++; this.money += rew;
             this.slowMoTimer = isBoss ? 4.0 : 1.0;
-            delete this.entities[t.id];
+            delete this.entities[e.id];
 
             if (this.session.kills >= this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
         },
@@ -852,6 +875,97 @@
             }
         },
 
+        // =====================================================================
+        // RADAR - MINIMAP TÁTICO AAA
+        // =====================================================================
+        _updateRadar: function(dt) {
+            this.radarTimer += dt;
+            let updateRate = this.perfTier === 'LOW' ? 0.3 : 0.05;
+            
+            if (this.radarTimer >= updateRate) {
+                this.radarTimer = 0;
+                let range = this.perfTier === 'LOW' ? 40000 : 80000;
+                let rangeSq = range * range;
+                let cosY = Math.cos(-this.ship.yaw), sinY = Math.sin(-this.ship.yaw);
+
+                for (let id in this.entities) {
+                    let e = this.entities[id];
+                    if (!e.components.render) continue;
+                    let r = e.components.render;
+                    let p = e.components.physics;
+                    
+                    if (e.type === 'cloud' || e.type === 'terrain' || e.type === 'fx' || e.type === 'floater' || e.type === 'bullet') {
+                        r.radVisible = false;
+                        continue;
+                    }
+                    
+                    let dx = p.x - this.ship.x;
+                    let dz = p.z - this.ship.z;
+                    let distSq = dx*dx + dz*dz;
+                    
+                    if (distSq <= rangeSq) {
+                        r.radVisible = true;
+                        r.radX = dx * cosY - dz * sinY;
+                        r.radZ = dx * sinY + dz * cosY;
+                        r.radDy = p.y - this.ship.y;
+                    } else {
+                        r.radVisible = false;
+                    }
+                }
+            }
+        },
+
+        _drawRadar: function(ctx, w, h, now) {
+            let radius = Math.min(w * 0.15, 70);
+            let cx = radius + 15;
+            let cy = h - radius - 45; 
+            
+            ctx.fillStyle = 'rgba(10, 30, 20, 0.6)';
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.4)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.66, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.33, 0, Math.PI*2); ctx.stroke();
+            
+            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
+
+            let range = this.perfTier === 'LOW' ? 40000 : 80000;
+
+            for (let id in this.entities) {
+                let e = this.entities[id];
+                let r = e.components.render;
+                if (!r || !r.radVisible) continue;
+                
+                let px = cx + (r.radX / range) * radius;
+                let py = cy - (r.radZ / range) * radius; 
+                
+                if (Math.hypot(px - cx, py - cy) > radius) continue;
+
+                let color = '#f00'; let size = 3;
+                if (e.type === 'boss') { color = (now % 500 < 250) ? '#f03' : '#fff'; size = 5; }
+                else if (e.type === 'net_player') { color = '#0ff'; size = 4; }
+                else if (e.type === 'missile') { color = '#ff0'; size = 2; }
+                else if (e.type.startsWith('enemy')) { color = '#f00'; size = 3; }
+
+                ctx.fillStyle = color;
+                if (r.radDy > 2500) {
+                    ctx.beginPath(); ctx.moveTo(px, py-size); ctx.lineTo(px-size, py+size); ctx.lineTo(px+size, py+size); ctx.fill();
+                } else if (r.radDy < -2500) {
+                    ctx.beginPath(); ctx.moveTo(px, py+size); ctx.lineTo(px-size, py-size); ctx.lineTo(px+size, py-size); ctx.fill();
+                } else {
+                    ctx.beginPath(); ctx.arc(px, py, size, 0, Math.PI*2); ctx.fill();
+                }
+            }
+
+            ctx.fillStyle = '#0f0';
+            ctx.beginPath(); ctx.moveTo(cx, cy-6); ctx.lineTo(cx-4, cy+4); ctx.lineTo(cx, cy+2); ctx.lineTo(cx+4, cy+4); ctx.fill();
+        },
+
+        // =====================================================================
+        // RENDER / HUD
+        // =====================================================================
         _draw: function(ctx, w, h) {
             ctx.save();
             if (this.cameraShake > 0.5) ctx.translate((Math.random()-0.5)*this.cameraShake, (Math.random()-0.5)*this.cameraShake);
@@ -898,7 +1012,7 @@
             ctx.restore();
         },
 
-        _drawMesh: function(ctx, meshData, obj, w, h) {
+        _drawMesh: function(ctx, meshData, obj, w, h, pcomp) {
             let scale = obj.type === 'boss' ? 200 : (obj.type === 'enemy_tank' ? 80 : 60); 
             let projectedFaces = [];
 
@@ -908,8 +1022,8 @@
 
                 for (let i = 0; i < face.length - 1; i++) {
                     let v = meshData.v[face[i]];
-                    let wPos = Engine3D.rotate(v.x * scale, v.y * scale, v.z * scale, 0, obj.yaw, 0);
-                    wPos.x += obj.x; wPos.y += obj.y; wPos.z += obj.z;
+                    let wPos = Engine3D.rotate(v.x * scale, v.y * scale, v.z * scale, 0, pcomp.yaw, 0);
+                    wPos.x += pcomp.x; wPos.y += pcomp.y; wPos.z += pcomp.z;
                     
                     let p = Engine3D.project(wPos.x, wPos.y, wPos.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                     if (!p.visible) visible = false;
@@ -928,9 +1042,10 @@
                 ctx.closePath(); ctx.fill(); ctx.stroke();
             }
 
-            if (obj.hp < obj.maxHp * 0.5 && this.perfTier !== 'LOW') {
-                let sCol = obj.hp < obj.maxHp * 0.2 ? '#e74c3c' : 'rgba(80,80,80,0.6)';
-                this._spawn('fx', {x: obj.x, y: obj.y, z: obj.z, vx: 0, vy: 0, vz: 0, life: 0.5, c: sCol, size: scale*3});
+            let c = obj.components.combat;
+            if (c && c.hp < c.maxHp * 0.5 && this.perfTier !== 'LOW') {
+                let sCol = c.hp < c.maxHp * 0.2 ? '#e74c3c' : 'rgba(80,80,80,0.6)';
+                this._spawn('fx', { physics: {x: pcomp.x, y: pcomp.y, z: pcomp.z, vx: 0, vy: 0, vz: 0}, render: {life: 0.5, color: sCol, size: scale*3}});
             }
         },
 
@@ -938,63 +1053,68 @@
             let buf=[];
             
             for(let id in this.entities) {
-                let o = this.entities[id];
-                let p = Engine3D.project(o.x, o.y, o.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if(p.visible) buf.push({p, o});
+                let e = this.entities[id];
+                let pcomp = e.components.physics;
+                if (!pcomp) continue;
+                let p = Engine3D.project(pcomp.x, pcomp.y, pcomp.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                if(p.visible) buf.push({p, e});
             }
             
             buf.sort((a,b)=>b.p.z-a.p.z); 
             
             buf.forEach(d=>{
-                let p=d.p, s=p.s, o=d.o;
-                if(o.type==='cloud') {
+                let p=d.p, s=p.s, e=d.e;
+                let r = e.components.render;
+                let pcomp = e.components.physics;
+
+                if(e.type==='cloud') {
                     ctx.fillStyle = this.environment.isNight ? 'rgba(50,50,60,0.08)' : 'rgba(255,255,255,0.2)';
-                    ctx.beginPath(); ctx.arc(p.x, p.y, o.size*s, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(p.x, p.y, r.size*s, 0, Math.PI*2); ctx.fill();
                 }
-                else if (o.type === 'terrain') {
-                    let p2 = Engine3D.project(o.x, o.h, o.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                else if (e.type === 'terrain') {
+                    let p2 = Engine3D.project(pcomp.x, r.h, pcomp.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                     if(p2.visible) {
-                        let tw = o.w * s; ctx.fillStyle = o.c; ctx.fillRect(p.x - w/2 - tw/2, p2.y - h/2, tw, p.y - p2.y);
+                        let tw = r.w * s; ctx.fillStyle = r.color; ctx.fillRect(p.x - w/2 - tw/2, p2.y - h/2, tw, p.y - p2.y);
                         ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeRect(p.x - w/2 - tw/2, p2.y - h/2, tw, p.y - p2.y);
                     }
                 }
-                else if(o.type==='floater') {
+                else if(e.type==='floater') {
                     ctx.fillStyle='#f1c40f'; ctx.font=`bold ${Math.max(12, 2500*s)}px Arial`; ctx.textAlign='center'; 
-                    ctx.fillText(o.text, p.x, p.y, w*0.9);
+                    ctx.fillText(r.text, p.x, p.y, w*0.9);
                 }
-                else if(o.type.startsWith('enemy') || o.type==='boss' || o.type==='net_player') {
-                    let isNet = o.type==='net_player';
-                    let meshType = o.type === 'enemy_tank' ? MESHES.tank : (o.type === 'boss' ? MESHES.boss : MESHES.jet);
-                    this._drawMesh(ctx, meshType, o, w, h);
+                else if(e.type.startsWith('enemy') || e.type==='boss' || e.type==='net_player') {
+                    let isNet = e.type==='net_player';
+                    let meshType = e.type === 'enemy_tank' ? MESHES.tank : (e.type === 'boss' ? MESHES.boss : MESHES.jet);
+                    this._drawMesh(ctx, meshType, e, w, h, pcomp);
                     
-                    if(isNet){ ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(o.name||'ALIADO',p.x,p.y-350*s-15, w*0.3); }
+                    if(isNet){ ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(e.components.network.name||'ALIADO',p.x,p.y-350*s-15, w*0.3); }
                     
-                    let locked = this.combat.targetId === o.id;
-                    let bs = Math.max(20, (o.type==='boss'? 800 : 250)*s);
+                    let locked = this.combat.targetId === e.id;
+                    let bs = Math.max(20, (e.type==='boss'? 800 : 250)*s);
                     
                     if (locked) {
                         ctx.strokeStyle = '#f03'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, bs*1.2, 0, Math.PI*2); ctx.stroke();
                         ctx.fillStyle = '#f03'; ctx.font = `bold ${Math.max(12, w*0.025)}px Arial`; ctx.textAlign = 'center'; 
                         ctx.fillText('TRAVADO', p.x, p.y + bs*1.2 + 15, w*0.3);
                     } else if (!isNet) {
-                        ctx.strokeStyle = o.type==='enemy_tank' ? 'rgba(243,156,18,0.8)' : 'rgba(231,76,60,0.6)'; ctx.lineWidth = 1;
+                        ctx.strokeStyle = e.type==='enemy_tank' ? 'rgba(243,156,18,0.8)' : 'rgba(231,76,60,0.6)'; ctx.lineWidth = 1;
                         ctx.strokeRect(p.x-bs, p.y-bs, bs*2, bs*2);
                     }
                 }
-                else if(o.type==='bullet') {
-                    if (o.tracer) { 
-                        ctx.strokeStyle = o.c; ctx.lineWidth = Math.max(1, o.size*s); ctx.lineCap='round';
-                        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - o.vx*0.01*s, p.y - o.vy*0.01*s); ctx.stroke();
+                else if(e.type==='bullet') {
+                    if (r.tracer) { 
+                        ctx.strokeStyle = r.color; ctx.lineWidth = Math.max(1, r.size*s); ctx.lineCap='round';
+                        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - pcomp.vx*0.01*s, p.y - pcomp.vy*0.01*s); ctx.stroke();
                     } else {
-                        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = o.isEnemy ? '#ff3300' : '#ffff00';
+                        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = r.color;
                         ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 15*s), 0, Math.PI*2); ctx.fill();
                         ctx.globalCompositeOperation = 'source-over';
                     }
                 }
-                else if(o.type==='missile') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 40*s), 0, Math.PI*2); ctx.fill(); }
-                else if(o.type==='fx') { 
-                    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, o.life); ctx.fillStyle = o.c;
-                    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, o.size*s), 0, Math.PI*2); ctx.fill();
+                else if(e.type==='missile') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 40*s), 0, Math.PI*2); ctx.fill(); }
+                else if(e.type==='fx') { 
+                    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, r.life); ctx.fillStyle = r.color;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, r.size*s), 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
                 }
             });
@@ -1114,53 +1234,6 @@
             }
         },
 
-        _drawRadar: function(ctx, w, h, now) {
-            let radius = Math.min(w * 0.15, 70);
-            let cx = radius + 15;
-            let cy = h - radius - 45; 
-            
-            ctx.fillStyle = 'rgba(10, 30, 20, 0.6)';
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(0, 255, 100, 0.4)'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.66, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.33, 0, Math.PI*2); ctx.stroke();
-            
-            ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
-
-            let range = this.perfTier === 'LOW' ? 40000 : 80000;
-
-            for (let id in this.entities) {
-                let e = this.entities[id];
-                if (!e._radVisible) continue;
-                
-                let px = cx + (e._radX / range) * radius;
-                let py = cy - (e._radZ / range) * radius; 
-                
-                if (Math.hypot(px - cx, py - cy) > radius) continue;
-
-                let color = '#f00'; let size = 3;
-                if (e.type === 'boss') { color = (now % 500 < 250) ? '#f03' : '#fff'; size = 5; }
-                else if (e.type === 'net_player') { color = '#0ff'; size = 4; }
-                else if (e.type === 'missile') { color = '#ff0'; size = 2; }
-                else if (e.type.startsWith('enemy')) { color = '#f00'; size = 3; }
-
-                ctx.fillStyle = color;
-                if (e._radDy > 2500) {
-                    ctx.beginPath(); ctx.moveTo(px, py-size); ctx.lineTo(px-size, py+size); ctx.lineTo(px+size, py+size); ctx.fill();
-                } else if (e._radDy < -2500) {
-                    ctx.beginPath(); ctx.moveTo(px, py+size); ctx.lineTo(px-size, py-size); ctx.lineTo(px+size, py-size); ctx.fill();
-                } else {
-                    ctx.beginPath(); ctx.arc(px, py, size, 0, Math.PI*2); ctx.fill();
-                }
-            }
-
-            ctx.fillStyle = '#0f0';
-            ctx.beginPath(); ctx.moveTo(cx, cy-6); ctx.lineTo(cx-4, cy+4); ctx.lineTo(cx, cy+2); ctx.lineTo(cx+4, cy+4); ctx.fill();
-        },
-
         _drawCalib: function(ctx,w,h){
             ctx.fillStyle='rgba(5,15,10,0.95)';ctx.fillRect(0,0,w,h);
             ctx.strokeStyle='rgba(0,255,100,0.3)';ctx.lineWidth=2;ctx.strokeRect(w*0.1, h*0.1, w*0.8, h*0.8);
@@ -1195,8 +1268,8 @@
             for(let id in this.entities) {
                 if (this.entities[id].type === 'net_player') {
                     let p = this.entities[id];
-                    ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';
-                    ctx.fillText(`[${p.ready?'PRONTO':'ESPERA'}] ${p.name}`, w/2, py, w*0.9); py+=35;
+                    ctx.fillStyle=p.components.network.ready?'#2ecc71':'#e74c3c';
+                    ctx.fillText(`[${p.components.network.ready?'PRONTO':'ESPERA'}] ${p.components.network.name}`, w/2, py, w*0.9); py+=35;
                 }
             }
 
