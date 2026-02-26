@@ -1,6 +1,6 @@
 // =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V6.0 MILITARY)
-// ENGINE: Manche Fixo com Rotação Realista, Câmera Invertida Corrigida.
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (PLATINUM V7.0)
+// ENGINE: Yoke Fixo Absolute, Física Ombro-Pulso, HUD Ultra-Responsivo, Auto-Combat
 // =============================================================================
 (function() {
     "use strict";
@@ -63,8 +63,8 @@
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
         session: { kills: 0, cash: 0, goal: 30 },
         ship: { hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0 },
-        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false },
-        timer: 3.0,
+        pilot: { active: false, targetRoll: 0, targetPitch: 0, headTilt: false },
+        timer: 4.0,
         entities: [], bullets: [], missiles: [], clouds: [], fx: [], floaters: [], terrain: [],
         combat: { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 },
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, loop: null },
@@ -74,7 +74,7 @@
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: 0, goal: 30 };
             this.ship = { hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0 };
-            this.pilot = { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false };
+            this.pilot = { active: false, targetRoll: 0, targetPitch: 0, headTilt: false };
             this.entities = []; this.bullets = []; this.missiles = []; this.clouds = []; this.fx = []; this.floaters = []; this.terrain = [];
             this.combat = { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 };
             
@@ -150,7 +150,7 @@
                 return this.session.cash;
             }
 
-            // FÍSICA
+            // FÍSICA E MOVIMENTO
             let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch);
             let fY = Math.sin(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
@@ -190,7 +190,7 @@
             }
         },
 
-        // --- SISTEMA DE CONTROLE (CORRIGIDO PARA REAÇÃO IMEDIATA E DIREÇÕES REAIS) ---
+        // --- LÓGICA DE CONTROLE PLATINUM: OMBROS VS PULSOS (INFALÍVEL) ---
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false;
@@ -198,43 +198,65 @@
             if (pose?.keypoints) {
                 const kp = name => pose.keypoints.find(k => k.part === name || k.name === name);
                 const rw = kp('right_wrist'), lw = kp('left_wrist');
+                const rs = kp('right_shoulder'), ls = kp('left_shoulder');
                 const rEar = kp('right_ear'), lEar = kp('left_ear');
-                const pX = x => (1 - (x / 640)) * w, pY = y => (y / 480) * h;
                 
-                if (rEar?.score > 0.4 && lEar?.score > 0.4 && Math.abs(rEar.y - lEar.y) > 25) this.pilot.headTilt = true;
+                // Conversão resolvendo o espelhamento da câmera: w - (k.x / 640 * w)
+                const pX = x => w - ((x / 640) * w); 
+                const pY = y => (y / 480) * h;
                 
-                if (rw?.score > 0.3 && lw?.score > 0.3) {
+                // Míssil Head Tilt
+                if (rEar?.score > 0.4 && lEar?.score > 0.4 && Math.abs(pY(rEar.y) - pY(lEar.y)) > h * 0.05) {
+                    this.pilot.headTilt = true;
+                }
+                
+                if (rw?.score > 0.3 && lw?.score > 0.3 && rs?.score > 0.3 && ls?.score > 0.3) {
                     inputDetected = true;
-                    // MoveNet espelhado: rx = Mão Direita do jogador. lx = Mão Esquerda do jogador.
-                    let rx = pX(rw.x), ry = pY(rw.y), lx = pX(lw.x), ly = pY(lw.y);
                     
-                    // MANCHE - GIRO (Roll)
-                    // Se o jogador abaixa a mão direita (ry maior) e sobe a esquerda (ly menor), vira pra direita.
-                    trgRoll = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, Math.atan2(ry - ly, lx - rx)));
+                    let w1 = { x: pX(rw.x), y: pY(rw.y) };
+                    let w2 = { x: pX(lw.x), y: pY(lw.y) };
                     
-                    // MANCHE - SUBIR/DESCER (Pitch)
-                    let avgY = (ry + ly) / 2;
-                    if (this.state === 'CALIBRATION') {
-                        this.pilot.baseY = this.pilot.baseY * 0.95 + avgY * 0.05;
-                        if (!this.pilot.baseY) this.pilot.baseY = avgY;
+                    // Identifica visualmente qual mão está na Esquerda/Direita da TELA
+                    let hands = [w1, w2].sort((a,b) => a.x - b.x);
+                    let sLeft = hands[0]; 
+                    let sRight = hands[1]; 
+                    
+                    // 1. ROLL (Giro): Se a mão direita da tela subir (Y menor), vira pra esquerda (Negativo).
+                    let dy = sRight.y - sLeft.y;
+                    let dx = sRight.x - sLeft.x;
+                    // Multiplicado por -1 para que Subir Mão Direita = Curva para Direita.
+                    trgRoll = -Math.atan2(dy, dx);
+                    // Limite angular realista
+                    trgRoll = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, trgRoll));
+                    
+                    // 2. PITCH (Subir/Descer): Referência Absoluta nos Ombros do Jogador.
+                    let avgShoulderY = (pY(rs.y) + pY(ls.y)) / 2;
+                    let avgWristY = (sLeft.y + sRight.y) / 2;
+                    
+                    // Y da tela cresce para baixo. 
+                    // Se os pulsos estão ACIMA dos ombros, deltaY é negativo -> Sobe.
+                    let deltaY = avgWristY - avgShoulderY;
+                    let deadzone = h * 0.05; // Margem de segurança na altura do peito
+                    
+                    if (deltaY < -deadzone) {
+                        trgPitch = 1.0; // Puxa Manche = Sobe
+                    } else if (deltaY > deadzone) {
+                        trgPitch = -1.0; // Empurra Manche = Desce
                     } else {
-                        // Delta negativo = mãos acima da base = puxar manche = subir.
-                        let deltaY = avgY - this.pilot.baseY;
-                        // Força direta baseada na tela inteira (sensível para 3 metros)
-                        let force = -(deltaY / (h * 0.15)); 
-                        trgPitch = Math.max(-1.5, Math.min(1.5, force));
+                        trgPitch = 0; // Nivelado
                     }
                 }
             }
             
             if (inputDetected) {
                 this.pilot.active = true;
-                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 8 * dt;
+                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 10 * dt;
                 this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 8 * dt;
                 
                 if (this.state === 'PLAYING') {
+                    // Yaw acompanha o giro do Roll suavemente
                     this.ship.yaw += this.pilot.targetRoll * 1.5 * dt;
-                    this.ship.roll += (this.pilot.targetRoll - this.ship.roll) * 4 * dt;
+                    this.ship.roll += (this.pilot.targetRoll - this.ship.roll) * 5 * dt;
                     this.ship.pitch += this.pilot.targetPitch * dt;
                     this.ship.pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, this.ship.pitch));
                 }
@@ -245,13 +267,14 @@
             this.ship.pitch %= Math.PI * 2; this.ship.yaw %= Math.PI * 2;
         },
 
-        // --- SISTEMA DE COMBATE AUTÔNOMO ---
+        // --- COMBATE AUTÔNOMO (METRALHADORA + MÍSSIL HOMING) ---
         _processCombat: function(dt, w, h, now) {
             this.combat.target = null; this.combat.locked = false; let closestZ = Infinity;
             
             const scan = (obj, isPlayer, uid) => {
                 let p = Engine3D.project(obj.x, obj.y, obj.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p.visible && p.z > 500 && p.z < 80000 && Math.abs(p.x - w/2) < w*0.4 && Math.abs(p.y - h/2) < h*0.4 && p.z < closestZ) {
+                // Área de trava central de 40% da tela
+                if (p.visible && p.z > 500 && p.z < 100000 && Math.abs(p.x - w/2) < w*0.35 && Math.abs(p.y - h/2) < h*0.35 && p.z < closestZ) {
                     closestZ = p.z; this.combat.target = isPlayer ? {...obj, isPlayer: true, uid} : obj;
                 }
             };
@@ -400,7 +423,7 @@
         _kill: function(t, rew) {
             GameSfx.play('boom');
             this._fx(t.x,t.y,t.z,'#ff3300', 50, 400); this._fx(t.x,t.y,t.z,'#222233', 40, 800);
-            this.floaters.push({x:t.x,y:t.y,z:t.z,text:`R$${rew}`,life:2.5});
+            this.floaters.push({x:t.x,y:t.y,z:t.z,text:`+ R$${rew}`,life:2.5});
             this.session.kills++; this.session.cash += rew;
             if (this.session.kills >= this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
         },
@@ -434,9 +457,12 @@
             if (window.Gfx?.shake > 0.5) ctx.translate((Math.random()-0.5)*window.Gfx.shake, (Math.random()-0.5)*window.Gfx.shake);
             this._drawWorld(ctx,w,h);
             this._drawEntities(ctx,w,h);
+            
+            // Renderização Rigorosa: Manche Atrás, HUD de Vidro na Frente
             this._drawYoke(ctx, w, h);
             this._drawHUD(ctx,w,h); 
             ctx.restore();
+            
             ctx.fillStyle='rgba(0,0,0,0.15)'; for(let i=0;i<h;i+=4) ctx.fillRect(0,i,w,1);
         },
 
@@ -566,21 +592,23 @@
             ctx.restore();
         },
         
-        // MANCHE SEPARADO: BASE FIXA, VOLANTE GIRA. MENOR NA TELA.
+        // MANCHE PLATINUM: BASE 100% PREGADA NO RODAPÉ, APENAS O VOLANTE GIRA.
         _drawYoke: function(ctx, w, h) {
             ctx.save();
             let yokeScale = Math.min(w * 0.25, 120); 
-            let yokeBaseY = h - yokeScale * 0.5 + (this.pilot.targetPitch * h * 0.2);
+            // Ancorado absolutamente no H (fundo da tela), sem subir com o Pitch.
+            ctx.translate(w/2, h); 
 
-            // 1. Coluna do Manche (Eixo Fixo - Não gira pros lados)
-            ctx.translate(w/2, yokeBaseY); 
+            // 1. Coluna do Manche (Eixo Fixo Absoluto)
             let grad = ctx.createLinearGradient(-15, 0, 15, 0);
             grad.addColorStop(0, '#111'); grad.addColorStop(0.5, '#444'); grad.addColorStop(1, '#111');
             ctx.fillStyle = grad;
-            ctx.fillRect(-yokeScale*0.15, 0, yokeScale*0.3, yokeScale*1.5); 
+            ctx.fillRect(-yokeScale*0.15, -yokeScale*1.5, yokeScale*0.3, yokeScale*1.5); 
 
-            // 2. Volante do Manche (Gira apenas ele)
+            // 2. Volante do Manche (No topo da coluna)
+            ctx.translate(0, -yokeScale*1.5);
             ctx.rotate(this.pilot.targetRoll); 
+            
             ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.roundRect(-yokeScale*0.8, -yokeScale*0.2, yokeScale*1.6, yokeScale*0.3, yokeScale*0.1); ctx.fill();
             
             let gripGrad = ctx.createLinearGradient(-yokeScale, 0, -yokeScale*0.7, 0);
@@ -597,22 +625,23 @@
             ctx.restore();
         },
 
-        // TEXTOS REDUZIDOS E RESTRITOS A TELA (w * 0.9)
+        // HUD PLATINUM: TEXTOS SEGUROS CONTRA VAZAMENTO NO MOBILE
         _drawHUD: function(ctx, w, h){
             let cx = w/2, cy = h/2;
-            const fz = Math.max(10, Math.min(w * 0.03, 16)); 
+            const fz = Math.max(10, Math.min(w * 0.035, 16)); 
             
             ctx.strokeStyle = 'rgba(0, 255, 100, 0.8)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
             ctx.font = `bold ${fz}px 'Chakra Petch', sans-serif`;
             
+            // Mira Central
             ctx.beginPath(); 
             ctx.moveTo(cx - 15, cy); ctx.lineTo(cx - 5, cy); ctx.moveTo(cx + 15, cy); ctx.lineTo(cx + 5, cy);
             ctx.moveTo(cx, cy - 15); ctx.lineTo(cx, cy - 5); ctx.moveTo(cx, cy + 15); ctx.lineTo(cx, cy + 5); 
             ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
 
             ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            let tapeW = w * 0.12; let tapeH = h * 0.35;
-            let spdX = w * 0.02; let altX = w * 0.86;
+            let tapeW = w * 0.14; let tapeH = h * 0.35;
+            let spdX = w * 0.02; let altX = w * 0.84;
             
             ctx.fillRect(spdX, cy - tapeH/2, tapeW, tapeH); ctx.strokeRect(spdX, cy - tapeH/2, tapeW, tapeH);
             ctx.fillRect(altX, cy - tapeH/2, tapeW, tapeH); ctx.strokeRect(altX, cy - tapeH/2, tapeW, tapeH);
@@ -626,7 +655,7 @@
             ctx.fillText("ALT (FT)", altX + tapeW/2, cy - tapeH/2 - 5, tapeW * 0.9);
 
             let hdg = (this.ship.yaw * 180 / Math.PI) % 360; if (hdg < 0) hdg += 360;
-            let compW = w * 0.3;
+            let compW = w * 0.35;
             ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; ctx.fillRect(cx - compW/2, 10, compW, 25); ctx.strokeRect(cx - compW/2, 10, compW, 25);
             ctx.fillStyle = '#fff'; ctx.font = `bold ${fz}px 'Russo One'`;
             ctx.fillText(`RUMO: ${Math.floor(hdg)}°`, cx, 28, compW * 0.9);
@@ -652,10 +681,10 @@
 
             ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c';
             ctx.font = `bold ${fz * 1.1}px 'Russo One'`; ctx.textAlign = 'left';
-            ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, 10, h - 10, w * 0.3);
+            ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, w * 0.02, h - 15, w * 0.3);
             
             ctx.fillStyle = '#f1c40f'; ctx.textAlign = 'right';
-            ctx.fillText(`R$: ${this.session.cash}`, w - 10, h - 10, w * 0.3);
+            ctx.fillText(`R$: ${this.session.cash}`, w * 0.98, h - 15, w * 0.3);
             
             ctx.textAlign = 'center';
             if (this.combat.target && this.combat.locked) {
@@ -679,7 +708,7 @@
         
         _drawLobby: function(ctx,w,h){
             ctx.fillStyle='rgba(10,20,30,0.98)';ctx.fillRect(0,0,w,h);
-            const fz = Math.min(w * 0.04, 20);
+            const fz = Math.min(w * 0.045, 22);
             ctx.fillStyle='#2ecc71';ctx.textAlign='center';ctx.font=`bold ${fz*1.5}px "Russo One"`;
             ctx.fillText('FORÇAS ARMADAS BR', w/2, h*0.15, w*0.9);
             
@@ -689,19 +718,19 @@
             let py=h*0.35;
             ps.forEach(p=>{
                 ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';
-                ctx.fillText(`[${p.ready?'PRONTO':'ESPERA'}] ${p.name}`, w/2, py, w*0.9); py+=30;
+                ctx.fillText(`[${p.ready?'PRONTO':'ESPERA'}] ${p.name}`, w/2, py, w*0.9); py+=35;
             });
 
-            let btnW = Math.min(250, w * 0.7);
+            let btnW = Math.min(280, w * 0.8);
             if(this.net.isHost){
                 const r=ps.length>=1; 
-                ctx.fillStyle=r?'#c0392b':'#34495e'; ctx.fillRect(w/2 - btnW/2,h*0.80,btnW,45);
+                ctx.fillStyle=r?'#c0392b':'#34495e'; ctx.fillRect(w/2 - btnW/2,h*0.80,btnW,50);
                 ctx.fillStyle='#fff';ctx.font=`bold ${fz}px "Russo One"`;
-                ctx.fillText(r?'LANÇAR':'AGUARDANDO...', w/2, h*0.80 + 28, btnW*0.9);
+                ctx.fillText(r?'LANÇAR':'AGUARDANDO...', w/2, h*0.80 + 32, btnW*0.9);
             }else{
-                ctx.fillStyle=this.net.isReady?'#f39c12':'#2980b9'; ctx.fillRect(w/2 - btnW/2,h*0.80,btnW,45);
+                ctx.fillStyle=this.net.isReady?'#f39c12':'#2980b9'; ctx.fillRect(w/2 - btnW/2,h*0.80,btnW,50);
                 ctx.fillStyle='#fff';ctx.font=`bold ${fz}px "Russo One"`;
-                ctx.fillText(this.net.isReady?'EM ESPERA':'PRONTO', w/2, h*0.80 + 28, btnW*0.9);
+                ctx.fillText(this.net.isReady?'EM ESPERA':'PRONTO', w/2, h*0.80 + 32, btnW*0.9);
             }
         },
 
@@ -709,31 +738,31 @@
             ctx.fillStyle='rgba(5,15,10,0.95)';ctx.fillRect(0,0,w,h);
             ctx.strokeStyle='rgba(0,255,100,0.3)';ctx.lineWidth=2;ctx.strokeRect(w*0.1, h*0.1, w*0.8, h*0.8);
             
-            const fz = Math.min(w * 0.04, 18);
+            const fz = Math.min(w * 0.045, 20);
             ctx.fillStyle='#0f6';ctx.textAlign='center';ctx.font=`bold ${fz*1.5}px "Russo One"`;
-            ctx.fillText('CALIBRAÇÃO', w/2, h*0.25, w*0.8);
+            ctx.fillText('CALIBRAÇÃO DE VOO', w/2, h*0.25, w*0.8);
             
             ctx.fillStyle='#fff';ctx.font=`bold ${fz}px Arial`;
-            ctx.fillText('MANTENHA MÃOS VISÍVEIS', w/2, h*0.4, w*0.8);
+            ctx.fillText('AUMENTE A DISTÂNCIA DO CELULAR', w/2, h*0.4, w*0.8);
             
             ctx.fillStyle='#f1c40f';
-            ctx.fillText('MÃO DIR BAIXO = VIRA DIR', w/2, h*0.5, w*0.8);
-            ctx.fillText('AMBAS ACIMA = SOBE BICO', w/2, h*0.55, w*0.8);
-            ctx.fillText('CABEÇA LADO = MÍSSIL', w/2, h*0.6, w*0.8);
+            ctx.fillText('MÃO ACIMA DOS OMBROS = SOBE', w/2, h*0.5, w*0.8);
+            ctx.fillText('MÃO NA BARRIGA = DESCE', w/2, h*0.55, w*0.8);
+            ctx.fillText('CABEÇA DE LADO = LANÇA MÍSSIL', w/2, h*0.6, w*0.8);
             
             let pct = 1 - this.timer/4;
             ctx.fillStyle='#111';ctx.fillRect(w*0.2,h*0.7,w*0.6,15);
             ctx.fillStyle='#0f6';ctx.fillRect(w*0.2,h*0.7,(w*0.6)*pct,15);
             
             ctx.fillStyle=this.pilot.active?'#0f6':'#f33';
-            ctx.fillText(this.pilot.active?'>> SENSOR OK':'>> APAREÇA NA TELA', w/2, h*0.8, w*0.8);
+            ctx.fillText(this.pilot.active?'>> SENSOR OK':'>> POSICIONE OS OMBROS NA TELA', w/2, h*0.8, w*0.8);
         },
 
         _drawEnd: function(ctx,w,h){
             this._draw(ctx,w,h);
             ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,w,h);
             
-            const fz = Math.min(w * 0.05, 30);
+            const fz = Math.min(w * 0.06, 35);
             ctx.textAlign='center';ctx.font=`bold ${fz}px "Russo One"`;
             ctx.fillStyle=this.state==='VICTORY'?'#2ecc71':'#e74c3c';
             ctx.fillText(this.state==='VICTORY'?'SUCESSO':'DESTRUÍDO', w/2, h/2 - fz, w*0.9);
