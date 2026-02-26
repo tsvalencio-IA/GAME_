@@ -1,29 +1,24 @@
 // =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V13 - LOCKED ARCHITECT)
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V14 - FINAL MASTER)
 // ENGINE: 100% PURE ECS, REAL AERODYNAMICS, TACTICAL MINIMAP, STATE MACHINE AI
 // =============================================================================
 (function() {
     "use strict";
 
-    // =========================================================================
-    // ENGINE
-    // =========================================================================
     const Engine3D = {
         fov: 800,
         rotate: (x, y, z, pitch, yaw, roll) => {
             let cr=Math.cos(roll), sr=Math.sin(roll), cp=Math.cos(pitch), sp=Math.sin(pitch), cy=Math.cos(yaw), sy=Math.sin(yaw);
-            let x1 = x*cr - y*sr, y1 = x*sr + y*cr;
-            let y2 = y1*cp - z*sp, z2 = y1*sp + z*cp;
-            return { x: x1*cy + z2*sy, y: y2, z: -x1*sy + z2*cy };
+            let x1=x*cr-y*sr, y1=x*sr+y*cr, y2=y1*cp-z*sp, z2=y1*sp+z*cp;
+            return { x: x1*cy+z2*sy, y: y2, z: -x1*sy+z2*cy };
         },
         project: (ox, oy, oz, cx, cy, cz, p, y, r, w, h) => {
             let dx=ox-cx, dy=oy-cy, dz=oz-cz;
             let cyw=Math.cos(-y), syw=Math.sin(-y), cp=Math.cos(-p), sp=Math.sin(-p), cr=Math.cos(r), sr=Math.sin(r);
-            let x1=dx*cyw - dz*syw, z1=dx*syw + dz*cyw;
-            let y2=dy*cp - z1*sp, z2=dy*sp + z1*cp;
+            let x1=dx*cyw-dz*syw, z1=dx*syw+dz*cyw, y2=dy*cp-z1*sp, z2=dy*sp+z1*cp;
             if (z2 < 10) return { visible: false };
-            let fx=x1*cr - y2*sr, fy=x1*sr + y2*cr, s=Engine3D.fov/z2;
-            return { x: (w/2) + fx*s, y: (h/2) - fy*s, s: s, z: z2, visible: true };
+            let fx=x1*cr-y2*sr, fy=x1*sr+y2*cr, s=Engine3D.fov/z2;
+            return { x: (w/2)+fx*s, y: (h/2)-fy*s, s: s, z: z2, visible: true };
         }
     };
 
@@ -76,24 +71,18 @@
         stop: function() { if(this.engineSrc){ try{this.engineSrc.stop();}catch(e){} this.engineSrc=null; } }
     };
 
-    // =========================================================================
-    // ECS & CORE LOOP
-    // =========================================================================
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE', slowMo: 1.0, slowMoTimer: 0, 
-        fpsHistory: [], perfTier: 'HIGH', money: 0,
+        fpsHistory: [], perfTier: 'HIGH', money: 0, eId: 0, entities: {},
         upgrades: { engine: 1, radar: 1, missile: 1, boost: 1, thermal: 1 },
-        session: { kills: 0, goal: 30 }, cameraShake: 0,
-        
-        eId: 0, entities: {}, // PURE ECS - NO PARALLEL ARRAYS
-        
+        session: { kills: 0, goal: 30 }, cameraShake: 0, radarTimer: 0,
         ship: { 
             hp: 100, speed: 1800, x: 0, y: 15000, z: 0, pitch: 0, yaw: 0, roll: 0,
             pitchVel: 0, yawVel: 0, rollVel: 0, boost: 100, overheat: 0, gForce: 1.0,
             damage: { lWing: 0, rWing: 0, engine: 0, body: 0 }
         },
         pilot: { active: false, targetRoll: 0, targetPitch: 0, headTilt: false, handL: {x:0,y:0}, handR: {x:0,y:0}, isBoosting: false },
-        timer: 4.0, hoverTime: 0, hoveredItem: null, radarTimer: 0,
+        timer: 4.0, hoverTime: 0, hoveredItem: null,
         combat: { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 },
         net: { isHost: false, uid: null, sessionRef: null, playersRef: null },
         environment: { skyTop: '', skyBot: '', ground: '', isNight: false, stars: [] },
@@ -112,7 +101,11 @@
             this.combat = { targetId: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0, isJammed: false, hitChance: 0 };
             this.slowMo = 1.0; this.slowMoTimer = 0; this.cameraShake = 0;
             
-            this._setupEnvironment();
+            let hr = new Date().getHours(); this.environment.stars = [];
+            if(hr>=6 && hr<17) { this.environment.skyTop='#0a3d62'; this.environment.skyBot='#60a3bc'; this.environment.ground='#386641'; this.environment.isNight=false; }
+            else if(hr>=17 && hr<19) { this.environment.skyTop='#2c2c54'; this.environment.skyBot='#ff793f'; this.environment.ground='#2d3436'; this.environment.isNight=false; }
+            else { this.environment.skyTop='#000000'; this.environment.skyBot='#111122'; this.environment.ground='#0a0a0a'; this.environment.isNight=true; for(let i=0;i<100;i++) this.environment.stars.push({x:Math.random()*2-1, y:Math.random(), z:Math.random()*2-1, size:Math.random()*2}); }
+
             for(let i=0; i<60; i++) this._spawn('cloud', { p:{x:(Math.random()-0.5)*120000, y:8000+Math.random()*15000, z:(Math.random()-0.5)*120000}, r:{size:4000+Math.random()*8000} });
             for(let i=0; i<80; i++) {
                 let col = this.environment.isNight ? `rgb(${Math.random()*30},${30+Math.random()*40},${Math.random()*30})` : `rgb(${50+Math.random()*50},${60+Math.random()*40},${40+Math.random()*30})`;
@@ -125,54 +118,6 @@
             GameSfx.init();
         },
 
-        _setupEnvironment: function() {
-            let hr = new Date().getHours(); this.environment.stars = [];
-            if(hr>=6 && hr<17) { this.environment.skyTop='#0a3d62'; this.environment.skyBot='#60a3bc'; this.environment.ground='#386641'; this.environment.isNight=false; }
-            else if(hr>=17 && hr<19) { this.environment.skyTop='#2c2c54'; this.environment.skyBot='#ff793f'; this.environment.ground='#2d3436'; this.environment.isNight=false; }
-            else { this.environment.skyTop='#000000'; this.environment.skyBot='#111122'; this.environment.ground='#0a0a0a'; this.environment.isNight=true; for(let i=0;i<100;i++) this.environment.stars.push({x:Math.random()*2-1, y:Math.random(), z:Math.random()*2-1, size:Math.random()*2}); }
-        },
-
-        update: function(ctx, w, h, pose) {
-            let now = performance.now(), realDt = Math.min((now - this.lastTime)/1000, 0.05); this.lastTime = now;
-            
-            this.fpsHistory.push(realDt); if(this.fpsHistory.length>30) this.fpsHistory.shift();
-            let fps = 1 / (this.fpsHistory.reduce((a,b)=>a+b,0) / this.fpsHistory.length);
-            let oldT = this.perfTier;
-            this.perfTier = fps>=45 ? 'HIGH' : (fps>=25 ? 'MEDIUM' : 'LOW');
-            if(oldT !== this.perfTier && this.state === 'PLAYING') this._adjustECS();
-
-            if(this.slowMoTimer>0) { this.slowMoTimer -= realDt; this.slowMo = 0.3; } else this.slowMo = 1.0;
-            if(this.cameraShake>0) this.cameraShake *= 0.9;
-            let dt = realDt * this.slowMo;
-
-            if(this.state === 'LOBBY') { this._drawLobby(ctx,w,h); return 0; }
-            this._readPose(pose,w,h,dt);
-            if(this.state === 'HANGAR') { this._drawHangar(ctx,w,h,realDt); return 0; }
-            if(this.state === 'CALIBRATION') { this.timer-=realDt; this._drawCalib(ctx,w,h); if(this.timer<=0) this._startMission(); return 0; }
-            if(this.state === 'GAMEOVER' || this.state === 'VICTORY') { this._drawEnd(ctx,w,h); return this.money; }
-
-            this._processPhysics(dt);
-            this._processCombat(dt,w,h,now);
-            this._processAI(dt,now);
-            this._processECS(dt); 
-            this._updateRadar(dt);
-
-            if(this.ship.hp<=0 && this.state!=='GAMEOVER') this._endGame('GAMEOVER');
-            this._draw(ctx,w,h,now);
-            return this.money;
-        },
-
-        _adjustECS: function() {
-            let limC = this.perfTier==='LOW'?20:(this.perfTier==='MEDIUM'?40:60), curC = 0, curT = 0;
-            for(let id in this.entities) {
-                if(this.entities[id].type==='cloud' && ++curC > limC) delete this.entities[id];
-                if(this.entities[id].type==='terrain' && ++curT > limC) delete this.entities[id];
-            }
-        },
-
-        // =====================================================================
-        // NETWORK
-        // =====================================================================
         _initNet: function() {
             this.state = 'LOBBY'; this.net.sessionRef = window.DB.ref('br_army_sessions/aero_' + this.mode);
             this.net.playersRef = this.net.sessionRef.child('pilotos'); this.net.playersRef.child(this.net.uid).onDisconnect().remove();
@@ -199,9 +144,66 @@
             this.net.sessionRef.child('state').on('value', snap => { if(snap.val()==='PLAYING' && this.state==='LOBBY') this.state='HANGAR'; });
         },
 
-        // =====================================================================
-        // PHYSICS
-        // =====================================================================
+        update: function(ctx, w, h, pose) {
+            let now = performance.now(), realDt = Math.min((now - this.lastTime)/1000, 0.05); this.lastTime = now;
+            this.fpsHistory.push(realDt); if(this.fpsHistory.length>30) this.fpsHistory.shift();
+            let fps = 1 / (this.fpsHistory.reduce((a,b)=>a+b,0) / this.fpsHistory.length);
+            let oldT = this.perfTier; this.perfTier = fps>=45 ? 'HIGH' : (fps>=25 ? 'MEDIUM' : 'LOW');
+            
+            if(oldT !== this.perfTier && this.state === 'PLAYING') {
+                let limC = this.perfTier==='LOW'?20:(this.perfTier==='MEDIUM'?40:60), curC = 0, curT = 0;
+                for(let id in this.entities) {
+                    if(this.entities[id].type==='cloud' && ++curC > limC) delete this.entities[id];
+                    if(this.entities[id].type==='terrain' && ++curT > limC) delete this.entities[id];
+                }
+            }
+
+            if(this.slowMoTimer>0) { this.slowMoTimer -= realDt; this.slowMo = 0.3; } else this.slowMo = 1.0;
+            if(this.cameraShake>0) this.cameraShake *= 0.9;
+            let dt = realDt * this.slowMo;
+
+            if(this.state === 'LOBBY') { this._drawLobby(ctx,w,h); return 0; }
+            this._readPose(pose,w,h,dt);
+            if(this.state === 'HANGAR') { this._drawHangar(ctx,w,h,realDt); return 0; }
+            if(this.state === 'CALIBRATION') { this.timer-=realDt; this._drawCalib(ctx,w,h); if(this.timer<=0) this._startMission(); return 0; }
+            if(this.state === 'GAMEOVER' || this.state === 'VICTORY') { this._drawEnd(ctx,w,h); return this.money; }
+
+            this._processPhysics(dt);
+            this._processCombat(dt,w,h,now);
+            this._processAI(dt,now);
+            this._processECS(dt); 
+            this._updateRadar(dt);
+
+            if(this.ship.hp<=0 && this.state!=='GAMEOVER') this._endGame('GAMEOVER');
+            this._draw(ctx,w,h,now);
+            return this.money;
+        },
+
+        cleanup: function() {
+            GameSfx.stop();
+            if(this.net.loop) clearInterval(this.net.loop);
+            if(this.mode!=='SINGLE' && this.net.playersRef) { this.net.playersRef.off(); this.net.sessionRef?.child('state')?.off(); this.net.playersRef.child(this.net.uid)?.remove(); if(this.net.isHost) this.net.sessionRef?.remove(); }
+        },
+
+        _readPose: function(pose, w, h, dt) {
+            let tR=0, tP=0; this.pilot.active=false; this.pilot.headTilt=false; this.pilot.isBoosting=false;
+            if(!pose?.keypoints) return;
+            const kp=n=>pose.keypoints.find(k=>k.part===n||k.name===n), rw=kp('right_wrist'), lw=kp('left_wrist'), rs=kp('right_shoulder'), ls=kp('left_shoulder'), rEar=kp('right_ear'), lEar=kp('left_ear');
+            const pX=x=>w-((x/640)*w), pY=y=>(y/480)*h;
+            if(rEar?.score>0.4 && lEar?.score>0.4 && Math.abs(pY(rEar.y)-pY(lEar.y))>h*0.05) this.pilot.headTilt=true;
+            if(rw?.score>0.3 && lw?.score>0.3 && rs?.score>0.3 && ls?.score>0.3) {
+                this.pilot.active=true;
+                let w1={x:pX(rw.x), y:pY(rw.y)}, w2={x:pX(lw.x), y:pY(lw.y)};
+                this.pilot.handR=w1; this.pilot.handL=w2;
+                let hands=[w1,w2].sort((a,b)=>a.x-b.x), lH=hands[0], rH=hands[1], dx=rH.x-lH.x;
+                tR=Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, Math.atan2(rH.y-lH.y, dx)));
+                let dy=((lH.y+rH.y)/2) - ((pY(rs.y)+pY(ls.y))/2), dz=h*0.05;
+                if(dy<-dz) tP=1.0; else if(dy>dz) tP=-1.0; else tP=0;
+                if(Math.abs(dx)<w*0.15) this.pilot.isBoosting=true;
+            }
+            this.pilot.targetRoll=tR; this.pilot.targetPitch=tP;
+        },
+
         _processPhysics: function(dt) {
             let wd = (this.ship.damage.rWing - this.ship.damage.lWing) * 0.05, cl = Math.max(0.3, 1.0 - (this.ship.damage.body + this.ship.damage.engine)/200);
             this.ship.rollVel += ((this.pilot.targetRoll - this.ship.roll)*15*cl*dt) + (wd*dt);
@@ -233,28 +235,6 @@
             if(tDmg>30 && this.perfTier!=='LOW') this._spawn('fx', { p:{x:this.ship.x, y:this.ship.y, z:this.ship.z, vx:0, vy:0, vz:0}, r:{life:2.0, color:tDmg>70?(Math.random()>0.5?'#e74c3c':'#333'):'rgba(80,80,80,0.6)', size:tDmg>70?400:200} });
         },
 
-        _readPose: function(pose, w, h, dt) {
-            let tR=0, tP=0; this.pilot.active=false; this.pilot.headTilt=false; this.pilot.isBoosting=false;
-            if(!pose?.keypoints) return;
-            const kp=n=>pose.keypoints.find(k=>k.part===n||k.name===n), rw=kp('right_wrist'), lw=kp('left_wrist'), rs=kp('right_shoulder'), ls=kp('left_shoulder'), rEar=kp('right_ear'), lEar=kp('left_ear');
-            const pX=x=>w-((x/640)*w), pY=y=>(y/480)*h;
-            if(rEar?.score>0.4 && lEar?.score>0.4 && Math.abs(pY(rEar.y)-pY(lEar.y))>h*0.05) this.pilot.headTilt=true;
-            if(rw?.score>0.3 && lw?.score>0.3 && rs?.score>0.3 && ls?.score>0.3) {
-                this.pilot.active=true;
-                let w1={x:pX(rw.x), y:pY(rw.y)}, w2={x:pX(lw.x), y:pY(lw.y)};
-                this.pilot.handR=w1; this.pilot.handL=w2;
-                let hands=[w1,w2].sort((a,b)=>a.x-b.x), lH=hands[0], rH=hands[1], dx=rH.x-lH.x;
-                tR=Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, Math.atan2(rH.y-lH.y, dx)));
-                let dy=((lH.y+rH.y)/2) - ((pY(rs.y)+pY(ls.y))/2), dz=h*0.05;
-                if(dy<-dz) tP=1.0; else if(dy>dz) tP=-1.0; else tP=0;
-                if(Math.abs(dx)<w*0.15) this.pilot.isBoosting=true;
-            }
-            this.pilot.targetRoll=tR; this.pilot.targetPitch=tP;
-        },
-
-        // =====================================================================
-        // AI
-        // =====================================================================
         _processAI: function(dt, now) {
             let maxE=this.perfTier==='LOW'?4:8, eC=0, hasBoss=false;
             for(let id in this.entities) { let t=this.entities[id].type; if(t.startsWith('enemy')||t==='boss') { eC++; if(t==='boss') hasBoss=true; } }
@@ -318,9 +298,6 @@
             }
         },
 
-        // =====================================================================
-        // COMBAT
-        // =====================================================================
         _processCombat: function(dt, w, h, now) {
             let rr = 100000+(this.upgrades.radar*20000), cT = this.combat.targetId?this.entities[this.combat.targetId]:null;
             if(cT && cT.c && cT.c.hp<=0) cT=null;
@@ -364,9 +341,6 @@
             }
         },
 
-        // =====================================================================
-        // CORE ECS SYSTEM & LOOP
-        // =====================================================================
         _processECS: function(dt) {
             let bullets = [], targets = [];
             for (let id in this.entities) {
@@ -522,8 +496,43 @@
         },
 
         // =====================================================================
-        // HUD / RENDERING
+        // HUD / RENDER
         // =====================================================================
+        _drawHangar: function(ctx, w, h, dt) {
+            ctx.fillStyle = 'rgba(15, 20, 25, 0.98)'; ctx.fillRect(0, 0, w, h);
+            const fz = Math.min(w * 0.04, 20);
+            ctx.fillStyle = '#f1c40f'; ctx.textAlign = 'center'; ctx.font = `bold ${fz*1.5}px "Russo One"`; ctx.fillText('HANGAR - UPGRADES', w/2, h*0.1);
+            ctx.fillStyle = '#2ecc71'; ctx.fillText(`SALDO: R$ ${this.money}`, w/2, h*0.18);
+            const items = [
+                { id: 'engine', name: 'MOTOR TURBO', cost: this.upgrades.engine * 500, lvl: this.upgrades.engine, max: 5, y: h*0.3 },
+                { id: 'radar', name: 'RADAR LOCK', cost: this.upgrades.radar * 400, lvl: this.upgrades.radar, max: 5, y: h*0.42 },
+                { id: 'missile', name: 'MÍSSIL AGIL', cost: this.upgrades.missile * 600, lvl: this.upgrades.missile, max: 5, y: h*0.54 },
+                { id: 'thermal', name: 'RESIST. TÉRMICA', cost: this.upgrades.thermal * 300, lvl: this.upgrades.thermal, max: 5, y: h*0.66 },
+                { id: 'start', name: '>> INICIAR MISSÃO <<', cost: 0, lvl: 0, max: 0, y: h*0.85, isBtn: true }
+            ];
+            let isHoveringAny = false;
+            items.forEach(item => {
+                let rect = { x: w*0.1, y: item.y - h*0.04, w: w*0.8, h: h*0.08 };
+                ctx.fillStyle = '#2c3e50'; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+                let hx = this.pilot.handR.x, hy = this.pilot.handR.y;
+                if (this.pilot.active && hx > rect.x && hx < rect.x + rect.w && hy > rect.y && hy < rect.y + rect.h) {
+                    ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 3; ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+                    isHoveringAny = true; if (this.hoveredItem !== item.id) { this.hoveredItem = item.id; this.hoverTime = 0; }
+                    this.hoverTime += dt; ctx.fillStyle = 'rgba(0, 255, 204, 0.3)'; ctx.fillRect(rect.x, rect.y, rect.w * Math.min(1, this.hoverTime / 1.5), rect.h);
+                    if (this.hoverTime >= 1.5) {
+                        if (item.isBtn) { this.state = 'CALIBRATION'; this.timer = 4.0; GameSfx.play('buy'); }
+                        else if (this.money >= item.cost && this.upgrades[item.id] < item.max) { this.money -= item.cost; this.upgrades[item.id]++; GameSfx.play('buy'); this.hoverTime = 0; } 
+                        else { GameSfx.play('alarm'); this.hoverTime = 0; }
+                    }
+                }
+                ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `bold ${fz}px Arial`;
+                if (item.isBtn) { ctx.textAlign = 'center'; ctx.fillStyle = '#e74c3c'; ctx.fillText(item.name, w/2, item.y + fz*0.3); } 
+                else { ctx.fillText(`${item.name} (LVL ${item.lvl}/${item.max})`, rect.x + 20, item.y + fz*0.3); ctx.textAlign = 'right'; ctx.fillStyle = (this.money >= item.cost && item.lvl < item.max) ? '#f1c40f' : '#7f8c8d'; ctx.fillText(item.lvl >= item.max ? 'MÁXIMO' : `R$ ${item.cost}`, rect.x + rect.w - 20, item.y + fz*0.3); }
+            });
+            if (!isHoveringAny) this.hoverTime = 0;
+            if (this.pilot.active) { ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(this.pilot.handR.x, this.pilot.handR.y, 15, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = `bold 12px Arial`; ctx.fillText("CURSOR", this.pilot.handR.x, this.pilot.handR.y - 20); }
+        },
+
         _draw: function(ctx, w, h, now) {
             ctx.save();
             if(this.cameraShake>0.5) ctx.translate((Math.random()-0.5)*this.cameraShake, (Math.random()-0.5)*this.cameraShake);
@@ -607,7 +616,7 @@
             ctx.restore();
         },
 
-        _drawHUD: function(ctx, w, h, now){
+        _drawHUD: function(ctx, w, h){
             let cx=w/2, cy=h/2, fz=Math.max(10,Math.min(w*0.035,16)); 
             ctx.strokeStyle='rgba(0,255,100,0.8)'; ctx.lineWidth=1; ctx.fillStyle='rgba(0,255,100,0.8)'; ctx.font=`bold ${fz}px 'Chakra Petch', sans-serif`;
             ctx.beginPath(); ctx.moveTo(cx-15,cy); ctx.lineTo(cx-5,cy); ctx.moveTo(cx+15,cy); ctx.lineTo(cx+5,cy); ctx.moveTo(cx,cy-15); ctx.lineTo(cx,cy-5); ctx.moveTo(cx,cy+15); ctx.lineTo(cx,cy+5); ctx.stroke(); ctx.beginPath(); ctx.arc(cx,cy,2,0,Math.PI*2); ctx.fill();
