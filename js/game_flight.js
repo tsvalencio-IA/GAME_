@@ -1,7 +1,7 @@
-/ =============================================================================
-// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V16 - VISUAL OVERHAUL)
+// =============================================================================
+// AERO STRIKE SIMULATOR: BRAZILIAN ARMED FORCES EDITION (V17 - PLATINUM FINAL)
 // ENGINE: 100% PURE ECS, REAL AERODYNAMICS, TACTICAL MINIMAP, VECTOR GRAPHICS
-// STATUS: NOVO HUD (MIRA [ ], MANCHE I__I, TRACEJADOS), LOCK-ON CORRIGIDO, CHÃO 3D
+// FIX: ID DE REGISTRO CORRIGIDO (usarmy_flight_sim), HUD INTEGRADA (MIRA E MANCHE)
 // =============================================================================
 (function() {
     "use strict";
@@ -26,7 +26,6 @@
         }
     };
 
-    // Modelos Vetoriais Redesenhados
     const MESHES = {
         jet: {
             v: [{x:0,y:0,z:50}, {x:0,y:15,z:-30}, {x:-40,y:0,z:-15}, {x:40,y:0,z:-15}, {x:0,y:-10,z:-25}, {x:0,y:12,z:10}],
@@ -65,10 +64,12 @@
             if(type==='lock') window.Sfx?.play(1200,'square',0.1,0.1);
             else if(type==='vulcan') window.Sfx?.play(150,'sawtooth',0.05,0.2);
             else if(type==='missile') {
-                const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.ctx.createGain();
-                o.type='square'; o.frequency.setValueAtTime(100,t); o.frequency.linearRampToValueAtTime(1000,t+0.8);
-                g.gain.setValueAtTime(0.6,t); g.gain.exponentialRampToValueAtTime(0.01,t+1.5);
-                o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t+1.5);
+                try {
+                    const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.ctx.createGain();
+                    o.type='square'; o.frequency.setValueAtTime(100,t); o.frequency.linearRampToValueAtTime(1000,t+0.8);
+                    g.gain.setValueAtTime(0.6,t); g.gain.exponentialRampToValueAtTime(0.01,t+1.5);
+                    o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t+1.5);
+                } catch(e) {}
             }
             else if(type==='boom') window.Sfx?.play(80,'sawtooth',0.5,0.3);
             else if(type==='alarm') window.Sfx?.play(600,'square',0.2,0.1);
@@ -233,7 +234,7 @@
 
             let u = this.ship.speed*20;
             this.ship.x += u*fX*dt; this.ship.y += (u*fY*dt) + ((lift - 9.8*60)*dt*0.1); this.ship.z += u*fZ*dt;
-            if(this.ship.y < 50) { this.ship.y = 50; this.ship.pitchVel += 2.0*dt; this._takeDamage(5); } // Ground collision
+            if(this.ship.y < 50) { this.ship.y = 50; this.ship.pitchVel += 2.0*dt; this._takeDamage(5); } 
             
             let tDmg = this.ship.damage.body + this.ship.damage.engine;
             if(tDmg>30 && this.perfTier!=='LOW') this._spawn('fx', { p:{x:this.ship.x, y:this.ship.y, z:this.ship.z, vx:0, vy:0, vz:0}, r:{life:2.0, color:tDmg>70?(Math.random()>0.5?'#e74c3c':'#333'):'rgba(80,80,80,0.6)', size:tDmg>70?400:200} });
@@ -247,6 +248,7 @@
                 let sx=this.ship.x+fX*d+(Math.random()-0.5)*50000, sz=this.ship.z+fZ*d+(Math.random()-0.5)*50000, r=Math.random();
                 if(this.session.kills>10 && r<0.1 && !hasBoss) {
                     this._spawn('boss', { p:{x:sx,y:30000,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:12000,vx:0,vy:0,vz:0}, c:{hp:3000,maxHp:3000,isEnemy:true,weakPoints:{left:800,right:800,core:1400}}, a:{state:'ENGAGE',timer:0,phase:1}, r:{radVisible:true} });
+                    if(window.System?.msg) window.System.msg("FORTALEZA VOADORA DETECTADA!");
                 } else if(r<0.3) {
                     this._spawn('enemy_squadron_lead', { p:{x:sx,y:this.ship.y,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:20000,vx:0,vy:0,vz:0}, c:{hp:200,maxHp:200,isEnemy:true}, a:{state:'PATROL',timer:0}, r:{radVisible:true} });
                     this._spawn('enemy_squadron_wing', { p:{x:sx+5000,y:this.ship.y+2000,z:sz,pitch:0,yaw:this.ship.yaw+Math.PI,roll:0,speed:22000,vx:0,vy:0,vz:0}, c:{hp:150,maxHp:150,isEnemy:true}, a:{state:'FLANK',timer:0}, r:{radVisible:true} });
@@ -305,7 +307,6 @@
             let rr = 100000+(this.upgrades.radar*20000), cT = this.combat.targetId?this.entities[this.combat.targetId]:null;
             if(cT && cT.c && cT.c.hp<=0) cT=null;
 
-            // LOCK-ON CORRIGIDO: Busca em um raio circular de 30% da tela para ser muito mais fácil travar a mira
             if(cT) {
                 let cp=cT.p, p = Engine3D.project(cp.x,cp.y,cp.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
                 let distToCenter = Math.hypot(p.x - w/2, p.y - h/2);
@@ -322,7 +323,6 @@
                     if(e.type.startsWith('enemy') || e.type==='boss' || e.type==='net_player') {
                         let p = Engine3D.project(e.p.x,e.p.y,e.p.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
                         let distToCenter = Math.hypot(p.x - w/2, p.y - h/2);
-                        // Tolerância imensa para travar mira (dentro de 40% da tela)
                         if(p.visible && p.z>100 && p.z<rr && distToCenter < w*0.4 && p.z<cZ) { cZ=p.z; this.combat.targetId=e.id; cT=e; }
                     }
                 }
@@ -550,12 +550,9 @@
             ctx.save();
             if(this.cameraShake>0.5) ctx.translate((Math.random()-0.5)*this.cameraShake, (Math.random()-0.5)*this.cameraShake);
             this._drawWorld(ctx,w,h);
-            this._drawGrid(ctx,w,h); // Novo chão 3D
+            this._drawGrid(ctx,w,h);
             this._drawEntities(ctx,w,h);
-            
-            // HUD NOVA ESTILO ASCII 
-            this._drawVectorHUD(ctx,w,h,now); 
-            
+            this._drawHUD(ctx,w,h,now); 
             this._drawRadar(ctx,w,h,now);
             ctx.restore();
             ctx.fillStyle='rgba(0,0,0,0.15)'; for(let i=0;i<h;i+=4) ctx.fillRect(0,i,w,1);
@@ -575,17 +572,10 @@
             ctx.restore();
         },
 
-        // NOVO: Chão 3D dinâmico (Grid)
         _drawGrid: function(ctx, w, h) {
-            if (this.ship.y > 60000) return; // Nao desenha grid tao alto
-            ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            
-            let st = 8000;
-            let sx = Math.floor(this.ship.x/st)*st - st*15;
-            let sz = Math.floor(this.ship.z/st)*st - st*15;
-
+            if (this.ship.y > 60000) return;
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)'; ctx.lineWidth = 1; ctx.beginPath();
+            let st = 8000, sx = Math.floor(this.ship.x/st)*st - st*15, sz = Math.floor(this.ship.z/st)*st - st*15;
             for(let x=0; x<=30; x++) {
                 for(let z=0; z<=30; z++) {
                     let p = Engine3D.project(sx+x*st, 0, sz+z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
@@ -628,30 +618,23 @@
             buf.forEach(d=>{
                 let pr=d.pr, s=pr.s, e=d.e, r=e.r, p=e.p;
                 if(e.type==='cloud') { ctx.fillStyle=this.environment.isNight?'rgba(50,50,60,0.08)':'rgba(255,255,255,0.2)'; ctx.beginPath(); ctx.arc(pr.x,pr.y,r.size*s,0,Math.PI*2); ctx.fill(); }
-                else if(e.type==='terrain') { /* Desenhado pelo _drawGrid agora */ }
+                else if(e.type==='terrain') { /* Terrain handled by _drawGrid */ }
                 else if(e.type==='floater') { ctx.fillStyle='#f1c40f'; ctx.font=`bold ${Math.max(12,2500*s)}px Arial`; ctx.textAlign='center'; ctx.fillText(r.text,pr.x,pr.y,w*0.9); }
                 else if(e.type.startsWith('enemy')||e.type==='boss'||e.type==='net_player') {
                     let iN=e.type==='net_player', mT=e.type==='enemy_tank'?MESHES.tank:(e.type==='boss'?MESHES.boss:MESHES.jet);
                     this._drawMesh(ctx,mT,e,w,h);
                     if(iN) { ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText(e.n.name||'ALIADO',pr.x,pr.y-350*s-15,w*0.3); }
-                    
                     let locked = this.combat.targetId === e.id;
                     let bs = Math.max(20, (e.type==='boss'?800:250)*s);
-                    
-                    // NOVA MIRA HOLOGRAFICA DE TRAVA [ ]
                     if (locked) {
-                        ctx.strokeStyle = '#f03'; ctx.lineWidth = 3; 
-                        let b = bs*1.2;
-                        ctx.beginPath();
+                        ctx.strokeStyle = '#f03'; ctx.lineWidth = 3; let b = bs*1.2; ctx.beginPath();
                         ctx.moveTo(pr.x - b, pr.y - b + 10); ctx.lineTo(pr.x - b, pr.y - b); ctx.lineTo(pr.x - b + 10, pr.y - b);
                         ctx.moveTo(pr.x + b - 10, pr.y - b); ctx.lineTo(pr.x + b, pr.y - b); ctx.lineTo(pr.x + b, pr.y - b + 10);
                         ctx.moveTo(pr.x - b, pr.y + b - 10); ctx.lineTo(pr.x - b, pr.y + b); ctx.lineTo(pr.x - b + 10, pr.y + b);
                         ctx.moveTo(pr.x + b - 10, pr.y + b); ctx.lineTo(pr.x + b, pr.y + b); ctx.lineTo(pr.x + b, pr.y + b - 10);
                         ctx.stroke();
                         ctx.fillStyle='#f03'; ctx.font=`bold ${Math.max(12,w*0.025)}px Arial`; ctx.textAlign='center'; ctx.fillText('LOCK',pr.x,pr.y+b+15,w*0.3); 
-                    } else if(!iN) { 
-                        ctx.strokeStyle=e.type==='enemy_tank'?'rgba(243,156,18,0.8)':'rgba(231,76,60,0.6)'; ctx.lineWidth=1; ctx.strokeRect(pr.x-bs,pr.y-bs,bs*2,bs*2); 
-                    }
+                    } else if(!iN) { ctx.strokeStyle=e.type==='enemy_tank'?'rgba(243,156,18,0.8)':'rgba(231,76,60,0.6)'; ctx.lineWidth=1; ctx.strokeRect(pr.x-bs,pr.y-bs,bs*2,bs*2); }
                 }
                 else if(e.type==='bullet') { if(r.tracer) { ctx.strokeStyle=r.color; ctx.lineWidth=Math.max(1,r.size*s); ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(pr.x,pr.y); ctx.lineTo(pr.x-p.vx*0.01*s,pr.y-p.vy*0.01*s); ctx.stroke(); } else { ctx.globalCompositeOperation='lighter'; ctx.fillStyle=r.color; ctx.beginPath(); ctx.arc(pr.x,pr.y,Math.max(2,15*s),0,Math.PI*2); ctx.fill(); ctx.globalCompositeOperation='source-over'; } }
                 else if(e.type==='missile') { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(pr.x,pr.y,Math.max(2,40*s),0,Math.PI*2); ctx.fill(); }
@@ -659,101 +642,72 @@
             });
         },
 
-        // NOVO HUD REQUISITADO (- [ ] I__I -)
-        _drawVectorHUD: function(ctx, w, h, now){
+        _drawHUD: function(ctx, w, h, now){
             let cx=w/2, cy=h/2;
-            ctx.strokeStyle='rgba(0,255,100,0.8)'; ctx.lineWidth=2;
+            ctx.save(); ctx.strokeStyle='rgba(0,255,100,0.8)'; ctx.lineWidth=2;
             
             // 1. MIRA CENTRAL ESTILO COLCHETES: [    ]
-            ctx.beginPath(); 
-            ctx.moveTo(cx - 30, cy - 10); ctx.lineTo(cx - 30, cy + 10); 
-            ctx.moveTo(cx - 30, cy - 10); ctx.lineTo(cx - 15, cy - 10);
-            ctx.moveTo(cx - 30, cy + 10); ctx.lineTo(cx - 15, cy + 10);
-
-            ctx.moveTo(cx + 30, cy - 10); ctx.lineTo(cx + 30, cy + 10); 
-            ctx.moveTo(cx + 30, cy - 10); ctx.lineTo(cx + 15, cy - 10);
-            ctx.moveTo(cx + 30, cy + 10); ctx.lineTo(cx + 15, cy + 10);
+            let s=25; ctx.beginPath(); 
+            ctx.moveTo(cx - s, cy - s/2); ctx.lineTo(cx - s, cy + s/2); 
+            ctx.moveTo(cx - s, cy - s/2); ctx.lineTo(cx - s/2, cy - s/2);
+            ctx.moveTo(cx - s, cy + s/2); ctx.lineTo(cx - s/2, cy + s/2);
+            ctx.moveTo(cx + s, cy - s/2); ctx.lineTo(cx + s, cy + s/2); 
+            ctx.moveTo(cx + s, cy - s/2); ctx.lineTo(cx + s/2, cy - s/2);
+            ctx.moveTo(cx + s, cy + s/2); ctx.lineTo(cx + s/2, cy + s/2);
             ctx.stroke(); 
-            ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
-            ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'rgba(0, 255, 100, 0.8)'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
 
             // 2. RISQUINHOS LATERAIS ANIMADOS COM ALTITUDE (PITCH LADDER LITE)
-            ctx.save();
-            ctx.translate(cx, cy); 
-            ctx.rotate(-this.ship.roll);
-            ctx.beginPath(); ctx.rect(-w/2, -h/2, w, h); ctx.clip();
-            
-            let pDeg = this.ship.pitch * 180 / Math.PI;
-            let spacing = h * 0.1; 
+            ctx.save(); ctx.translate(cx, cy); ctx.rotate(-this.ship.roll); ctx.beginPath(); ctx.rect(-w/2, -h/2, w, h); ctx.clip();
+            let pDeg = this.ship.pitch * 180 / Math.PI, spacing = h * 0.1; 
             for(let i = -90; i <= 90; i += 10) {
                 if (i === 0) continue;
                 let yo = (pDeg - i) * (spacing / 10);
-                let rw = w * 0.2; // Largura das laterais
-                
-                // Tracinhos nas laterais
-                ctx.beginPath(); 
-                if (i < 0) ctx.setLineDash([10, 10]); else ctx.setLineDash([]);
-                // Esquerda
-                ctx.moveTo(-cx + 20, yo); ctx.lineTo(-cx + 20 + rw, yo);
-                // Direita
-                ctx.moveTo(cx - 20, yo); ctx.lineTo(cx - 20 - rw, yo);
-                ctx.stroke();
-                
-                ctx.setLineDash([]);
-                ctx.font = `bold 12px 'Chakra Petch'`; ctx.fillStyle = 'rgba(0,255,100,0.8)';
-                ctx.textAlign = 'left'; ctx.fillText(Math.abs(i), -cx + 25 + rw, yo + 4);
-                ctx.textAlign = 'right'; ctx.fillText(Math.abs(i), cx - 25 - rw, yo + 4);
+                if (Math.abs(yo) > h*0.35) continue; // Culling
+                let rw = w * 0.15; 
+                ctx.beginPath(); if (i < 0) ctx.setLineDash([10, 10]); else ctx.setLineDash([]);
+                ctx.moveTo(-w*0.3, yo); ctx.lineTo(-w*0.3 + rw, yo); ctx.moveTo(w*0.3, yo); ctx.lineTo(w*0.3 - rw, yo); ctx.stroke();
+                ctx.setLineDash([]); ctx.font = `bold 12px 'Chakra Petch', Arial`; ctx.fillStyle = 'rgba(0,255,100,0.8)';
+                ctx.textAlign = 'left'; ctx.fillText(Math.abs(i), -w*0.3 + rw + 5, yo + 4); ctx.textAlign = 'right'; ctx.fillText(Math.abs(i), w*0.3 - rw - 5, yo + 4);
             }
             ctx.restore();
 
             // 3. NOVO MANCHE INFERIOR I____I (YOKE)
             ctx.save();
-            let yokeScale = Math.min(w * 0.2, 100); 
-            // Posiciona o manche no fundo, movendo um pouco com o pitch do piloto para dar feedback visual
-            ctx.translate(cx, h - 50 + (this.pilot.targetPitch * 30)); 
-            ctx.rotate(this.pilot.targetRoll); // Roda com a mão
-            
+            let yokeScale = Math.min(w * 0.15, 80); 
+            ctx.translate(cx + (this.pilot.targetRoll * w * 0.2), h - 40 + (this.pilot.targetPitch * 30)); 
+            ctx.rotate(this.pilot.targetRoll); 
             ctx.strokeStyle = '#0f6'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            ctx.beginPath();
-            // Coluna Central
-            ctx.moveTo(0, 0); ctx.lineTo(0, 50);
-            // Barra Horizontal
-            ctx.moveTo(-yokeScale, 0); ctx.lineTo(yokeScale, 0);
-            // Hastes verticais I
-            ctx.moveTo(-yokeScale, 0); ctx.lineTo(-yokeScale, -yokeScale*0.5);
-            ctx.moveTo(yokeScale, 0); ctx.lineTo(yokeScale, -yokeScale*0.5);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 40); ctx.moveTo(-yokeScale, 0); ctx.lineTo(yokeScale, 0); ctx.moveTo(-yokeScale, 0); ctx.lineTo(-yokeScale, -yokeScale*0.5); ctx.moveTo(yokeScale, 0); ctx.lineTo(yokeScale, -yokeScale*0.5); ctx.stroke();
+            ctx.fillStyle = this.combat.locked ? '#f33' : '#a00'; ctx.beginPath(); ctx.arc(-yokeScale, -yokeScale*0.5, 6, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(yokeScale, -yokeScale*0.5, 6, 0, Math.PI*2); ctx.fill();
             ctx.restore();
 
-            // 4. TEXTOS DE VELOCIDADE E ALTITUDE (Canto Superior)
-            ctx.fillStyle = '#0f6'; ctx.textAlign = 'left'; ctx.font = `bold 16px 'Russo One'`;
-            ctx.fillText(`VEL: ${Math.floor(this.ship.speed)} KT`, 15, 30);
-            ctx.fillText(`ALT: ${Math.floor(this.ship.y)} FT`, 15, 50);
-            let hdg=(this.ship.yaw*180/Math.PI)%360; if(hdg<0) hdg+=360;
-            ctx.fillText(`RUMO: ${Math.floor(hdg)}°`, 15, 70);
+            // 4. TEXTOS DE VELOCIDADE E ALTITUDE
+            ctx.fillStyle = '#0f6'; ctx.textAlign = 'left'; ctx.font = `bold 14px 'Russo One', Arial`;
+            ctx.fillText(`VEL: ${Math.floor(this.ship.speed)} KT`, 15, 30); ctx.fillText(`ALT: ${Math.floor(this.ship.y)} FT`, 15, 50);
+            let hdg=(this.ship.yaw*180/Math.PI)%360; if(hdg<0) hdg+=360; ctx.fillText(`RUMO: ${Math.floor(hdg)}°`, 15, 70);
 
-            // BARRAS: Boost & Overheat (Inferior Centro-Direita)
-            const bX = cx + 50, bY = h - 60, cW = w * 0.3; 
-            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bX, bY, cW, 10); ctx.fillRect(bX, bY + 15, cW, 10);
-            ctx.fillStyle = '#3498db'; ctx.fillRect(bX, bY, cW * (this.ship.boost/100), 10); 
-            ctx.fillStyle = this.combat.isJammed ? '#e74c3c' : '#e67e22'; ctx.fillRect(bX, bY + 15, cW * (this.ship.overheat/100), 10); 
-            ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `bold 10px Arial`;
-            ctx.fillText("BOOST", bX - 45, bY + 9); ctx.fillText("CALOR", bX - 45, bY + 24);
+            // BARRAS
+            const bX = cx + 50, bY = h - 50, cW = Math.min(w * 0.3, 150); 
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bX, bY, cW, 8); ctx.fillRect(bX, bY + 12, cW, 8);
+            ctx.fillStyle = '#3498db'; ctx.fillRect(bX, bY, cW * (this.ship.boost/100), 8); 
+            ctx.fillStyle = this.combat.isJammed ? '#e74c3c' : '#e67e22'; ctx.fillRect(bX, bY + 12, cW * (this.ship.overheat/100), 8); 
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = `bold 9px Arial`; ctx.fillText("BOOST", bX - 5, bY + 8); ctx.fillText("CALOR", bX - 5, bY + 20);
 
-            // G-Force & Dano
-            ctx.fillStyle = '#0f6'; ctx.textAlign = 'right'; ctx.font = `bold 14px Arial`;
-            ctx.fillText(`G-FORCE: ${this.ship.gForce.toFixed(1)}`, w - 15, 30);
-            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c';
-            ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, w - 15, 50);
+            // G-Force & HP
+            ctx.fillStyle = '#0f6'; ctx.textAlign = 'right'; ctx.font = `bold 14px Arial`; ctx.fillText(`G-FORCE: ${this.ship.gForce.toFixed(1)}`, w - 15, 30);
+            ctx.fillStyle = this.ship.hp > 30 ? '#2ecc71' : '#e74c3c'; ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`, w - 15, 50);
             ctx.fillStyle = '#f1c40f'; ctx.fillText(`R$: ${this.money}`, w - 15, 70);
             
+            // TRAVA E AVISOS
             ctx.textAlign='center';
             if(this.combat.targetId && this.combat.locked) { 
-                ctx.fillStyle='#f03'; ctx.font=`bold 20px 'Russo One'`; ctx.fillText("FOGO AUTORIZADO!",cx,h*0.70); 
-                if(this.combat.missileCd<=0) { ctx.fillStyle='#0ff'; ctx.font=`bold 12px Arial`; ctx.fillText("INCLINE CABEÇA P/ MÍSSIL",cx,h*0.75); } 
+                ctx.fillStyle='#f03'; ctx.font=`bold 18px 'Russo One', Arial`; ctx.fillText("TRAVADO - FOGO!",cx, cy + h*0.25); 
+                if(this.combat.missileCd<=0) { ctx.fillStyle='#0ff'; ctx.font=`bold 12px Arial`; ctx.fillText("INCLINE A CABEÇA: MÍSSIL",cx, cy + h*0.25 + 20); } 
             }
-            if(this.combat.isJammed) { ctx.fillStyle='#f00'; ctx.font=`bold 24px 'Russo One'`; ctx.fillText("ARMA SOBREAQUECIDA!",cx,h*0.65); }
-            if(!this.pilot.active) { ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,cy-20,w,40); ctx.fillStyle='#f00'; ctx.font=`bold 16px Arial`; ctx.textAlign='center'; ctx.fillText("MÃOS NÃO DETECTADAS!",cx,cy+5); }
+            if(this.combat.isJammed) { ctx.fillStyle='#f00'; ctx.font=`bold 20px 'Russo One', Arial`; ctx.fillText("ARMA SOBREAQUECIDA!",cx, cy + h*0.2); }
+            if(!this.pilot.active) { ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0, cy - 20, w, 40); ctx.fillStyle='#f00'; ctx.font=`bold 16px Arial`; ctx.fillText("MÃOS NÃO DETECTADAS!",cx, cy + 6); }
+            ctx.restore();
         },
 
         _drawCalib: function(ctx,w,h){
@@ -783,11 +737,11 @@
     };
 
     const register = () => {
-        if (window.System?.registerGame) {
-            window.System.registerGame('flight_sim', 'Aero Strike WAR', '🚀', Game, {
+        if (window.System && window.System.registerGame) {
+            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '🚀', Game, {
                 camera: 'user',
                 phases: [
-                    { id: 'mission1', name: 'TREINO VS. IA', desc: 'Passo Atrás = Sobe. Passo Frente = Desce. Mira Automática Instântanea. Incline a Cabeça = Míssil!', mode: 'SINGLE', reqLvl: 1 },
+                    { id: 'mission1', name: 'TREINO VS. IA', desc: 'Mão Acima dos Ombros = Sobe. Na Barriga = Desce. Mira HOLOGRÁFICA Instantânea. Incline a Cabeça = Míssil!', mode: 'SINGLE', reqLvl: 1 },
                     { id: 'coop', name: 'SQUADRON CO-OP', desc: 'Junte-se a aliados contra a IA.', mode: 'COOP', reqLvl: 1 },
                     { id: 'pvp', name: 'DOGFIGHT PVP', desc: 'Combate aéreo contra outros jogadores reais.', mode: 'PVP', reqLvl: 1 }
                 ]
