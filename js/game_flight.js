@@ -1,7 +1,7 @@
 // =============================================================================
-// AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - MASTER V3)
+// AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - FINAL STABLE)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: 6DOF PHYSICS, UNIVERSAL CORE.JS ADAPTER, FAIL-SAFE CANVAS, KEYBOARD FALLBACK
+// STATUS: SILENT-CRASH FIXED, ROBUST MOVENET TRACKING, STRICT CORE.JS MAPPING
 // =============================================================================
 
 (function() {
@@ -12,24 +12,23 @@
     // =========================================================================
     const Engine3D = {
         fov: 800,
-        // Projeta coordenadas 3D do Mundo para 2D na Tela baseadas na Câmera do Jogador
         project: (objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) => {
             let dx = objX - camX;
-            let dy = camY - objY; // Y Invertido para o Canvas (Altitude Positiva = Para Cima)
+            let dy = camY - objY; // Y Invertido para o Canvas
             let dz = objZ - camZ;
             
-            // Rotação YAW (Eixo Y - Esquerda/Direita)
+            // Rotação YAW (Esquerda/Direita)
             let cy = Math.cos(-yaw), sy = Math.sin(-yaw);
             let x1 = dx * cy - dz * sy, z1 = dx * sy + dz * cy;
             
-            // Rotação PITCH (Eixo X - Subir/Descer)
+            // Rotação PITCH (Subir/Descer)
             let cp = Math.cos(-pitch), sp = Math.sin(-pitch);
             let y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
             
-            // Clipping de profundidade (evita renderizar o que está atrás da câmera)
+            // Clipping de profundidade
             if (z2 < 10) return { visible: false };
             
-            // Rotação ROLL (Eixo Z - Inclinação das asas)
+            // Rotação ROLL (Inclinação das asas)
             let cr = Math.cos(roll), sr = Math.sin(roll);
             let finalX = x1 * cr - y2 * sr, finalY = x1 * sr + y2 * cr;
             
@@ -54,21 +53,13 @@
             ctx.lineWidth = 2;
             ctx.fillStyle = isEnemy ? "rgba(231, 76, 60, 0.4)" : "rgba(52, 152, 219, 0.4)";
             
-            // Corpo do Caça (F-22 Raptor Profile)
             ctx.beginPath();
-            ctx.moveTo(0, -20); // Nariz
-            ctx.lineTo(5, -10);
-            ctx.lineTo(20, 5);  // Asa Dir
-            ctx.lineTo(5, 10);
-            ctx.lineTo(0, 15);  // Cauda
-            ctx.lineTo(-5, 10);
-            ctx.lineTo(-20, 5); // Asa Esq
-            ctx.lineTo(-5, -10);
-            ctx.closePath();
+            ctx.moveTo(0, -20); ctx.lineTo(5, -10); ctx.lineTo(20, 5);
+            ctx.lineTo(5, 10); ctx.lineTo(0, 15); ctx.lineTo(-5, 10);
+            ctx.lineTo(-20, 5); ctx.lineTo(-5, -10); ctx.closePath();
             
             ctx.fill(); ctx.stroke();
             
-            // Motor em chamas
             ctx.fillStyle = "#f39c12";
             ctx.beginPath(); ctx.arc(0, 16, Math.random() * 4 + 2, 0, Math.PI*2); ctx.fill();
             ctx.restore();
@@ -76,34 +67,24 @@
     };
 
     // =========================================================================
-    // 2. CONSTANTES FÍSICAS E CLASSES
+    // 2. CONSTANTES E CLASSES DO JOGO
     // =========================================================================
-    const PHYSICS = {
-        MAX_THRUST: 1200,      
-        MAX_PITCH_RATE: 0.03,  
-        MAX_ROLL_RATE: 0.05,   
-    };
+    const PHYSICS = { MAX_THRUST: 1200, MAX_PITCH_RATE: 0.03, MAX_ROLL_RATE: 0.05 };
 
     class Particle {
         constructor(x, y, z, color, size, life) {
             this.x = x; this.y = y; this.z = z;
-            this.vx = (Math.random() - 0.5) * 20;
-            this.vy = (Math.random() - 0.5) * 20;
-            this.vz = (Math.random() - 0.5) * 20;
+            this.vx = (Math.random() - 0.5) * 20; this.vy = (Math.random() - 0.5) * 20; this.vz = (Math.random() - 0.5) * 20;
             this.color = color; this.size = size; this.life = life; this.maxLife = life;
         }
-        update(dt) {
-            this.x += this.vx * dt; this.y += this.vy * dt; this.z += this.vz * dt;
-            this.life -= dt;
-        }
+        update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; this.z += this.vz * dt; this.life -= dt; }
     }
 
     class Missile {
         constructor(x, y, z, pitch, yaw, roll, speed, isEnemy, target) {
             this.x = x; this.y = y; this.z = z;
             this.pitch = pitch; this.yaw = yaw; this.roll = roll;
-            this.speed = speed + 800;
-            this.isEnemy = isEnemy; this.target = target;
+            this.speed = speed + 800; this.isEnemy = isEnemy; this.target = target;
             this.life = 6.0; this.active = true;
         }
         update(dt) {
@@ -115,13 +96,13 @@
                 let dx = this.target.x - this.x, dy = this.target.y - this.y, dz = this.target.z - this.z;
                 let dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
                 
-                if (dist < 150) { // Detonação
+                if (dist < 150) { 
                     this.active = false; this.target.hit(45);
                     if(window.Sfx) window.Sfx.play(100, 'sawtooth', 0.5, 0.3);
                     return;
                 }
                 let targetYaw = Math.atan2(dx, dz);
-                let targetPitch = Math.atan2(dy, Math.sqrt(dx*dx + dz*dz)); // Y positivo = cima
+                let targetPitch = Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
                 this.yaw += (targetYaw - this.yaw) * 0.05;
                 this.pitch += (targetPitch - this.pitch) * 0.05;
             }
@@ -152,92 +133,41 @@
             let targetYaw = Math.atan2(dx, dz);
             
             if (this.evading) {
-                this.roll += (Math.PI/3 - this.roll) * 0.1; 
-                this.yaw += 0.02;
+                this.roll += (Math.PI/3 - this.roll) * 0.1; this.yaw += 0.02;
             } else {
                 this.roll += (0 - this.roll) * 0.1;
                 let yawDiff = targetYaw - this.yaw;
                 while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
                 while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-                this.yaw += yawDiff * 0.01;
+                if (!isNaN(yawDiff)) this.yaw += yawDiff * 0.01;
             }
 
             this.x += Math.sin(this.yaw) * this.speed * dt;
             this.z += Math.cos(this.yaw) * this.speed * dt;
         }
-        hit(damage) {
-            this.hp -= damage;
-            if (this.hp <= 0) this.active = false;
-        }
+        hit(damage) { this.hp -= damage; if (this.hp <= 0) this.active = false; }
     }
 
     // =========================================================================
-    // 3. LÓGICA CENTRAL E O ADAPTADOR UNIVERSAL (O SALVADOR DO CANVAS)
+    // 3. LÓGICA PRINCIPAL (MAPEAMENTO DIRETO PARA O CORE.JS)
     // =========================================================================
     const Game = {
         state: 'INIT', lastTime: 0,
-        
         player: { x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, speed: 400, throttle: 0.5, hp: 100, flares: 10, gForce: 1.0, mach: 0.3 },
         hotas: { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0 },
         entities: { missiles: [], enemies: [], particles: [] },
         session: { kills: 0, cash: 0, mode: 'SINGLE', time: 0 },
         radarTarget: null, lockTimer: 0, keys: {}, keysBound: false,
 
-        // --- ADAPTADORES UNIVERSAIS PARA O CORE.JS ---
-        // Não importa que nomes ou variáveis o core.js mande, o código descobre e processa sem crashar.
-        
-        _init: function() { this.safeInit(...arguments); },
-        init: function() { this.safeInit(...arguments); },
-        safeInit: function() {
-            let missionData = (arguments.length > 0 && arguments[0]) ? arguments[0] : {};
-            this.gameInit(missionData);
-        },
+        // Apelidos diretos suportados por diferentes versões do motor
+        _init: function(m) { this.init(m); },
+        _update: function(k, w, h) { this.update(k, w, h); },
+        _draw: function(c, w, h) { this.render(c, w, h); },
+        _drawEnd: function(c, w, h) { this.renderEnd(c, w, h); },
 
-        _update: function() { this.safeUpdate(...arguments); },
-        update: function() { this.safeUpdate(...arguments); },
-        safeUpdate: function() {
-            let kps = [];
-            for (let i = 0; i < arguments.length; i++) {
-                if (Array.isArray(arguments[i])) { kps = arguments[i]; break; }
-            }
-            this.gameUpdate(kps);
-        },
-
-        _draw: function() { this.safeDraw(...arguments); },
-        render: function() { this.safeDraw(...arguments); },
-        draw: function() { this.safeDraw(...arguments); },
-        safeDraw: function() {
-            let ctx = arguments[0];
-            if (!ctx || !ctx.fillRect) return; // Proteção contra silent crash
-            let w = 640, h = 480;
-            // Descobre onde estão o width e height na assinatura
-            if (typeof arguments[1] === 'number') { w = arguments[1]; h = arguments[2]; }
-            else if (typeof arguments[2] === 'number') { w = arguments[2]; h = arguments[3]; }
-            
-            ctx.save(); // Isola as pinturas para não quebrar outros jogos
-            this.gameDraw(ctx, w, h);
-            ctx.restore();
-        },
-
-        _drawEnd: function() { this.safeDrawEnd(...arguments); },
-        renderEnd: function() { this.safeDrawEnd(...arguments); },
-        safeDrawEnd: function() {
-            let ctx = arguments[0];
-            if (!ctx || !ctx.fillRect) return;
-            let w = 640, h = 480;
-            if (typeof arguments[1] === 'number') { w = arguments[1]; h = arguments[2]; }
-            else if (typeof arguments[2] === 'number') { w = arguments[2]; h = arguments[3]; }
-            
-            ctx.save();
-            this.gameDrawEnd(ctx, w, h);
-            ctx.restore();
-        },
-
-        // --- LÓGICA DE JOGO REAL ---
-
-        gameInit: function(missionData) {
+        init: function(missionData) {
             this.state = 'CALIBRATING';
-            this.session.mode = missionData.mode || 'SINGLE';
+            this.session.mode = (missionData && missionData.mode) ? missionData.mode : 'SINGLE';
             this.player = { x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, speed: 400, throttle: 0.5, hp: 100, flares: 10, gForce: 1.0, mach: 0.3 };
             this.entities = { missiles: [], enemies: [], particles: [] };
             this.session.kills = 0; this.session.cash = 0; this.session.time = 0;
@@ -246,12 +176,11 @@
 
             if(window.Sfx) window.Sfx.play(400, 'sine', 0.5, 0.1); 
 
-            // Teclado de Emergência / Fallback
             if (!this.keysBound) {
                 window.addEventListener('keydown', (e) => {
                     this.keys[e.key] = true;
                     if (this.state === 'CALIBRATING' && ['ArrowUp', 'ArrowDown', 'w', 's', ' '].includes(e.key)) {
-                        this.state = 'PLAYING'; // Força início via teclado
+                        this.state = 'PLAYING';
                         if(window.System && window.System.msg) window.System.msg("TECLADO MANUAL ATIVADO", "#f39c12");
                     }
                     if (e.key === ' ' && this.state === 'PLAYING') this.fireMissile();
@@ -270,12 +199,12 @@
             }
         },
 
-        gameUpdate: function(kps) {
+        update: function(kps, w, h) {
             let now = performance.now();
             if (this.lastTime === 0) this.lastTime = now;
             let dt = Math.max(0.001, (now - this.lastTime) / 1000);
             this.lastTime = now;
-            if (dt > 0.1) dt = 0.1; // Previne saltos no tempo
+            if (dt > 0.1) dt = 0.1; // Limita o Delta Time para o jogo não "saltar"
 
             this.processInputs(kps);
 
@@ -294,7 +223,7 @@
         },
 
         processInputs: function(kps) {
-            // Processa Inputs do Teclado (Sempre ativos)
+            // Teclado (Sempre Processado)
             if (this.keys['ArrowUp']) this.hotas.pitchInput = 0.5;
             else if (this.keys['ArrowDown']) this.hotas.pitchInput = -0.5;
             else this.hotas.pitchInput = this.lerp(this.hotas.pitchInput, 0, 0.1);
@@ -307,34 +236,37 @@
             else if (this.keys['s']) this.player.throttle = 0.2;
             else this.player.throttle = this.lerp(this.player.throttle, 0.5, 0.05);
 
-            // Processa Inputs MoveNet (Câmera)
+            // Câmara (MoveNet) - Com proteções Anti-Crash!
             let kpDict = {};
-            if (kps && kps.length > 0) {
-                // Previne variações do core.js (Array de poses vs Array de keypoints)
-                let arr = kps[0].keypoints ? kps[0].keypoints : kps;
-                arr.forEach(kp => { if (kp.name) kpDict[kp.name] = kp; });
+            if (kps && Array.isArray(kps) && kps.length > 0) {
+                let arr = (kps[0] && kps[0].keypoints) ? kps[0].keypoints : kps;
+                arr.forEach(kp => { if (kp && kp.name) kpDict[kp.name] = kp; });
             }
 
             let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
 
-            if (rightWrist && rightWrist.score > 0.4 && nose) {
+            // SÓ avança se o nariz também existir no frame (evita o erro undefined)
+            if (rightWrist && rightWrist.score > 0.4 && nose && nose.score > 0.4) {
                 if (this.state === 'CALIBRATING') {
                     this.hotas.calibratedX = rightWrist.x; this.hotas.calibratedY = rightWrist.y;
                     this.state = 'PLAYING';
                     if(window.System && window.System.msg) window.System.msg("HOTAS AR CALIBRADO!", "#2ecc71");
                 }
-                if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) { // AR só age se teclado não estiver a ser usado
+                if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
                     let deltaY = (rightWrist.y - this.hotas.calibratedY) / 100;
                     let deltaX = (rightWrist.x - this.hotas.calibratedX) / 100;
-                    this.hotas.pitchInput = this.lerp(this.hotas.pitchInput, deltaY, 0.1);
-                    this.hotas.rollInput = this.lerp(this.hotas.rollInput, deltaX, 0.1);
+                    if (!isNaN(deltaY)) this.hotas.pitchInput = this.lerp(this.hotas.pitchInput, deltaY, 0.1);
+                    if (!isNaN(deltaX)) this.hotas.rollInput = this.lerp(this.hotas.rollInput, deltaX, 0.1);
                 }
             }
 
-            if (leftWrist && leftWrist.score > 0.4 && this.state === 'PLAYING') {
+            // Acelerador: Mesma proteção (exige pulso + nariz ativos neste exato frame)
+            if (leftWrist && leftWrist.score > 0.4 && nose && nose.score > 0.4 && this.state === 'PLAYING') {
                 let thrInput = (nose.y - leftWrist.y) / 200; 
-                this.player.throttle = Math.max(0.2, Math.min(1.0, thrInput));
-                if (Math.abs(leftWrist.x - (rightWrist ? rightWrist.x : 0)) < 50 && this.lockTimer > 1.5) {
+                if (!isNaN(thrInput)) {
+                    this.player.throttle = Math.max(0.2, Math.min(1.0, thrInput));
+                }
+                if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 50 && this.lockTimer > 1.5) {
                     this.fireMissile();
                 }
             }
@@ -347,19 +279,23 @@
             p.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, p.pitch));
             
             let turnRate = Math.sin(p.roll) * 0.02;
-            p.yaw += turnRate;
-            p.pitch -= Math.abs(turnRate) * 0.01;
+            if (!isNaN(turnRate)) {
+                p.yaw += turnRate;
+                p.pitch -= Math.abs(turnRate) * 0.01;
+            }
 
             let targetSpeed = PHYSICS.MAX_THRUST * p.throttle;
             p.speed = this.lerp(p.speed, targetSpeed, 0.01);
             p.mach = (p.speed / 343).toFixed(2);
-            p.gForce = 1.0 + (Math.abs(p.pitchInput) * 4.0) + (Math.abs(turnRate) * 50.0);
+            p.gForce = 1.0 + (Math.abs(p.pitchInput) * 4.0) + (Math.abs(turnRate || 0) * 50.0);
 
             let vx = Math.sin(p.yaw) * Math.cos(p.pitch) * p.speed;
-            let vy = Math.sin(p.pitch) * p.speed; // Pitch positivo (nariz para cima) ganha altitude
+            let vy = Math.sin(p.pitch) * p.speed; // Ganha altitude com nariz cima
             let vz = Math.cos(p.yaw) * Math.cos(p.pitch) * p.speed;
 
-            p.x += vx * dt; p.y += vy * dt; p.z += vz * dt;
+            if (!isNaN(vx)) p.x += vx * dt; 
+            if (!isNaN(vy)) p.y += vy * dt; 
+            if (!isNaN(vz)) p.z += vz * dt;
         },
 
         updateEntities: function(dt) {
@@ -432,12 +368,13 @@
 
         lerp: (a, b, t) => a + (b - a) * t,
 
-        // --- MÓDULOS DE RENDERIZAÇÃO SEGUROS ---
-
-        gameDraw: function(ctx, w, h) {
+        // =====================================================================
+        // RENDERIZAÇÃO
+        // =====================================================================
+        render: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
             if (this.state === 'CALIBRATING') return this.drawCalibration(ctx, w, h);
-            if (this.state === 'GAMEOVER' || this.state === 'VICTORY') return this.gameDrawEnd(ctx, w, h);
+            if (this.state === 'GAMEOVER' || this.state === 'VICTORY') return this.renderEnd(ctx, w, h);
 
             this.draw3DWorld(ctx, w, h);
             this.drawHUD(ctx, w, h);
@@ -566,7 +503,7 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
-        gameDrawEnd: function(ctx, w, h) {
+        renderEnd: function(ctx, w, h) {
             ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
             ctx.textAlign = "center"; 
             if (this.state === 'VICTORY') {
@@ -588,8 +525,10 @@
             window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.4, 
                 phases: [
-                    { id: 'training', name: 'TREINO BÁSICO', desc: 'Destrua os drones com o HOTAS Virtual.', mode: 'SINGLE', reqLvl: 1 },
-                    { id: 'coop_mission', name: 'OPERAÇÃO DESERT STORM', desc: 'Combate Aéreo. Sobreviva.', mode: 'SINGLE', reqLvl: 3 }
+                    // Mapeamento EXATO da versão original do teu repositório:
+                    { id: 'single', name: 'CAMPANHA SOLO', desc: 'Destrua alvos para ganhar $', mode: 'SINGLE', reqLvl: 1 },
+                    { id: 'coop', name: 'CO-OP SQUADRON', desc: 'Jogue com amigos.', mode: 'COOP', reqLvl: 3 },
+                    { id: 'pvp', name: 'DOGFIGHT PVP', desc: 'Batalha aérea.', mode: 'PVP', reqLvl: 5 }
                 ]
             });
             clearInterval(regLoop);
