@@ -57,18 +57,23 @@
     };
 
     // =========================================================================
-    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL
+    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL (CORRIGIDO ANTI-TELA BRANCA)
     // =========================================================================
     const Engine3D = {
         fov: 800,
         project: (obj, cam, w, h) => {
-            let dx = obj.x - cam.x;
-            let dy = cam.y - obj.y; // Eixo Y da Tela é invertido em relação à física
-            let dz = obj.z - cam.z;
+            // CORREÇÃO CRÍTICA: Assegura a leitura correta do vetor 'pos' da entidade física
+            let cx = cam.pos ? cam.pos.x : cam.x;
+            let cy = cam.pos ? cam.pos.y : cam.y;
+            let cz = cam.pos ? cam.pos.z : cam.z;
+            
+            let dx = obj.x - cx;
+            let dy = cy - obj.y; // Eixo Y da Tela é invertido em relação à física
+            let dz = obj.z - cz;
             
             // Transformação de Câmera (Yaw, Pitch, Roll)
-            let cy = Math.cos(-cam.yaw), sy = Math.sin(-cam.yaw);
-            let x1 = dx * cy - dz * sy, z1 = dx * sy + dz * cy;
+            let cyaw = Math.cos(-cam.yaw), syaw = Math.sin(-cam.yaw);
+            let x1 = dx * cyaw - dz * syaw, z1 = dx * syaw + dz * cyaw;
             
             let cp = Math.cos(-cam.pitch), sp = Math.sin(-cam.pitch);
             let y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
@@ -336,13 +341,15 @@
         
         network: { lastSyncTime: 0, remotePlayers: {}, sendRate: 100 },
 
-        // Mapeamentos Blindados e Separados para o core.js
+        // Mapeamentos Blindados Múltiplos (Cobre qualquer variação de chamada do core.js)
         _init: function(m) { this.init(m); },
-        _update: function() { this.updateLogic(...arguments); },
-        update: function()  { this.updateLogic(...arguments); },
-        _draw: function()   { this.renderSafe(...arguments); },
-        draw: function()    { this.renderSafe(...arguments); },
-        _drawEnd: function() { this.renderSafeEnd(...arguments); },
+        _update: function() { this.updateLogic(arguments); },
+        update: function()  { this.updateLogic(arguments); },
+        _draw: function()   { this.renderSafe(arguments); },
+        draw: function()    { this.renderSafe(arguments); },
+        render: function()  { this.renderSafe(arguments); }, // Alias super protegido para evitar o crash silencioso
+        _drawEnd: function() { this.renderSafeEnd(arguments); },
+        renderEnd: function() { this.renderSafeEnd(arguments); },
 
         init: function(missionData) {
             try {
@@ -351,7 +358,7 @@
                 this.hangarTimer = 3.0;
                 
                 // Reinicialização rigorosa das variáveis locais 
-                this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0 };
+                this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
                 this.keys = {};
                 
                 this.session.mode = (missionData && missionData.mode) ? missionData.mode : 'SINGLE';
@@ -387,17 +394,19 @@
         },
         
         // Loop de Atualização Isolado (Apenas Roda a Lógica, sem interferência gráfica)
-        updateLogic: function() {
-            let kps = [];
-            // Procura a array de câmera independentemente da ordem
-            for (let i = 0; i < arguments.length; i++) {
-                if (Array.isArray(arguments[i])) kps = arguments[i];
+        updateLogic: function(args) {
+            let kps = null;
+            for (let i = 0; i < args.length; i++) {
+                if (Array.isArray(args[i])) kps = args[i];
             }
 
             try {
                 let now = performance.now();
                 if (this.lastTime === 0) this.lastTime = now;
-                let dt = Math.max(0.001, Math.min(0.05, (now - this.lastTime) / 1000)); 
+                let dt = (now - this.lastTime) / 1000;
+                // Previne duplicação de física num único frame
+                if (dt < 0.005) return; 
+                if (dt > 0.05) dt = 0.05; 
                 this.lastTime = now;
 
                 if (!this.fatalError) {
@@ -424,13 +433,17 @@
             }
         },
 
-        // Loop de Renderização Isolado (Não zera as variáveis da câmera)
-        renderSafe: function() {
-            let ctx = null, w = 640, h = 480;
-            for (let i = 0; i < arguments.length; i++) {
-                let arg = arguments[i];
-                if (arg && typeof arg.clearRect === 'function') ctx = arg;
-                else if (typeof arg === 'number' && arg >= 100) { if (w === 640) w = arg; else h = arg; }
+        // Loop de Renderização Seguro e Tolerante a Erros
+        renderSafe: function(args) {
+            let ctx = null, w = window.innerWidth || 640, h = window.innerHeight || 480;
+            for (let i = 0; i < args.length; i++) {
+                let arg = args[i];
+                if (!arg) continue;
+                if (typeof arg.clearRect === 'function' || arg.canvas) ctx = arg;
+                else if (typeof arg === 'number') {
+                    if (arg > 50 && w === (window.innerWidth || 640)) w = arg;
+                    else if (arg > 50) h = arg;
+                }
             }
             if (!ctx) return;
 
@@ -443,16 +456,21 @@
                 for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], 20, 90 + (i*15));
             } else {
                 try { 
-                    this.render(ctx, w, h); 
+                    this._internalRender(ctx, w, h); 
                 } catch(e) { 
                     this.fatalError = "CRASH NO RENDER: " + e.message; 
+                    // Desenha instantaneamente para não deixar a tela branca neste frame
+                    ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
+                    ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
+                    ctx.fillText("⚠️ RENDER CRASH ⚠️", 20, 50);
+                    ctx.font = "12px monospace"; ctx.fillText(e.message, 20, 90);
                 }
             }
         },
 
-        // FCS (Flight Control System) - Lê a câmera com proteção
+        // FCS (Flight Control System) - Leitura de Câmara Suavizada e Segura
         processMobileInputs: function(kps, dt) {
-            if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0 };
+            if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
             
             let rawPitch = 0, rawRoll = 0, rawThr = this.player.throttle;
 
@@ -461,7 +479,6 @@
             if (this.keys['ArrowRight']) rawRoll = 1.0; else if (this.keys['ArrowLeft']) rawRoll = -1.0;
             if (this.keys['w']) rawThr = 1.0; else if (this.keys['s']) rawThr = 0.2;
 
-            // Extração de Keypoints robusta (Aceita flat array ou object)
             let kpDict = {};
             if (kps && Array.isArray(kps) && kps.length > 0) {
                 let arr = (kps[0] && kps[0].keypoints) ? kps[0].keypoints : kps;
@@ -472,7 +489,7 @@
 
             let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
 
-            // Baixada a tolerância para > 0.3 para reconhecer as mãos mais fácil e rápido
+            // Limite reduzido (0.3) para tracking ser MUITO mais fiável
             if (rightWrist && rightWrist.score > 0.3 && nose && nose.score > 0.3) {
                 if (this.state === 'CALIBRATING') {
                     this.hotas.calibratedX = rightWrist.x; 
@@ -485,12 +502,26 @@
                     let dx = (rightWrist.x - this.hotas.calibratedX) / 120;
                     rawPitch = Math.max(-1, Math.min(1, dy));
                     rawRoll = Math.max(-1, Math.min(1, dx));
+                    
+                    this.hotas.lastValidPitch = rawPitch;
+                    this.hotas.lastValidRoll = rawRoll;
+                }
+            } else {
+                // MÁGICA: Se a câmara falhar um frame, mantém a última posição em vez de o avião travar
+                if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
+                    rawPitch = this.hotas.lastValidPitch || 0;
+                    rawRoll = this.hotas.lastValidRoll || 0;
                 }
             }
 
             if (leftWrist && leftWrist.score > 0.3 && this.state === 'PLAYING' && !this.keys['w']) {
                 rawThr = 1.1 - (leftWrist.y / 480);
+                this.hotas.lastValidThr = rawThr;
                 if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 80 && this.lockTimer > 1.5) this.fireMissile();
+            } else {
+                if (this.state === 'PLAYING' && !this.keys['w']) {
+                    rawThr = this.hotas.lastValidThr !== undefined ? this.hotas.lastValidThr : this.player.throttle;
+                }
             }
 
             const applyCurve = (val, deadzone, expo) => {
@@ -508,7 +539,7 @@
             this.player.inputs.roll += (targetRoll - this.player.inputs.roll) * (dt * 10.0);
             this.player.throttle += (targetThrottle - this.player.throttle) * (dt * 5.0);
 
-            // Fly-By-Wire Limitador de Carga
+            // Fly-By-Wire Limitador de Carga G (Para evitar quebrar as asas do avião)
             if (this.player.gForce > 8.0 && this.player.inputs.pitch > 0) this.player.inputs.pitch *= 0.5; 
         },
 
@@ -580,7 +611,6 @@
 
                 e.updatePhysics(dt);
 
-                // IA Dispara Míssil no Jogador (Chance pequena se o jogador estiver à frente)
                 if (e.isBoss && distToPlayer < 4000 && Math.abs(e.inputs.roll) < 0.2 && Math.random() < 0.005) {
                     this.entities.missiles.push(new Missile(e, this.player, true));
                 }
@@ -681,7 +711,6 @@
             for(let id in this.network.remotePlayers) {
                 let rp = this.network.remotePlayers[id];
                 if(rp.targetPos) {
-                    // Dead Reckoning + Interpolation
                     rp.pos.x += (rp.targetPos.x - rp.pos.x) * dt * 5.0 + (rp.targetVel.x * dt);
                     rp.pos.y += (rp.targetPos.y - rp.pos.y) * dt * 5.0 + (rp.targetVel.y * dt);
                     rp.pos.z += (rp.targetPos.z - rp.pos.z) * dt * 5.0 + (rp.targetVel.z * dt);
@@ -702,14 +731,14 @@
         },
 
         // =====================================================================
-        // RENDERIZAÇÃO MILITAR
+        // RENDERIZAÇÃO EFEITIVA (Onde o Bug estava escondido)
         // =====================================================================
-        render: function(ctx, w, h) {
+        _internalRender: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
             
             if (this.state === 'HANGAR') return this.drawHangar(ctx, w, h);
             if (this.state === 'CALIBRATING') return this.drawCalibration(ctx, w, h);
-            if (this.state === 'GAMEOVER' || this.state === 'VICTORY') return this.renderEnd(ctx, w, h);
+            if (this.state === 'GAMEOVER' || this.state === 'VICTORY') return this.renderSafeEnd(ctx, w, h);
 
             this.draw3DWorld(ctx, w, h);
             this.drawHUD(ctx, w, h);
@@ -873,12 +902,16 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
-        renderSafeEnd: function() {
-            let ctx = null, w = 640, h = 480;
-            for (let i = 0; i < arguments.length; i++) {
-                let arg = arguments[i];
-                if (arg && typeof arg.clearRect === 'function') ctx = arg;
-                else if (typeof arg === 'number' && arg >= 100) { if (w === 640) w = arg; else h = arg; }
+        renderSafeEnd: function(args) {
+            let ctx = null, w = window.innerWidth || 640, h = window.innerHeight || 480;
+            for (let i = 0; i < args.length; i++) {
+                let arg = args[i];
+                if (!arg) continue;
+                if (typeof arg.clearRect === 'function' || arg.canvas) ctx = arg;
+                else if (typeof arg === 'number') {
+                    if (arg > 50 && w === (window.innerWidth || 640)) w = arg;
+                    else if (arg > 50) h = arg;
+                }
             }
             if (ctx) {
                 ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
