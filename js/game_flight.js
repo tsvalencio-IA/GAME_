@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - TRUE AAA)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, CAMERA FIXED
+// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, CAMERA FIXED V2
 // =============================================================================
 
 (function() {
@@ -136,7 +136,9 @@
 
             // 2. Velocidade Vetorial e Escalar
             let V = Math.sqrt(this.vel.x**2 + this.vel.y**2 + this.vel.z**2);
+            if (isNaN(V)) V = 100;
             this.mach = V / speedOfSound;
+            if (isNaN(this.mach)) this.mach = 0;
 
             // Vetores de Orientação
             let cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
@@ -155,10 +157,13 @@
 
             // 4. Forças Aerodinâmicas
             let CL = this.alpha * (this.stats.clMax / this.stats.stallAngle); 
+            if (isNaN(CL)) CL = 0;
+            
             this.isStalling = this.alpha > this.stats.stallAngle || V < 50;
             if (this.isStalling) CL = Math.max(0, CL - (this.alpha - this.stats.stallAngle) * 5.0); 
 
             let CD = this.stats.cd0 + this.stats.kInduced * (CL * CL);
+            if (isNaN(CD)) CD = this.stats.cd0;
 
             let dynamicPressure = 0.5 * airDensity * (V * V);
             let liftMag = dynamicPressure * this.stats.wingArea * CL;
@@ -194,10 +199,13 @@
                 (liftForce.z + dragForce.z + thrustForce.z)**2
             );
             this.gForce = specificForceMag / weight;
+            if (isNaN(this.gForce)) this.gForce = 1.0;
 
             // 7. Cinemática de Rotação
             let currentTurnRate = (liftMag * Math.sin(this.roll)) / (this.stats.mass * V); 
-            if (!this.isStalling && V > 30) this.yaw += (isNaN(currentTurnRate) ? 0 : currentTurnRate) * dt;
+            if (!this.isStalling && V > 30 && !isNaN(currentTurnRate)) {
+                this.yaw += currentTurnRate * dt;
+            }
 
             this.pitch += this.inputs.pitch * this.stats.maxPitchRate * dt;
             this.roll += this.inputs.roll * this.stats.maxRollRate * dt;
@@ -208,6 +216,14 @@
                 this.pitch += (-0.5 - this.pitch) * 1.5 * dt;
                 this.roll += (Math.random() - 0.5) * 2.0 * dt; 
             }
+
+            // Sanitização final anti-NaN (Garante que nunca crashe a tela)
+            if (isNaN(this.pitch)) this.pitch = 0;
+            if (isNaN(this.roll)) this.roll = 0;
+            if (isNaN(this.yaw)) this.yaw = 0;
+            if (isNaN(this.pos.x)) this.pos.x = 0;
+            if (isNaN(this.pos.y)) this.pos.y = 3000;
+            if (isNaN(this.pos.z)) this.pos.z = 0;
 
             // Colisão com o solo
             if (this.pos.y <= 0) {
@@ -307,13 +323,13 @@
                     az = (az / accMag) * maxAcc;
                 }
 
-                this.vel.x += ax * dt;
-                this.vel.y += ay * dt;
-                this.vel.z += az * dt;
+                if (!isNaN(ax)) this.vel.x += ax * dt;
+                if (!isNaN(ay)) this.vel.y += ay * dt;
+                if (!isNaN(az)) this.vel.z += az * dt;
 
                 // Atualização cosmética do míssil para o render
                 this.yaw = Math.atan2(this.vel.x, this.vel.z);
-                this.pitch = Math.asin(this.vel.y / V);
+                this.pitch = Math.asin(this.vel.y / (V || 1));
             }
 
             // Aceleração do Foguete
@@ -341,15 +357,15 @@
         
         network: { lastSyncTime: 0, remotePlayers: {}, sendRate: 100 },
 
-        // Mapeamentos Blindados Múltiplos (Cobre qualquer variação de chamada do core.js)
+        // Mapeamentos estritos diretos (Garante compatibilidade total com core.js)
         _init: function(m) { this.init(m); },
-        _update: function() { this.updateLogic(arguments); },
-        update: function()  { this.updateLogic(arguments); },
-        _draw: function()   { this.renderSafe(arguments); },
-        draw: function()    { this.renderSafe(arguments); },
-        render: function()  { this.renderSafe(arguments); }, // Alias super protegido para evitar o crash silencioso
-        _drawEnd: function() { this.renderSafeEnd(arguments); },
-        renderEnd: function() { this.renderSafeEnd(arguments); },
+        _update: function(kps, w, h) { this.updateLogic(kps, w, h); },
+        update: function(kps, w, h)  { this.updateLogic(kps, w, h); },
+        _draw: function(ctx, w, h)   { this.renderSafe(ctx, w, h); },
+        draw: function(ctx, w, h)    { this.renderSafe(ctx, w, h); },
+        render: function(ctx, w, h)  { this.renderSafe(ctx, w, h); },
+        _drawEnd: function(ctx, w, h) { this.renderSafeEnd(ctx, w, h); },
+        renderEnd: function(ctx, w, h) { this.renderSafeEnd(ctx, w, h); },
 
         init: function(missionData) {
             try {
@@ -393,59 +409,44 @@
             } catch(e) { this.fatalError = "ERRO NO INIT: " + e.message; }
         },
         
-        // Loop de Atualização Isolado (Apenas Roda a Lógica, sem interferência gráfica)
-        updateLogic: function(args) {
-            let kps = null;
-            for (let i = 0; i < args.length; i++) {
-                if (Array.isArray(args[i])) kps = args[i];
-            }
-
+        // Loop de Atualização Isolado (Separado do Render para evitar descarte da câmera)
+        updateLogic: function(kps, w, h) {
             try {
+                if (this.fatalError) return;
+
                 let now = performance.now();
                 if (this.lastTime === 0) this.lastTime = now;
                 let dt = (now - this.lastTime) / 1000;
-                // Previne duplicação de física num único frame
-                if (dt < 0.005) return; 
-                if (dt > 0.05) dt = 0.05; 
+                if (dt < 0.005) return; // Evita processar múltiplas vezes no mesmo milissegundo
+                if (dt > 0.05) dt = 0.05; // Limite fixo
                 this.lastTime = now;
 
-                if (!this.fatalError) {
-                    if (this.state === 'HANGAR') {
-                        this.hangarTimer -= dt;
-                        if (this.hangarTimer <= 0) this.state = 'CALIBRATING';
-                    } else if (this.state === 'CALIBRATING' || this.state === 'PLAYING') {
-                        this.processMobileInputs(kps, dt);
-                        if (this.state === 'PLAYING') {
-                            this.session.time += dt;
-                            this.player.updatePhysics(dt);
-                            this.updateAI(dt);
-                            this.updateEntities(dt);
-                            this.updateCombatSystem(dt);
-                            this.updateMissionSystem();
-                            this.updateMultiplayer(dt);
-                            
-                            if (this.player.hp <= 0 || !this.player.active) this.endGame('GAMEOVER');
-                        }
+                if (this.state === 'HANGAR') {
+                    this.hangarTimer -= dt;
+                    if (this.hangarTimer <= 0) this.state = 'CALIBRATING';
+                } else if (this.state === 'CALIBRATING' || this.state === 'PLAYING') {
+                    this.processMobileInputs(kps, dt);
+                    if (this.state === 'PLAYING') {
+                        this.session.time += dt;
+                        this.player.updatePhysics(dt);
+                        this.updateAI(dt);
+                        this.updateEntities(dt);
+                        this.updateCombatSystem(dt);
+                        this.updateMissionSystem();
+                        this.updateMultiplayer(dt);
+                        
+                        if (this.player.hp <= 0 || !this.player.active) this.endGame('GAMEOVER');
                     }
                 }
             } catch(e) {
-                this.fatalError = "CRASH NA ENGINE FÍSICA: " + e.message + "\n" + e.stack;
+                this.fatalError = "CRASH NA FÍSICA: " + e.message + "\n" + e.stack;
             }
         },
 
-        // Loop de Renderização Seguro e Tolerante a Erros
-        renderSafe: function(args) {
-            let ctx = null, w = window.innerWidth || 640, h = window.innerHeight || 480;
-            for (let i = 0; i < args.length; i++) {
-                let arg = args[i];
-                if (!arg) continue;
-                if (typeof arg.clearRect === 'function' || arg.canvas) ctx = arg;
-                else if (typeof arg === 'number') {
-                    if (arg > 50 && w === (window.innerWidth || 640)) w = arg;
-                    else if (arg > 50) h = arg;
-                }
-            }
-            if (!ctx) return;
+        // Renderização com Tela Vermelha de Diagnóstico em caso de falha severa
+        renderSafe: function(ctx, w, h) {
+            if (!ctx || typeof ctx.clearRect !== 'function') return;
+            w = w || 640; h = h || 480;
 
             if (this.fatalError) {
                 ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
@@ -459,7 +460,6 @@
                     this._internalRender(ctx, w, h); 
                 } catch(e) { 
                     this.fatalError = "CRASH NO RENDER: " + e.message; 
-                    // Desenha instantaneamente para não deixar a tela branca neste frame
                     ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
                     ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
                     ctx.fillText("⚠️ RENDER CRASH ⚠️", 20, 50);
@@ -468,7 +468,7 @@
             }
         },
 
-        // FCS (Flight Control System) - Leitura de Câmara Suavizada e Segura
+        // FCS (Flight Control System) - Leitura de Câmara Suavizada com "Hold State"
         processMobileInputs: function(kps, dt) {
             if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
             
@@ -479,9 +479,12 @@
             if (this.keys['ArrowRight']) rawRoll = 1.0; else if (this.keys['ArrowLeft']) rawRoll = -1.0;
             if (this.keys['w']) rawThr = 1.0; else if (this.keys['s']) rawThr = 0.2;
 
+            // Tratamento à prova de balas da array do MoveNet do core.js
             let kpDict = {};
-            if (kps && Array.isArray(kps) && kps.length > 0) {
-                let arr = (kps[0] && kps[0].keypoints) ? kps[0].keypoints : kps;
+            if (kps) {
+                let arr = Array.isArray(kps) ? kps : (kps.keypoints ? kps.keypoints : null);
+                if (!arr && kps[0] && kps[0].keypoints) arr = kps[0].keypoints;
+                
                 if (Array.isArray(arr)) {
                     arr.forEach(kp => { if (kp && kp.name) kpDict[kp.name] = kp; });
                 }
@@ -489,34 +492,39 @@
 
             let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
 
-            // Limite reduzido (0.3) para tracking ser MUITO mais fiável
+            // Limite reduzido para 0.3 (Pega os movimentos de forma muito mais rápida e estável)
             if (rightWrist && rightWrist.score > 0.3 && nose && nose.score > 0.3) {
                 if (this.state === 'CALIBRATING') {
-                    this.hotas.calibratedX = rightWrist.x; 
-                    this.hotas.calibratedY = rightWrist.y;
+                    this.hotas.calibratedX = typeof rightWrist.x === 'number' ? rightWrist.x : 320; 
+                    this.hotas.calibratedY = typeof rightWrist.y === 'number' ? rightWrist.y : 240;
                     this.state = 'PLAYING';
                     if(window.System && window.System.msg) window.System.msg("FCS ONLINE", "#2ecc71");
                 }
                 if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
                     let dy = (rightWrist.y - this.hotas.calibratedY) / 120;
                     let dx = (rightWrist.x - this.hotas.calibratedX) / 120;
-                    rawPitch = Math.max(-1, Math.min(1, dy));
-                    rawRoll = Math.max(-1, Math.min(1, dx));
+                    rawPitch = Math.max(-1, Math.min(1, isNaN(dy) ? 0 : dy));
+                    rawRoll = Math.max(-1, Math.min(1, isNaN(dx) ? 0 : dx));
                     
+                    // Salva a memória motora (Hold State)
                     this.hotas.lastValidPitch = rawPitch;
                     this.hotas.lastValidRoll = rawRoll;
                 }
             } else {
-                // MÁGICA: Se a câmara falhar um frame, mantém a última posição em vez de o avião travar
+                // Se o MoveNet piscar e não vir a mão, usamos a última posição validada!
                 if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
                     rawPitch = this.hotas.lastValidPitch || 0;
                     rawRoll = this.hotas.lastValidRoll || 0;
                 }
             }
 
+            // Acelerador & Disparo
             if (leftWrist && leftWrist.score > 0.3 && this.state === 'PLAYING' && !this.keys['w']) {
-                rawThr = 1.1 - (leftWrist.y / 480);
+                let lwY = typeof leftWrist.y === 'number' ? leftWrist.y : 240;
+                let thr = 1.1 - (lwY / 480);
+                rawThr = Math.max(0.1, Math.min(1.0, isNaN(thr) ? 0.5 : thr));
                 this.hotas.lastValidThr = rawThr;
+
                 if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 80 && this.lockTimer > 1.5) this.fireMissile();
             } else {
                 if (this.state === 'PLAYING' && !this.keys['w']) {
@@ -533,13 +541,13 @@
 
             let targetPitch = applyCurve(rawPitch, 0.1, 1.5);
             let targetRoll = applyCurve(rawRoll, 0.1, 1.5);
-            let targetThrottle = Math.max(0.1, Math.min(1.0, rawThr));
+            let targetThrottle = Math.max(0.1, Math.min(1.0, isNaN(rawThr) ? 0.5 : rawThr));
 
             this.player.inputs.pitch += (targetPitch - this.player.inputs.pitch) * (dt * 10.0);
             this.player.inputs.roll += (targetRoll - this.player.inputs.roll) * (dt * 10.0);
             this.player.throttle += (targetThrottle - this.player.throttle) * (dt * 5.0);
 
-            // Fly-By-Wire Limitador de Carga G (Para evitar quebrar as asas do avião)
+            // Fly-By-Wire Limitador de Carga G (Para evitar quebrar as asas)
             if (this.player.gForce > 8.0 && this.player.inputs.pitch > 0) this.player.inputs.pitch *= 0.5; 
         },
 
@@ -731,7 +739,7 @@
         },
 
         // =====================================================================
-        // RENDERIZAÇÃO EFEITIVA (Onde o Bug estava escondido)
+        // RENDERIZAÇÃO EFEITIVA
         // =====================================================================
         _internalRender: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
@@ -902,29 +910,20 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
-        renderSafeEnd: function(args) {
-            let ctx = null, w = window.innerWidth || 640, h = window.innerHeight || 480;
-            for (let i = 0; i < args.length; i++) {
-                let arg = args[i];
-                if (!arg) continue;
-                if (typeof arg.clearRect === 'function' || arg.canvas) ctx = arg;
-                else if (typeof arg === 'number') {
-                    if (arg > 50 && w === (window.innerWidth || 640)) w = arg;
-                    else if (arg > 50) h = arg;
-                }
+        renderSafeEnd: function(ctx, w, h) {
+            if (!ctx || typeof ctx.clearRect !== 'function') return;
+            w = w || 640; h = h || 480;
+
+            ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
+            ctx.textAlign = "center"; 
+            if (this.state === 'VICTORY') {
+                ctx.fillStyle = "#2ecc71"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("ESPAÇO AÉREO LIMPO", w/2, h/2 - 30);
+                ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText(`PAGAMENTO APROVADO: R$ ${this.session.cash}`, w/2, h/2 + 20);
+            } else {
+                ctx.fillStyle = "#e74c3c"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("CAÇA ABATIDO", w/2, h/2 - 30);
+                ctx.fillStyle = "#fff"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText("O PILOTO FOI EJETADO.", w/2, h/2 + 20);
             }
-            if (ctx) {
-                ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
-                ctx.textAlign = "center"; 
-                if (this.state === 'VICTORY') {
-                    ctx.fillStyle = "#2ecc71"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("ESPAÇO AÉREO LIMPO", w/2, h/2 - 30);
-                    ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText(`PAGAMENTO APROVADO: R$ ${this.session.cash}`, w/2, h/2 + 20);
-                } else {
-                    ctx.fillStyle = "#e74c3c"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("CAÇA ABATIDO", w/2, h/2 - 30);
-                    ctx.fillStyle = "#fff"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText("O PILOTO FOI EJETADO.", w/2, h/2 + 20);
-                }
-                ctx.fillText(`Inimigos Destruídos: ${this.session.kills}`, w/2, h/2 + 60);
-            }
+            ctx.fillText(`Inimigos Destruídos: ${this.session.kills}`, w/2, h/2 + 60);
         }
     };
 
