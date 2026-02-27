@@ -233,6 +233,7 @@
         // Multiplayer Firebase
         isHost: false, remotePlayers: {}, lastSync: 0,
 
+        _init: function(missionData) { this.init(missionData); },
         init: function(missionData) {
             this.state = 'CALIBRATING';
             this.session.mode = missionData.mode || 'SINGLE';
@@ -286,6 +287,7 @@
         // =====================================================================
         // LOOP PRINCIPAL: ATUALIZAÇÃO FÍSICA E IA
         // =====================================================================
+        _update: function(poses) { this.update(poses); },
         update: function(poses) {
             let now = performance.now();
             let dt = (now - this.lastTime) / 1000;
@@ -481,6 +483,8 @@
         // =====================================================================
         // LOOP DE RENDERIZAÇÃO: AR + HUD + 3D
         // =====================================================================
+        _draw: function(ctx, w, h) { this.draw(ctx, w, h); },
+        _drawEnd: function(ctx, w, h) { this.drawEndScreen(ctx, w, h); },
         draw: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
 
