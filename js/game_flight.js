@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - FINAL STABLE)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: SILENT-CRASH FIXED, ROBUST MOVENET TRACKING, STRICT CORE.JS MAPPING
+// STATUS: CORE.JS UNIVERSAL HOOK IMPLEMENTED, SILENT-CRASH FIXED, HOTAS TUNED
 // =============================================================================
 
 (function() {
@@ -14,7 +14,7 @@
         fov: 800,
         project: (objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) => {
             let dx = objX - camX;
-            let dy = camY - objY; // Y Invertido para o Canvas
+            let dy = camY - objY; // Y Invertido para o Canvas (Altitude Positiva = Subir)
             let dz = objZ - camZ;
             
             // Rotação YAW (Esquerda/Direita)
@@ -149,22 +149,18 @@
     }
 
     // =========================================================================
-    // 3. LÓGICA PRINCIPAL (MAPEAMENTO DIRETO PARA O CORE.JS)
+    // 3. LÓGICA PRINCIPAL & ADAPTADOR UNIVERSAL DE MOTOR
     // =========================================================================
     const Game = {
-        state: 'INIT', lastTime: 0,
+        state: 'INIT', lastTime: 0, hasDrawnThisFrame: false,
         player: { x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, speed: 400, throttle: 0.5, hp: 100, flares: 10, gForce: 1.0, mach: 0.3 },
         hotas: { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0 },
         entities: { missiles: [], enemies: [], particles: [] },
         session: { kills: 0, cash: 0, mode: 'SINGLE', time: 0 },
         radarTarget: null, lockTimer: 0, keys: {}, keysBound: false,
 
-        // Apelidos diretos suportados por diferentes versões do motor
+        // --- ADAPTADORES UNIVERSAIS PARA QUALQUER VERSÃO DO CORE.JS ---
         _init: function(m) { this.init(m); },
-        _update: function(k, w, h) { this.update(k, w, h); },
-        _draw: function(c, w, h) { this.render(c, w, h); },
-        _drawEnd: function(c, w, h) { this.renderEnd(c, w, h); },
-
         init: function(missionData) {
             this.state = 'CALIBRATING';
             this.session.mode = (missionData && missionData.mode) ? missionData.mode : 'SINGLE';
@@ -190,6 +186,54 @@
             }
         },
 
+        // CORE LOOP INTERCEPTOR: Aceita ctx e kps em qualquer ordem!
+        _update: function() { this.coreLoop(...arguments); },
+        update: function()  { this.coreLoop(...arguments); },
+        _draw: function()   { this.coreLoop(...arguments); },
+        
+        coreLoop: function() {
+            let ctx = null, kps = [], w = 640, h = 480;
+            
+            // Descobre o que o core.js nos enviou analisando as variáveis
+            for (let i = 0; i < arguments.length; i++) {
+                let arg = arguments[i];
+                if (arg && typeof arg.clearRect === 'function') ctx = arg;
+                else if (Array.isArray(arg)) kps = arg;
+                else if (typeof arg === 'number' && arg >= 100) {
+                    if (w === 640) w = arg; else h = arg;
+                }
+            }
+
+            let now = performance.now();
+            if (this.lastTime === 0) this.lastTime = now;
+            let dt = Math.max(0.001, Math.min(0.1, (now - this.lastTime) / 1000));
+            this.lastTime = now;
+
+            // Se for a primeira vez que esta frame roda, atualiza a física
+            if (!this.hasDrawnThisFrame) {
+                this.processInputs(kps);
+
+                if (this.state === 'PLAYING') {
+                    this.session.time += dt;
+                    this.updatePhysics(dt);
+                    this.updateEntities(dt);
+                    this.updateCombatSystem(dt);
+
+                    if (this.player.hp <= 0 || this.player.y <= 0) this.endGame('GAMEOVER');
+                    else if (this.entities.enemies.filter(e => e.active).length === 0) this.endGame('VICTORY');
+                }
+            }
+
+            // Renderiza IMEDIATAMENTE se tivermos o Canvas (Prevenindo a Tela Branca!)
+            if (ctx) {
+                this.render(ctx, w, h);
+                this.hasDrawnThisFrame = true; 
+            }
+            
+            // Reseta a flag para a próxima ronda de frames (setTimeout limpa o ciclo)
+            setTimeout(() => { this.hasDrawnThisFrame = false; }, 0);
+        },
+
         spawnEnemies: function(count) {
             for(let i=0; i<count; i++) {
                 let ex = this.player.x + (Math.random() * 8000 - 4000);
@@ -199,31 +243,8 @@
             }
         },
 
-        update: function(kps, w, h) {
-            let now = performance.now();
-            if (this.lastTime === 0) this.lastTime = now;
-            let dt = Math.max(0.001, (now - this.lastTime) / 1000);
-            this.lastTime = now;
-            if (dt > 0.1) dt = 0.1; // Limita o Delta Time para o jogo não "saltar"
-
-            this.processInputs(kps);
-
-            if (this.state === 'PLAYING') {
-                this.session.time += dt;
-                this.updatePhysics(dt);
-                this.updateEntities(dt);
-                this.updateCombatSystem(dt);
-
-                if (this.player.hp <= 0 || this.player.y <= 0) { 
-                    this.endGame('GAMEOVER');
-                } else if (this.entities.enemies.filter(e => e.active).length === 0) {
-                    this.endGame('VICTORY');
-                }
-            }
-        },
-
         processInputs: function(kps) {
-            // Teclado (Sempre Processado)
+            // Teclado (Sempre Processado como Segurança)
             if (this.keys['ArrowUp']) this.hotas.pitchInput = 0.5;
             else if (this.keys['ArrowDown']) this.hotas.pitchInput = -0.5;
             else this.hotas.pitchInput = this.lerp(this.hotas.pitchInput, 0, 0.1);
@@ -236,7 +257,7 @@
             else if (this.keys['s']) this.player.throttle = 0.2;
             else this.player.throttle = this.lerp(this.player.throttle, 0.5, 0.05);
 
-            // Câmara (MoveNet) - Com proteções Anti-Crash!
+            // Câmara (MoveNet)
             let kpDict = {};
             if (kps && Array.isArray(kps) && kps.length > 0) {
                 let arr = (kps[0] && kps[0].keypoints) ? kps[0].keypoints : kps;
@@ -245,7 +266,6 @@
 
             let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
 
-            // SÓ avança se o nariz também existir no frame (evita o erro undefined)
             if (rightWrist && rightWrist.score > 0.4 && nose && nose.score > 0.4) {
                 if (this.state === 'CALIBRATING') {
                     this.hotas.calibratedX = rightWrist.x; this.hotas.calibratedY = rightWrist.y;
@@ -260,13 +280,16 @@
                 }
             }
 
-            // Acelerador: Mesma proteção (exige pulso + nariz ativos neste exato frame)
-            if (leftWrist && leftWrist.score > 0.4 && nose && nose.score > 0.4 && this.state === 'PLAYING') {
-                let thrInput = (nose.y - leftWrist.y) / 200; 
+            // Acelerador Reconstruído (Mais natural: Levantar a mão esquerda sobe o acelerador)
+            if (leftWrist && leftWrist.score > 0.4 && this.state === 'PLAYING') {
+                // Mapeia a altura do pulso (0 topo, 480 fundo) para (1 topo, 0 fundo)
+                let thrInput = 1.1 - (leftWrist.y / 480); 
                 if (!isNaN(thrInput)) {
                     this.player.throttle = Math.max(0.2, Math.min(1.0, thrInput));
                 }
-                if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 50 && this.lockTimer > 1.5) {
+                
+                // Juntar as mãos (Bater Palmas virtuais) para atirar Míssil
+                if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 80 && this.lockTimer > 1.5) {
                     this.fireMissile();
                 }
             }
@@ -290,7 +313,7 @@
             p.gForce = 1.0 + (Math.abs(p.pitchInput) * 4.0) + (Math.abs(turnRate || 0) * 50.0);
 
             let vx = Math.sin(p.yaw) * Math.cos(p.pitch) * p.speed;
-            let vy = Math.sin(p.pitch) * p.speed; // Ganha altitude com nariz cima
+            let vy = Math.sin(p.pitch) * p.speed; // Pitch UP = Ganha Altitude
             let vz = Math.cos(p.yaw) * Math.cos(p.pitch) * p.speed;
 
             if (!isNaN(vx)) p.x += vx * dt; 
@@ -369,10 +392,11 @@
         lerp: (a, b, t) => a + (b - a) * t,
 
         // =====================================================================
-        // RENDERIZAÇÃO
+        // RENDERIZAÇÃO MILITAR SEGURA
         // =====================================================================
         render: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
+            
             if (this.state === 'CALIBRATING') return this.drawCalibration(ctx, w, h);
             if (this.state === 'GAMEOVER' || this.state === 'VICTORY') return this.renderEnd(ctx, w, h);
 
@@ -488,12 +512,12 @@
         drawCalibration: function(ctx, w, h) {
             ctx.fillStyle = "rgba(0,10,20,0.8)"; ctx.fillRect(0,0,w,h);
             ctx.fillStyle = "#00ffcc"; ctx.textAlign = "center"; ctx.font = "bold 30px 'Russo One'";
-            ctx.fillText("CALIBRAÇÃO DO SISTEMA DE VOO", w/2, h/2 - 40);
+            ctx.fillText("SISTEMA DE VOO ONLINE", w/2, h/2 - 40);
             
             ctx.font = "18px 'Chakra Petch'"; ctx.fillStyle = "#fff";
             ctx.fillText("Fique em frente à câmera.", w/2, h/2 + 10);
-            ctx.fillText("Estique o braço direito na altura do ombro (Seu Manche).", w/2, h/2 + 40);
-            ctx.fillText("Levante o braço esquerdo para acelerar. Junte as mãos para atirar.", w/2, h/2 + 70);
+            ctx.fillText("Mão Direita: Manche (Pitch / Roll).", w/2, h/2 + 40);
+            ctx.fillText("Mão Esquerda: Acelerador. Junte as mãos: Atirar.", w/2, h/2 + 70);
             
             ctx.fillStyle = "#f39c12"; ctx.font = "14px Arial";
             ctx.fillText("[Mapeamento Auxiliar: Setas do Teclado e W/S operacionais]", w/2, h/2 + 120);
@@ -503,6 +527,7 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
+        _drawEnd: function(c, w, h) { this.renderEnd(c, w, h); },
         renderEnd: function(ctx, w, h) {
             ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
             ctx.textAlign = "center"; 
@@ -525,7 +550,6 @@
             window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.4, 
                 phases: [
-                    // Mapeamento EXATO da versão original do teu repositório:
                     { id: 'single', name: 'CAMPANHA SOLO', desc: 'Destrua alvos para ganhar $', mode: 'SINGLE', reqLvl: 1 },
                     { id: 'coop', name: 'CO-OP SQUADRON', desc: 'Jogue com amigos.', mode: 'COOP', reqLvl: 3 },
                     { id: 'pvp', name: 'DOGFIGHT PVP', desc: 'Batalha aérea.', mode: 'PVP', reqLvl: 5 }
