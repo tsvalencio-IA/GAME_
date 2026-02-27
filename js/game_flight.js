@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - TRUE AAA)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, DEAD RECKONING
+// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, CAMERA FIXED
 // =============================================================================
 
 (function() {
@@ -327,17 +327,23 @@
     // 5. SISTEMA PRINCIPAL DO JOGO E CONTROLADOR (FCS)
     // =========================================================================
     const Game = {
-        state: 'INIT', lastTime: 0, hasDrawnThisFrame: false, fatalError: null,
+        state: 'INIT', lastTime: 0, fatalError: null,
         player: null,
         entities: { missiles: [], enemies: [], particles: [] },
         session: { kills: 0, cash: 0, mode: 'SINGLE', time: 0, wave: 1, selectedPlane: PLANES.falcon_lite },
         radarTarget: null, lockTimer: 0, keys: {}, keysBound: false, hangarTimer: 3.0,
-        hotas: null, // Proteção de escopo assegurada
+        hotas: null, 
         
-        // Networking Netcode
         network: { lastSyncTime: 0, remotePlayers: {}, sendRate: 100 },
 
+        // Mapeamentos Blindados e Separados para o core.js
         _init: function(m) { this.init(m); },
+        _update: function() { this.updateLogic(...arguments); },
+        update: function()  { this.updateLogic(...arguments); },
+        _draw: function()   { this.renderSafe(...arguments); },
+        draw: function()    { this.renderSafe(...arguments); },
+        _drawEnd: function() { this.renderSafeEnd(...arguments); },
+
         init: function(missionData) {
             try {
                 this.fatalError = null;
@@ -379,28 +385,22 @@
 
             } catch(e) { this.fatalError = "ERRO NO INIT: " + e.message; }
         },
-
-        _update: function() { this.coreLoop(...arguments); },
-        update: function()  { this.coreLoop(...arguments); },
-        _draw: function()   { this.coreLoop(...arguments); },
         
-        coreLoop: function() {
-            let ctx = null, kps = [], w = 640, h = 480;
-            
-            try {
-                for (let i = 0; i < arguments.length; i++) {
-                    let arg = arguments[i];
-                    if (arg && typeof arg.clearRect === 'function') ctx = arg;
-                    else if (Array.isArray(arg)) kps = arg;
-                    else if (typeof arg === 'number' && arg >= 100) { if (w === 640) w = arg; else h = arg; }
-                }
+        // Loop de Atualização Isolado (Apenas Roda a Lógica, sem interferência gráfica)
+        updateLogic: function() {
+            let kps = [];
+            // Procura a array de câmera independentemente da ordem
+            for (let i = 0; i < arguments.length; i++) {
+                if (Array.isArray(arguments[i])) kps = arguments[i];
+            }
 
+            try {
                 let now = performance.now();
                 if (this.lastTime === 0) this.lastTime = now;
                 let dt = Math.max(0.001, Math.min(0.05, (now - this.lastTime) / 1000)); 
                 this.lastTime = now;
 
-                if (!this.hasDrawnThisFrame && !this.fatalError) {
+                if (!this.fatalError) {
                     if (this.state === 'HANGAR') {
                         this.hangarTimer -= dt;
                         if (this.hangarTimer <= 0) this.state = 'CALIBRATING';
@@ -422,42 +422,58 @@
             } catch(e) {
                 this.fatalError = "CRASH NA ENGINE FÍSICA: " + e.message + "\n" + e.stack;
             }
-
-            if (ctx) {
-                if (this.fatalError) {
-                    ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
-                    ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
-                    ctx.fillText("⚠️ CRITICAL SYSTEM FAILURE ⚠️", 20, 50);
-                    ctx.font = "12px monospace"; 
-                    let lines = this.fatalError.split("\n");
-                    for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], 20, 90 + (i*15));
-                } else {
-                    try { this.render(ctx, w, h); } catch(e) { this.fatalError = "CRASH NO RENDER: " + e.message; }
-                }
-                this.hasDrawnThisFrame = true; 
-            }
-            setTimeout(() => { this.hasDrawnThisFrame = false; }, 0);
         },
 
-        // FCS (Flight Control System) - Blindado e validado
+        // Loop de Renderização Isolado (Não zera as variáveis da câmera)
+        renderSafe: function() {
+            let ctx = null, w = 640, h = 480;
+            for (let i = 0; i < arguments.length; i++) {
+                let arg = arguments[i];
+                if (arg && typeof arg.clearRect === 'function') ctx = arg;
+                else if (typeof arg === 'number' && arg >= 100) { if (w === 640) w = arg; else h = arg; }
+            }
+            if (!ctx) return;
+
+            if (this.fatalError) {
+                ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
+                ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
+                ctx.fillText("⚠️ CRITICAL SYSTEM FAILURE ⚠️", 20, 50);
+                ctx.font = "12px monospace"; 
+                let lines = this.fatalError.split("\n");
+                for(let i=0; i<lines.length; i++) ctx.fillText(lines[i], 20, 90 + (i*15));
+            } else {
+                try { 
+                    this.render(ctx, w, h); 
+                } catch(e) { 
+                    this.fatalError = "CRASH NO RENDER: " + e.message; 
+                }
+            }
+        },
+
+        // FCS (Flight Control System) - Lê a câmera com proteção
         processMobileInputs: function(kps, dt) {
             if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0 };
             
             let rawPitch = 0, rawRoll = 0, rawThr = this.player.throttle;
 
+            // Prioridade Teclado
             if (this.keys['ArrowUp']) rawPitch = 1.0; else if (this.keys['ArrowDown']) rawPitch = -1.0;
             if (this.keys['ArrowRight']) rawRoll = 1.0; else if (this.keys['ArrowLeft']) rawRoll = -1.0;
             if (this.keys['w']) rawThr = 1.0; else if (this.keys['s']) rawThr = 0.2;
 
+            // Extração de Keypoints robusta (Aceita flat array ou object)
             let kpDict = {};
             if (kps && Array.isArray(kps) && kps.length > 0) {
                 let arr = (kps[0] && kps[0].keypoints) ? kps[0].keypoints : kps;
-                arr.forEach(kp => { if (kp && kp.name) kpDict[kp.name] = kp; });
+                if (Array.isArray(arr)) {
+                    arr.forEach(kp => { if (kp && kp.name) kpDict[kp.name] = kp; });
+                }
             }
 
             let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
 
-            if (rightWrist && rightWrist.score > 0.4 && nose && nose.score > 0.4) {
+            // Baixada a tolerância para > 0.3 para reconhecer as mãos mais fácil e rápido
+            if (rightWrist && rightWrist.score > 0.3 && nose && nose.score > 0.3) {
                 if (this.state === 'CALIBRATING') {
                     this.hotas.calibratedX = rightWrist.x; 
                     this.hotas.calibratedY = rightWrist.y;
@@ -472,7 +488,7 @@
                 }
             }
 
-            if (leftWrist && leftWrist.score > 0.4 && this.state === 'PLAYING' && !this.keys['w']) {
+            if (leftWrist && leftWrist.score > 0.3 && this.state === 'PLAYING' && !this.keys['w']) {
                 rawThr = 1.1 - (leftWrist.y / 480);
                 if (rightWrist && Math.abs(leftWrist.x - rightWrist.x) < 80 && this.lockTimer > 1.5) this.fireMissile();
             }
@@ -498,7 +514,7 @@
 
         // Gestão Tática e IA
         spawnWave: function() {
-            let count = (this.session.wave === 3) ? 1 : 3; // Wave 3 é o Boss
+            let count = (this.session.wave === 3) ? 1 : 3; 
             let planeType = (this.session.wave === 3) ? PLANES.boss_su57 : PLANES.falcon_lite;
 
             for(let i=0; i<count; i++) {
@@ -857,17 +873,25 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
-        renderEnd: function(ctx, w, h) {
-            ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
-            ctx.textAlign = "center"; 
-            if (this.state === 'VICTORY') {
-                ctx.fillStyle = "#2ecc71"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("ESPAÇO AÉREO LIMPO", w/2, h/2 - 30);
-                ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText(`PAGAMENTO APROVADO: R$ ${this.session.cash}`, w/2, h/2 + 20);
-            } else {
-                ctx.fillStyle = "#e74c3c"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("CAÇA ABATIDO", w/2, h/2 - 30);
-                ctx.fillStyle = "#fff"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText("O PILOTO FOI EJETADO.", w/2, h/2 + 20);
+        renderSafeEnd: function() {
+            let ctx = null, w = 640, h = 480;
+            for (let i = 0; i < arguments.length; i++) {
+                let arg = arguments[i];
+                if (arg && typeof arg.clearRect === 'function') ctx = arg;
+                else if (typeof arg === 'number' && arg >= 100) { if (w === 640) w = arg; else h = arg; }
             }
-            ctx.fillText(`Inimigos Destruídos: ${this.session.kills}`, w/2, h/2 + 60);
+            if (ctx) {
+                ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
+                ctx.textAlign = "center"; 
+                if (this.state === 'VICTORY') {
+                    ctx.fillStyle = "#2ecc71"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("ESPAÇO AÉREO LIMPO", w/2, h/2 - 30);
+                    ctx.fillStyle = "#f1c40f"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText(`PAGAMENTO APROVADO: R$ ${this.session.cash}`, w/2, h/2 + 20);
+                } else {
+                    ctx.fillStyle = "#e74c3c"; ctx.font = "bold 50px 'Russo One'"; ctx.fillText("CAÇA ABATIDO", w/2, h/2 - 30);
+                    ctx.fillStyle = "#fff"; ctx.font = "20px 'Chakra Petch'"; ctx.fillText("O PILOTO FOI EJETADO.", w/2, h/2 + 20);
+                }
+                ctx.fillText(`Inimigos Destruídos: ${this.session.kills}`, w/2, h/2 + 60);
+            }
         }
     };
 
