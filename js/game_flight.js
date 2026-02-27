@@ -132,7 +132,7 @@
                 if (dist < 150) {
                     this.active = false;
                     this.target.hit(45); // Dano do míssil
-                    window.Sfx.play(100, 'sawtooth', 0.5, 0.3); // Explosão
+                    if(window.Sfx) window.Sfx.play(100, 'sawtooth', 0.5, 0.3); // Explosão
                     return;
                 }
 
@@ -233,6 +233,7 @@
         // Multiplayer Firebase
         isHost: false, remotePlayers: {}, lastSync: 0,
 
+        // Adaptação segura para o core.js
         _init: function(missionData) { this.init(missionData); },
         init: function(missionData) {
             this.state = 'CALIBRATING';
@@ -244,7 +245,7 @@
             this.spawnEnemies(3);
 
             // Audio Setup
-            window.Sfx.play(400, 'sine', 0.5, 0.1); // Engine Startup
+            if(window.Sfx) window.Sfx.play(400, 'sine', 0.5, 0.1); // Engine Startup
 
             if (this.session.mode === 'COOP' || this.session.mode === 'PVP') {
                 this.initMultiplayer();
@@ -285,16 +286,19 @@
         },
 
         // =====================================================================
-        // LOOP PRINCIPAL: ATUALIZAÇÃO FÍSICA E IA
+        // LOOP PRINCIPAL: ATUALIZAÇÃO FÍSICA E IA (AGORA BLINDADO PARA KPS)
         // =====================================================================
-        _update: function(poses) { this.update(poses); },
-        update: function(poses) {
+        _update: function(kps, w, h) { this.update(kps, w, h); },
+        update: function(kps, w, h) {
             let now = performance.now();
             let dt = (now - this.lastTime) / 1000;
             this.lastTime = now;
             if (dt > 0.1) dt = 0.1; // Limite para evitar pulos quando a aba fica inativa
 
-            this.processARInputs(poses);
+            // Processa input apenas se houver kps válidos do MoveNet
+            if (kps && Array.isArray(kps)) {
+                this.processARInputs(kps);
+            }
 
             if (this.state === 'PLAYING') {
                 this.session.time += dt;
@@ -312,10 +316,11 @@
             }
         },
 
-        processARInputs: function(poses) {
-            if (!poses || poses.length === 0) return;
-            const pose = poses[0];
-            const keypoints = pose.keypoints.reduce((acc, kp) => { acc[kp.name] = kp; return acc; }, {});
+        processARInputs: function(kps) {
+            if (kps.length === 0) return;
+            
+            // Converte a array plana do core.js para um dicionário mais fácil de ler
+            const keypoints = kps.reduce((acc, kp) => { acc[kp.name] = kp; return acc; }, {});
 
             // Rastreia Mão Direita (Manche) e Mão Esquerda (Acelerador)
             let rightWrist = keypoints['right_wrist'];
@@ -328,7 +333,7 @@
                     this.hotas.calibratedX = rightWrist.x;
                     this.hotas.calibratedY = rightWrist.y;
                     this.state = 'PLAYING';
-                    window.System.msg("HOTAS CALIBRADO. TAKEOFF!", "#2ecc71");
+                    if(window.System && window.System.msg) window.System.msg("HOTAS CALIBRADO. TAKEOFF!", "#2ecc71");
                 }
 
                 if (this.state === 'PLAYING') {
@@ -408,7 +413,7 @@
                     for(let i=0; i<20; i++) this.entities.particles.push(new Particle(e.x, e.y, e.z, "#e74c3c", Math.random()*15+5, 2.0));
                     this.session.kills++;
                     this.session.cash += 500;
-                    window.Sfx.play(150, 'square', 0.8, 0.4); // Kill som
+                    if(window.Sfx) window.Sfx.play(150, 'square', 0.8, 0.4); // Kill som
                 }
             });
             this.entities.enemies = this.entities.enemies.filter(e => e.active);
@@ -442,10 +447,12 @@
                 this.radarTarget = target;
                 this.lockTimer += dt;
                 // Bips do Radar
-                if (this.lockTimer > 1.5) {
-                    if (Math.floor(this.session.time * 10) % 2 === 0) window.Sfx.play(1200, 'square', 0.05, 0.05); // Som Lock Completo
-                } else {
-                    if (Math.floor(this.session.time * 5) % 2 === 0) window.Sfx.play(800, 'square', 0.05, 0.02); // Som buscando
+                if (window.Sfx) {
+                    if (this.lockTimer > 1.5) {
+                        if (Math.floor(this.session.time * 10) % 2 === 0) window.Sfx.play(1200, 'square', 0.05, 0.05); // Som Lock Completo
+                    } else {
+                        if (Math.floor(this.session.time * 5) % 2 === 0) window.Sfx.play(800, 'square', 0.05, 0.02); // Som buscando
+                    }
                 }
             } else {
                 this.radarTarget = null;
@@ -455,14 +462,14 @@
 
         fireMissile: function() {
             if (this.radarTarget && this.lockTimer > 1.5) {
-                window.Sfx.play(600, 'sawtooth', 0.5, 0.2); // Lançamento
+                if(window.Sfx) window.Sfx.play(600, 'sawtooth', 0.5, 0.2); // Lançamento
                 this.entities.missiles.push(new Missile(
                     this.player.x, this.player.y - 10, this.player.z, // Nasce debaixo do avião
                     this.player.pitch, this.player.yaw, this.player.roll,
                     this.player.speed, false, this.radarTarget
                 ));
                 this.lockTimer = 0; // Reseta o lock após atirar
-                window.System.msg("FOX 2!", "#e74c3c");
+                if(window.System && window.System.msg) window.System.msg("FOX 2!", "#e74c3c");
             }
         },
 
@@ -471,7 +478,7 @@
             setTimeout(() => {
                 if (window.System && window.System.gameOver) {
                     window.System.gameOver(this.session.kills, finalState === 'VICTORY', this.session.cash);
-                } else {
+                } else if (window.System && window.System.home) {
                     window.System.home();
                 }
             }, 4000);
@@ -484,7 +491,6 @@
         // LOOP DE RENDERIZAÇÃO: AR + HUD + 3D
         // =====================================================================
         _draw: function(ctx, w, h) { this.draw(ctx, w, h); },
-        _drawEnd: function(ctx, w, h) { this.drawEndScreen(ctx, w, h); },
         draw: function(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
 
@@ -494,7 +500,7 @@
             }
 
             if (this.state === 'GAMEOVER' || this.state === 'VICTORY') {
-                this.drawEndScreen(ctx, w, h);
+                this.renderEnd(ctx, w, h);
                 return;
             }
 
@@ -685,7 +691,9 @@
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         },
 
-        drawEndScreen: function(ctx, w, h) {
+        // Função padronizada para finalização nos outros jogos
+        _drawEnd: function(ctx, w, h) { this.renderEnd(ctx, w, h); },
+        renderEnd: function(ctx, w, h) {
             ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
             ctx.textAlign = "center"; 
             
