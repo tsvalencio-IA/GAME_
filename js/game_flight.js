@@ -1,7 +1,7 @@
 // =============================================================================
-// AERO STRIKE: BLACK OPS (TRUE AAA PHYSICS + V10 ARCHITECTURE)
+// AERO STRIKE: BLACK OPS (TRUE AAA PHYSICS + FLY-BY-WIRE LIMITER)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: TELA BRANCA RESOLVIDA! VOLANTE DE 2 MÃOS RESTAURADO, FÍSICA AAA.
+// STATUS: TELA BRANCA RESOLVIDA! G-FORCE CLAMPED, EXPLOSÃO CINÉTICA CORRIGIDA.
 // =============================================================================
 
 (function() {
@@ -70,16 +70,16 @@
             ctx.fillStyle = jetGrad;
             
             ctx.beginPath();
-            ctx.moveTo(0, -40); // Bico
-            ctx.lineTo(6, -15); // Cockpit dir
-            ctx.lineTo(35, 10); // Asa dir ponta
-            ctx.lineTo(10, 15); // Asa dir base
-            ctx.lineTo(15, 30); // Estabilizador dir
-            ctx.lineTo(0, 25);  // Motor
-            ctx.lineTo(-15, 30); // Estabilizador esq
-            ctx.lineTo(-10, 15); // Asa esq base
-            ctx.lineTo(-35, 10); // Asa esq ponta
-            ctx.lineTo(-6, -15); // Cockpit esq
+            ctx.moveTo(0, -40); 
+            ctx.lineTo(6, -15); 
+            ctx.lineTo(35, 10); 
+            ctx.lineTo(10, 15); 
+            ctx.lineTo(15, 30); 
+            ctx.lineTo(0, 25);  
+            ctx.lineTo(-15, 30); 
+            ctx.lineTo(-10, 15); 
+            ctx.lineTo(-35, 10); 
+            ctx.lineTo(-6, -15); 
             ctx.closePath();
             
             ctx.shadowBlur = 10;
@@ -144,10 +144,9 @@
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
         session: { kills: 0, cash: 0, goal: 30 },
-        // Ship agora tem física 6DOF acoplada
         ship: { hp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false },
-        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.9 }, // Aceleração automática constante
-        timer: 3.0, keys: {}, keysBound: false,
+        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.9 },
+        timer: 3.0, keys: {}, keysBound: false, touchBound: false,
         entities: [], bullets: [], missiles: [], clouds: [], fx: [], floaters: [],
         combat: { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 },
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, loop: null },
@@ -172,6 +171,22 @@
                 window.addEventListener('keyup', (e) => this.keys[e.key] = false);
                 this.keysBound = true;
             }
+            if (!this.touchBound) {
+                const handleTap = () => {
+                    if (this.state === 'LOBBY') {
+                        if (this.net.isHost && Object.keys(this.net.players).length >= 1) {
+                            if (this.net.sessionRef) this.net.sessionRef.child('state').set('PLAYING');
+                        } else if (!this.net.isHost && this.net.uid && this.net.playersRef) {
+                            this.net.playersRef.child(this.net.uid).update({ready: true});
+                        }
+                    } else if (this.state === 'CALIBRATION') {
+                        this.timer = 0; 
+                    }
+                };
+                window.addEventListener('pointerdown', handleTap);
+                window.addEventListener('touchstart', handleTap);
+                this.touchBound = true;
+            }
 
             if (this.mode !== 'SINGLE' && window.DB) this._initNet();
             else { this.state = 'CALIBRATION'; this.timer = 3.0; }
@@ -191,8 +206,8 @@
                     this.net.playersRef.remove();
                 }
                 this.net.playersRef.child(this.net.uid).set({
-                    name: window.Profile?.username || 'PILOT', ready: false, hp: 100,
-                    x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0
+                    name: (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOT', 
+                    ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0
                 });
             });
             this.net.playersRef.on('value', snap => { this.net.players = snap.val() || {}; });
@@ -202,7 +217,7 @@
         },
 
         // =====================================================================
-        // O CORAÇÃO DO JOGO - ASSINATURA V10.JS (NÃO ALTERAR)
+        // O CORAÇÃO DO JOGO - UPDATE PROTEGIDO E BLINDADO
         // =====================================================================
         update: function(ctx, w, h, pose) {
             const now = performance.now();
@@ -213,9 +228,9 @@
             if (dt < 0.001) return this.session.cash || 0;
 
             if (this.state === 'LOBBY') { 
-                if (this.keys[' '] || this.keys['ArrowUp']) {
-                    if (this.net.isHost && Object.keys(this.net.players).length >= 1) { this.net.sessionRef?.child('state').set('PLAYING'); }
-                    else if (!this.net.isHost) { this.net.playersRef?.child(this.net.uid).update({ready: true}); }
+                if (this.keys[' ']) {
+                    if (this.net.isHost && Object.keys(this.net.players).length >= 1) { if(this.net.sessionRef) this.net.sessionRef.child('state').set('PLAYING'); }
+                    else if (!this.net.isHost && this.net.playersRef) { this.net.playersRef.child(this.net.uid).update({ready: true}); }
                 }
                 this._drawLobby(ctx, w, h); 
                 return 0; 
@@ -235,7 +250,7 @@
             }
 
             // -----------------------------------------------------------------
-            // INJEÇÃO DA FÍSICA AAA DENTRO DO UPDATE V10
+            // INJEÇÃO DA FÍSICA AAA COM FLY-BY-WIRE LIMITER (ANTI-EXPLOSÃO)
             // -----------------------------------------------------------------
             let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
             let tempK = 288.15 - 0.0065 * altitude; 
@@ -243,7 +258,7 @@
             let speedOfSound = Math.sqrt(GAME_CONFIG.GAMMA * GAME_CONFIG.R_GAS * tempK);
 
             let V = Math.hypot(this.ship.vx, this.ship.vy, this.ship.vz);
-            if (V === 0) V = 1;
+            if (V === 0 || isNaN(V)) V = 1;
             this.ship.speed = V;
             this.ship.mach = V / speedOfSound;
 
@@ -280,16 +295,29 @@
             let Fy = liftFy + dragFy + thrustFy - weight; 
             let Fz = liftFz + dragFz + thrustFz;
 
-            this.ship.vx += (Fx / PLANE_STATS.mass) * dt;
-            this.ship.vy += (Fy / PLANE_STATS.mass) * dt;
-            this.ship.vz += (Fz / PLANE_STATS.mass) * dt;
+            // FLY-BY-WIRE G-LIMITER: Impede valores insanos que somem com o ecrã
+            let ax = Fx / PLANE_STATS.mass;
+            let ay = Fy / PLANE_STATS.mass;
+            let az = Fz / PLANE_STATS.mass;
+
+            let maxAccel = 15.0 * GAME_CONFIG.GRAVITY; // Máximo 15 Gs de Aceleração Estrutural
+            let accMag = Math.hypot(ax, ay, az);
+            if (accMag > maxAccel) {
+                ax = (ax / accMag) * maxAccel;
+                ay = (ay / accMag) * maxAccel;
+                az = (az / accMag) * maxAccel;
+            }
+
+            this.ship.vx += ax * dt;
+            this.ship.vy += ay * dt;
+            this.ship.vz += az * dt;
+
+            // Recalcula Força G real Clampada para renderização segura
+            this.ship.gForce = Math.hypot(ax, ay + GAME_CONFIG.GRAVITY, az) / GAME_CONFIG.GRAVITY;
 
             this.ship.x += this.ship.vx * dt;
             this.ship.y += this.ship.vy * dt;
             this.ship.z += this.ship.vz * dt;
-
-            let specForce = Math.hypot(liftFx+dragFx+thrustFx, liftFy+dragFy+thrustFy, liftFz+dragFz+thrustFz);
-            this.ship.gForce = specForce / weight;
 
             if (this.ship.y < 50) { 
                 this.ship.y = 50; 
@@ -299,7 +327,7 @@
 
             let turnRate = (liftMag * Math.sin(this.ship.roll)) / (PLANE_STATS.mass * V);
             if (!this.ship.isStalling && V > 30 && !isNaN(turnRate)) {
-                this.ship.yaw += turnRate * dt;
+                this.ship.yaw += Math.max(-1.5, Math.min(1.5, turnRate)) * dt; // Clamp Turn Rate
             }
 
             this.ship.roll += (this.pilot.targetRoll - this.ship.roll) * PLANE_STATS.maxRollRate * dt;
@@ -310,6 +338,18 @@
                 this.ship.roll += (Math.random() - 0.5) * 4 * dt;
             }
             this.ship.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.ship.pitch));
+            
+            // SANITIZAÇÃO ANTI-TELA BRANCA FINAL (Impossível renderizar NaN)
+            if (!Number.isFinite(this.ship.x)) this.ship.x = 0;
+            if (!Number.isFinite(this.ship.y)) this.ship.y = 3000;
+            if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
+            if (!Number.isFinite(this.ship.vx)) this.ship.vx = 0;
+            if (!Number.isFinite(this.ship.vy)) this.ship.vy = 0;
+            if (!Number.isFinite(this.ship.vz)) this.ship.vz = 250;
+            if (!Number.isFinite(this.ship.pitch)) this.ship.pitch = 0;
+            if (!Number.isFinite(this.ship.yaw)) this.ship.yaw = 0;
+            if (!Number.isFinite(this.ship.roll)) this.ship.roll = 0;
+            if (!Number.isFinite(this.ship.gForce)) this.ship.gForce = 1;
             // -----------------------------------------------------------------
 
             this._processCombat(dt, w, h);
@@ -319,9 +359,9 @@
             this._updateMissiles(dt); 
             this._cleanupFx();
 
-            if (this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
+            if (this.mode !== 'SINGLE' && this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
 
-            // Renderiza tudo (O que impedia a tela branca da v10)
+            // Chamada de Renderização Garantida
             this._draw(ctx, w, h);
             return this.session.cash + this.session.kills * 10;
         },
@@ -338,7 +378,7 @@
         },
 
         // =====================================================================
-        // O VERDADEIRO VOLANTE (YOKE) DE DUAS MÃOS - IDÊNTICO À V10.JS
+        // O YOKE DE DUAS MÃOS - LEITURA SEGURA DE CÂMERA
         // =====================================================================
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
@@ -365,16 +405,18 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // Conversão de Coordenadas
-                    let rx = (1 - (rightWrist.x / 640)) * w; 
-                    let ry = (rightWrist.y / 480) * h;
-                    let lx = (1 - (leftWrist.x / 640)) * w; 
-                    let ly = (leftWrist.y / 480) * h;
+                    // Proteção de Coordenadas
+                    let rwX = typeof rightWrist.x === 'number' ? rightWrist.x : 320;
+                    let rwY = typeof rightWrist.y === 'number' ? rightWrist.y : 240;
+                    let lwX = typeof leftWrist.x === 'number' ? leftWrist.x : 320;
+                    let lwY = typeof leftWrist.y === 'number' ? leftWrist.y : 240;
+
+                    let rx = (1 - (rwX / 640)) * w; 
+                    let ry = (rwY / 480) * h;
+                    let lx = (1 - (lwX / 640)) * w; 
+                    let ly = (lwY / 480) * h;
                     
-                    // VOLANTE: Inclinação entre as mãos
                     trgRoll = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, Math.atan2(ry - ly, rx - lx)));
-                    
-                    // PITCH: Altura média das duas mãos em relação à calibração
                     let avgY = (ry + ly) / 2;
                     
                     if (this.state === 'CALIBRATION') {
@@ -387,7 +429,7 @@
                         else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY)/200); 
                     }
 
-                    // Juntar as mãos atira o míssil! (Clap)
+                    // Clap to Fire
                     if (Math.hypot(rx - lx, ry - ly) < 120 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
@@ -403,6 +445,8 @@
                 this.pilot.targetRoll *= 0.9;
                 this.pilot.targetPitch *= 0.9;
             }
+            if (!Number.isFinite(this.pilot.targetRoll)) this.pilot.targetRoll = 0;
+            if (!Number.isFinite(this.pilot.targetPitch)) this.pilot.targetPitch = 0;
         },
 
         _processCombat: function(dt, w, h) {
@@ -436,7 +480,6 @@
                 if (this.combat.lockTimer < 0) this.combat.lockTimer = 0;
             }
 
-            // Metralhadora
             if (this.combat.locked && this.combat.target && performance.now() - this.combat.vulcanCd > 80) {
                 this.combat.vulcanCd = performance.now();
                 let spd = this.ship.speed + 800;
@@ -453,7 +496,6 @@
 
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
 
-            // Disparo de Míssil com Mãos Juntas
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0) {
                 this.combat.missileCd = 1.2;
                 this.missiles.push({
@@ -474,7 +516,6 @@
             let sx = this.ship.x + fX*dist + (Math.random()-0.5)*15000;
             let sz = this.ship.z + fZ*dist + (Math.random()-0.5)*15000;
             
-            // Inimigos com vetores de física
             this.entities.push({ 
                 type: 'jet', x: sx, y: Math.max(1000, this.ship.y+(Math.random()-0.5)*4000), z: sz, 
                 vx: -fX*250, vy: 0, vz: -fZ*250, hp: 150, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0 
@@ -507,7 +548,6 @@
                 
                 if (Math.hypot(dx, dy, dz) > 120000) { e.hp = -1; continue; }
                 
-                // IA Disparando de Volta
                 if (Math.hypot(dx, dy, dz) < 8000 && Math.abs(yawDiff) < 0.2 && Math.random()<0.03) {
                     let bSpd = 600;
                     let d = Math.hypot(dx, dy, dz);
@@ -556,7 +596,6 @@
             }
         },
 
-        // INJEÇÃO: PROPORTIONAL NAVIGATION GUIDANCE
         _updateMissiles: function(dt) {
             for (let i = this.missiles.length-1; i >= 0; i--) {
                 let m = this.missiles[i];
@@ -578,7 +617,6 @@
                         }
                         m.life = 0;
                     } else {
-                        // Física de Interceção Proporcional (PN)
                         let tx = m.target.vx || 0, ty = m.target.vy || 0, tz = m.target.vz || 0;
                         let vrx = tx - m.vx, vry = ty - m.vy, vrz = tz - m.vz;
                         
@@ -665,14 +703,15 @@
         },
 
         // =====================================================================
-        // O VISUAL BLACK PS2 INJETADO NA ARQUITETURA ANTIGA
+        // VISUAL (EFEITO G-FORCE SEGURO + YOKE 2 MÃOS)
         // =====================================================================
         _draw: function(ctx, w, h) {
             ctx.save();
-            // Efeito Físico de G-Force Visual Tremor
-            if (this.ship.gForce > 3.0) {
-                let shake = (this.ship.gForce - 3.0) * 2;
-                ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+            
+            // TREMOR SEGURO (Impede de voar para fora do ecrã se der erro)
+            let gShake = Math.min(20, Math.max(0, (this.ship.gForce - 3.0) * 2));
+            if (gShake > 0) {
+                ctx.translate((Math.random()-0.5)*gShake, (Math.random()-0.5)*gShake);
             } else if (window.Gfx?.shake > 0.5) {
                 ctx.translate((Math.random()-0.5)*window.Gfx.shake, (Math.random()-0.5)*window.Gfx.shake);
             }
@@ -681,7 +720,7 @@
             this._drawEntities(ctx,w,h);
             this._drawPilotFX(ctx, w, h); 
             this._drawHUD(ctx,w,h);
-            this._drawCockpit(ctx,w,h);   // O VOLANTE YOKE DE DUAS MÃOS
+            this._drawCockpit(ctx,w,h);
             ctx.restore();
             
             ctx.fillStyle='rgba(0,0,0,0.1)';
@@ -698,7 +737,6 @@
             ctx.fillStyle = sG;
             ctx.fillRect(-w*3,-h*4,w*6,hy+h*4);
             
-            // Sol
             ctx.fillStyle = "rgba(255, 255, 200, 0.4)";
             ctx.beginPath(); ctx.arc(0, hy - 100, 60, 0, Math.PI*2); ctx.fill();
 
@@ -727,7 +765,6 @@
             });
             add(this.clouds,'c'); add(this.entities,'e'); add(this.bullets,'b'); add(this.missiles,'m'); add(this.fx,'f'); add(this.floaters,'x');
             
-            // Interpolação Multiplayer
             if(this.mode!=='SINGLE' && this.net.players) Object.keys(this.net.players).forEach(uid=>{
                 if(uid!==this.net.uid&&this.net.players[uid]?.hp>0){
                     let rp = this.net.players[uid];
@@ -750,7 +787,6 @@
                     let bs = Math.max(40, 250*s); 
                     if(locked){
                         ctx.strokeStyle='#ff0000';ctx.lineWidth=2;ctx.strokeRect(p.x-bs,p.y-bs,bs*2,bs*2);
-                        // Box de Mira do PS2
                         ctx.beginPath(); ctx.moveTo(p.x, p.y - bs); ctx.lineTo(p.x, p.y - bs - 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x, p.y + bs); ctx.lineTo(p.x, p.y + bs + 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x - bs, p.y); ctx.lineTo(p.x - bs - 20, p.y); ctx.stroke();
@@ -766,10 +802,10 @@
 
         _drawPilotFX: function(ctx, w, h) {
             if (this.ship.gForce > 5.0) {
-                let intensity = Math.min(1.0, (this.ship.gForce - 5.0) / 4.0); 
+                let intensity = Math.min(1.0, Math.max(0, (this.ship.gForce - 5.0) / 4.0)); 
                 ctx.fillStyle = `rgba(0, 0, 0, ${intensity * 0.8})`; ctx.fillRect(0,0,w,h);
             } else if (this.ship.gForce < -1.5) {
-                let intensityN = Math.min(1.0, (Math.abs(this.ship.gForce) - 1.5) / 2.0);
+                let intensityN = Math.min(1.0, Math.max(0, (Math.abs(this.ship.gForce) - 1.5) / 2.0));
                 ctx.fillStyle = `rgba(231, 76, 60, ${intensityN * 0.6})`; ctx.fillRect(0,0,w,h);
             }
         },
@@ -782,7 +818,6 @@
             let hdg=(p.yaw*180/Math.PI)%360;if(hdg<0)hdg+=360;
             ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(Math.floor(hdg)+'°',w/2,35);
             
-            // MIRA CENTRAL
             ctx.strokeStyle='#00ffcc'; ctx.lineWidth=2;
             ctx.beginPath(); ctx.arc(w/2, h/2, 4, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(w/2, h/2, 20, 0, Math.PI*2); ctx.stroke();
@@ -790,7 +825,6 @@
             ctx.beginPath(); ctx.moveTo(w/2 + 40, h/2); ctx.lineTo(w/2 + 20, h/2); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(w/2, h/2 - 40); ctx.lineTo(w/2, h/2 - 20); ctx.stroke();
 
-            // TELEMETRIA
             ctx.textAlign='left'; ctx.font='bold 14px Arial'; ctx.fillStyle='#00ffcc';
             ctx.fillText(`G-FORCE: ${p.gForce.toFixed(1)}G`, 20, 80);
             ctx.fillText(`MACH: ${p.mach.toFixed(2)}`, 20, 100);
@@ -826,11 +860,9 @@
                 
                 ctx.translate(cx, h + yokeYOffset + 20); 
                 
-                // Haste
                 ctx.fillStyle='#050a10';ctx.fillRect(-30,-180,60,180);
                 ctx.translate(0,-160);ctx.rotate(this.pilot.targetRoll);
                 
-                // Volante Yoke Cyber/Militar
                 ctx.shadowBlur = 10; ctx.shadowColor = "#000";
                 ctx.fillStyle='#1a202c'; ctx.strokeStyle='#00ffcc'; ctx.lineWidth=3; ctx.lineJoin='round';
                 
@@ -848,7 +880,6 @@
                 ctx.closePath();
                 ctx.fill(); ctx.stroke();
                 
-                // Painéis e Botões
                 ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(-110, 0, 20, 0, Math.PI*2); ctx.fill();
                 ctx.beginPath(); ctx.arc(110, 0, 20, 0, Math.PI*2); ctx.fill();
 
@@ -872,7 +903,6 @@
                 ctx.fillStyle='#ff0000';ctx.textAlign='center';ctx.font='bold 22px Arial';ctx.fillText('PLACE HANDS ON SCREEN',cx,h-100);
             }
 
-            // HUD Inferior (Estado e Integridade)
             ctx.fillStyle='rgba(0,15,10,0.8)';ctx.fillRect(0,h-50,w,50);
             ctx.fillStyle='#222';ctx.fillRect(20,h-30,w/2 - 40,12);
             ctx.fillStyle=this.ship.hp>30?'#00ffcc':'#ff3300';
