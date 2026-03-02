@@ -905,8 +905,7 @@
     // =========================================================================
     var register = function() {
         if (window.System && window.System.registerGame) {
-            // REGISTRADO EXATAMENTE COMO NO SEU ÚLTIMO ZIP (usarmy_flight_sim)
-            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
+            window.System.registerGame('flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.4, 
                 phases: [
                     { id: 'single', name: 'CAMPANHA SOLO', desc: 'Derrote 3 Waves (Inclui Boss Final).', mode: 'SINGLE', reqLvl: 1 },
