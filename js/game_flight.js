@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - TRUE AAA)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, 100% COMPATIBLE
+// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, ANTI-WHITE-SCREEN
 // =============================================================================
 
 (function() {
@@ -10,42 +10,28 @@
     // =========================================================================
     // 1. CONFIGURAÇÕES GLOBAIS E CATÁLOGO DE AERONAVES
     // =========================================================================
-    const GAME_CONFIG = {
+    var GAME_CONFIG = {
         MONEY_PER_KILL: 150,
         MONEY_MISSION_BONUS: 800,
         MONEY_BOSS_BONUS: 2000,
-        GRAVITY: 9.80665,     // Aceleração da gravidade (m/s^2)
-        R_GAS: 287.05,        // Constante do gás para o ar (J/(kg·K))
-        GAMMA: 1.4,           // Razão de calor específico do ar
-        MAX_ALTITUDE: 40000   // Limite atmosférico para não quebrar ISA
+        GRAVITY: 9.80665,     
+        R_GAS: 287.05,        
+        GAMMA: 1.4,           
+        MAX_ALTITUDE: 40000   
     };
 
-    const PLANES = {
+    var PLANES = {
         falcon_lite: {
             id: "falcon_lite", name: "F-16 FALCON", price: 0,
-            thrust: 120000,      // Empuxo em Newtons
-            mass: 12000,         // Massa em kg
-            wingArea: 28.0,      // Área da asa (m^2)
-            cd0: 0.022,          // Coeficiente de arrasto parasita
-            kInduced: 0.05,      // Fator de arrasto induzido (k)
-            clMax: 1.6,          // Coeficiente de sustentação máximo (Stall)
-            stallAngle: 0.26,    // Ângulo crítico de ataque (~15 graus em rad)
-            maxPitchRate: 1.5,   // Resposta mecânica (rad/s)
-            maxRollRate: 3.0,
-            color: "#3498db"
+            thrust: 120000, mass: 12000, wingArea: 28.0,
+            cd0: 0.022, kInduced: 0.05, clMax: 1.6, stallAngle: 0.26,
+            maxPitchRate: 1.5, maxRollRate: 3.0, color: "#3498db"
         },
         raptor_pro: {
             id: "raptor_pro", name: "F-22 RAPTOR", price: 5000,
-            thrust: 230000,      
-            mass: 19700,
-            wingArea: 78.04,
-            cd0: 0.019,
-            kInduced: 0.035,
-            clMax: 1.8,
-            stallAngle: 0.35,    
-            maxPitchRate: 2.0,
-            maxRollRate: 4.0,
-            color: "#9b59b6"
+            thrust: 230000, mass: 19700, wingArea: 78.04,
+            cd0: 0.019, kInduced: 0.035, clMax: 1.8, stallAngle: 0.35,    
+            maxPitchRate: 2.0, maxRollRate: 4.0, color: "#9b59b6"
         },
         boss_su57: {
             id: "boss_su57", name: "SU-57 FELON (ACE)", price: 99999,
@@ -58,28 +44,28 @@
     // =========================================================================
     // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL
     // =========================================================================
-    const Engine3D = {
+    var Engine3D = {
         fov: 800,
         project: function(obj, cam, w, h) {
-            let cx = cam.pos ? cam.pos.x : cam.x;
-            let cy = cam.pos ? cam.pos.y : cam.y;
-            let cz = cam.pos ? cam.pos.z : cam.z;
+            var cx = cam.pos ? cam.pos.x : cam.x;
+            var cy = cam.pos ? cam.pos.y : cam.y;
+            var cz = cam.pos ? cam.pos.z : cam.z;
             
-            let dx = obj.x - cx;
-            let dy = cy - obj.y; // Eixo Y invertido para o Canvas
-            let dz = obj.z - cz;
+            var dx = obj.x - cx;
+            var dy = cy - obj.y; 
+            var dz = obj.z - cz;
             
-            let cyaw = Math.cos(-cam.yaw), syaw = Math.sin(-cam.yaw);
-            let x1 = dx * cyaw - dz * syaw, z1 = dx * syaw + dz * cyaw;
+            var cyaw = Math.cos(-cam.yaw), syaw = Math.sin(-cam.yaw);
+            var x1 = dx * cyaw - dz * syaw, z1 = dx * syaw + dz * cyaw;
             
-            let cp = Math.cos(-cam.pitch), sp = Math.sin(-cam.pitch);
-            let y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
+            var cp = Math.cos(-cam.pitch), sp = Math.sin(-cam.pitch);
+            var y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
             
             if (z2 < 10) return { visible: false };
             
-            let cr = Math.cos(cam.roll), sr = Math.sin(cam.roll);
-            let finalX = x1 * cr - y2 * sr, finalY = x1 * sr + y2 * cr;
-            let scale = Engine3D.fov / z2;
+            var cr = Math.cos(cam.roll), sr = Math.sin(cam.roll);
+            var finalX = x1 * cr - y2 * sr, finalY = x1 * sr + y2 * cr;
+            var scale = Engine3D.fov / z2;
             
             return { x: (w/2) + (finalX * scale), y: (h/2) + (finalY * scale), s: scale, z: z2, visible: true };
         },
@@ -102,7 +88,7 @@
     };
 
     // =========================================================================
-    // 3. NÚCLEO DE FÍSICA AERODINÂMICA AAA (SINTAXE SEGURA ES5/ES6)
+    // 3. NÚCLEO DE FÍSICA AERODINÂMICA AAA
     // =========================================================================
     function PhysicsEntity(x, y, z, stats) {
         this.pos = { x: x, y: y, z: z };
@@ -125,55 +111,55 @@
         if (!this.active) return;
         if (dt > 0.1) dt = 0.1; 
 
-        let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.pos.y));
-        let tempK = 288.15 - 0.0065 * altitude; 
-        let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
-        let speedOfSound = Math.sqrt(GAME_CONFIG.GAMMA * GAME_CONFIG.R_GAS * tempK);
+        var altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.pos.y));
+        var tempK = 288.15 - 0.0065 * altitude; 
+        var airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
+        var speedOfSound = Math.sqrt(GAME_CONFIG.GAMMA * GAME_CONFIG.R_GAS * tempK);
 
-        let V2 = (this.vel.x * this.vel.x) + (this.vel.y * this.vel.y) + (this.vel.z * this.vel.z);
-        let V = Math.sqrt(V2);
+        var V2 = (this.vel.x * this.vel.x) + (this.vel.y * this.vel.y) + (this.vel.z * this.vel.z);
+        var V = Math.sqrt(V2);
         if (isNaN(V) || V === 0) V = 1;
         this.mach = V / speedOfSound;
         if (isNaN(this.mach)) this.mach = 0;
 
-        let cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
-        let cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
-        let cr = Math.cos(this.roll), sr = Math.sin(this.roll);
+        var cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+        var cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+        var cr = Math.cos(this.roll), sr = Math.sin(this.roll);
 
-        let forwardVec = { x: sy * cp, y: sp, z: cy * cp };
-        let upVec = { x: -sy * sp * cr - cy * sr, y: cp * cr, z: -cy * sp * cr + sy * sr };
-        let rightVec = { x: cy * cr - sy * sp * sr, y: sp * sr, z: -sy * cr - cy * sp * sr };
+        var forwardVec = { x: sy * cp, y: sp, z: cy * cp };
+        var upVec = { x: -sy * sp * cr - cy * sr, y: cp * cr, z: -cy * sp * cr + sy * sr };
+        var rightVec = { x: cy * cr - sy * sp * sr, y: sp * sr, z: -sy * cr - cy * sp * sr };
 
-        let vDir = V > 1.0 ? { x: this.vel.x/V, y: this.vel.y/V, z: this.vel.z/V } : forwardVec;
-        let cosAlpha = forwardVec.x*vDir.x + forwardVec.y*vDir.y + forwardVec.z*vDir.z;
+        var vDir = V > 1.0 ? { x: this.vel.x/V, y: this.vel.y/V, z: this.vel.z/V } : forwardVec;
+        var cosAlpha = forwardVec.x*vDir.x + forwardVec.y*vDir.y + forwardVec.z*vDir.z;
         this.alpha = Math.acos(Math.max(-1, Math.min(1, cosAlpha)));
         if (isNaN(this.alpha)) this.alpha = 0;
 
-        let CL = this.alpha * (this.stats.clMax / this.stats.stallAngle); 
+        var CL = this.alpha * (this.stats.clMax / this.stats.stallAngle); 
         if (isNaN(CL)) CL = 0;
         
         this.isStalling = this.alpha > this.stats.stallAngle || V < 50;
         if (this.isStalling) CL = Math.max(0, CL - (this.alpha - this.stats.stallAngle) * 5.0); 
 
-        let CD = this.stats.cd0 + this.stats.kInduced * (CL * CL);
+        var CD = this.stats.cd0 + this.stats.kInduced * (CL * CL);
         if (isNaN(CD)) CD = this.stats.cd0;
 
-        let dynamicPressure = 0.5 * airDensity * (V * V);
-        let liftMag = dynamicPressure * this.stats.wingArea * CL;
-        let dragMag = dynamicPressure * this.stats.wingArea * CD;
+        var dynamicPressure = 0.5 * airDensity * (V * V);
+        var liftMag = dynamicPressure * this.stats.wingArea * CL;
+        var dragMag = dynamicPressure * this.stats.wingArea * CD;
 
-        let liftForce = { x: upVec.x * liftMag, y: upVec.y * liftMag, z: upVec.z * liftMag };
-        let dragForce = { x: -vDir.x * dragMag, y: -vDir.y * dragMag, z: -vDir.z * dragMag };
+        var liftForce = { x: upVec.x * liftMag, y: upVec.y * liftMag, z: upVec.z * liftMag };
+        var dragForce = { x: -vDir.x * dragMag, y: -vDir.y * dragMag, z: -vDir.z * dragMag };
         
-        let thrustMag = this.stats.thrust * this.throttle;
-        let thrustForce = { x: forwardVec.x * thrustMag, y: forwardVec.y * thrustMag, z: forwardVec.z * thrustMag };
+        var thrustMag = this.stats.thrust * this.throttle;
+        var thrustForce = { x: forwardVec.x * thrustMag, y: forwardVec.y * thrustMag, z: forwardVec.z * thrustMag };
 
-        let weight = this.stats.mass * GAME_CONFIG.GRAVITY;
-        let gravityForce = { x: 0, y: -weight, z: 0 };
+        var weight = this.stats.mass * GAME_CONFIG.GRAVITY;
+        var gravityForce = { x: 0, y: -weight, z: 0 };
 
-        let Fx = liftForce.x + dragForce.x + thrustForce.x + gravityForce.x;
-        let Fy = liftForce.y + dragForce.y + thrustForce.y + gravityForce.y;
-        let Fz = liftForce.z + dragForce.z + thrustForce.z + gravityForce.z;
+        var Fx = liftForce.x + dragForce.x + thrustForce.x + gravityForce.x;
+        var Fy = liftForce.y + dragForce.y + thrustForce.y + gravityForce.y;
+        var Fz = liftForce.z + dragForce.z + thrustForce.z + gravityForce.z;
 
         this.vel.x += (Fx / this.stats.mass) * dt;
         this.vel.y += (Fy / this.stats.mass) * dt;
@@ -183,7 +169,7 @@
         this.pos.y += this.vel.y * dt;
         this.pos.z += this.vel.z * dt;
 
-        let specificForceMag = Math.sqrt(
+        var specificForceMag = Math.sqrt(
             Math.pow(liftForce.x + dragForce.x + thrustForce.x, 2) +
             Math.pow(liftForce.y + dragForce.y + thrustForce.y, 2) +
             Math.pow(liftForce.z + dragForce.z + thrustForce.z, 2)
@@ -191,7 +177,7 @@
         this.gForce = specificForceMag / weight;
         if (isNaN(this.gForce)) this.gForce = 1.0;
 
-        let currentTurnRate = (liftMag * Math.sin(this.roll)) / (this.stats.mass * V); 
+        var currentTurnRate = (liftMag * Math.sin(this.roll)) / (this.stats.mass * V); 
         if (!this.isStalling && V > 30 && !isNaN(currentTurnRate)) {
             this.yaw += currentTurnRate * dt;
         }
@@ -251,15 +237,15 @@
         this.life -= dt;
         if (this.life <= 0) { this.active = false; return; }
 
-        let V2 = (this.vel.x * this.vel.x) + (this.vel.y * this.vel.y) + (this.vel.z * this.vel.z);
-        let V = Math.sqrt(V2);
+        var V2 = (this.vel.x * this.vel.x) + (this.vel.y * this.vel.y) + (this.vel.z * this.vel.z);
+        var V = Math.sqrt(V2);
 
         if (this.target && this.target.active) {
-            let rx = this.target.pos.x - this.pos.x;
-            let ry = this.target.pos.y - this.pos.y;
-            let rz = this.target.pos.z - this.pos.z;
-            let dist2 = (rx*rx) + (ry*ry) + (rz*rz);
-            let dist = Math.sqrt(dist2);
+            var rx = this.target.pos.x - this.pos.x;
+            var ry = this.target.pos.y - this.pos.y;
+            var rz = this.target.pos.z - this.pos.z;
+            var dist2 = (rx*rx) + (ry*ry) + (rz*rz);
+            var dist = Math.sqrt(dist2);
             
             if (dist < 80) { 
                 this.active = false; this.target.hp -= 55;
@@ -267,32 +253,32 @@
                 return;
             }
 
-            let vrx = this.target.vel.x - this.vel.x;
-            let vry = this.target.vel.y - this.vel.y;
-            let vrz = this.target.vel.z - this.vel.z;
+            var vrx = this.target.vel.x - this.vel.x;
+            var vry = this.target.vel.y - this.vel.y;
+            var vrz = this.target.vel.z - this.vel.z;
 
-            let cx = ry * vrz - rz * vry;
-            let cy = rz * vrx - rx * vrz;
-            let cz = rx * vry - ry * vrx;
+            var cx = ry * vrz - rz * vry;
+            var cy = rz * vrx - rx * vrz;
+            var cz = rx * vry - ry * vrx;
             
-            let omegax = cx / dist2;
-            let omegay = cy / dist2;
-            let omegaz = cz / dist2;
+            var omegax = cx / dist2;
+            var omegay = cy / dist2;
+            var omegaz = cz / dist2;
 
-            let Vc = -(rx*vrx + ry*vry + rz*vrz) / dist;
-            let ux = rx / dist, uy = ry / dist, uz = rz / dist;
+            var Vc = -(rx*vrx + ry*vry + rz*vrz) / dist;
+            var ux = rx / dist, uy = ry / dist, uz = rz / dist;
 
-            let N_gain = 4.0; 
-            let oxu_x = omegay * uz - omegaz * uy;
-            let oxu_y = omegaz * ux - omegax * uz;
-            let oxu_z = omegax * uy - omegay * ux;
+            var N_gain = 4.0; 
+            var oxu_x = omegay * uz - omegaz * uy;
+            var oxu_y = omegaz * ux - omegax * uz;
+            var oxu_z = omegax * uy - omegay * ux;
 
-            let ax = N_gain * Vc * oxu_x;
-            let ay = N_gain * Vc * oxu_y;
-            let az = N_gain * Vc * oxu_z;
+            var ax = N_gain * Vc * oxu_x;
+            var ay = N_gain * Vc * oxu_y;
+            var az = N_gain * Vc * oxu_z;
 
-            let accMag = Math.sqrt((ax*ax) + (ay*ay) + (az*az));
-            let maxAcc = this.maxG * GAME_CONFIG.GRAVITY;
+            var accMag = Math.sqrt((ax*ax) + (ay*ay) + (az*az));
+            var maxAcc = this.maxG * GAME_CONFIG.GRAVITY;
             if (accMag > maxAcc) {
                 ax = (ax / accMag) * maxAcc;
                 ay = (ay / accMag) * maxAcc;
@@ -307,7 +293,7 @@
             this.pitch = Math.asin(this.vel.y / (V || 1));
         }
 
-        let vDir = V > 0.1 ? { x: this.vel.x/V, y: this.vel.y/V, z: this.vel.z/V } : {x:0, y:0, z:1};
+        var vDir = V > 0.1 ? { x: this.vel.x/V, y: this.vel.y/V, z: this.vel.z/V } : {x:0, y:0, z:1};
         this.vel.x += vDir.x * this.thrust * dt;
         this.vel.y += vDir.y * this.thrust * dt;
         this.vel.z += vDir.z * this.thrust * dt;
@@ -318,9 +304,9 @@
     };
 
     // =========================================================================
-    // 5. SISTEMA PRINCIPAL DO JOGO (COM INTEGRAÇÃO CORE.JS NATIVA)
+    // 5. SISTEMA PRINCIPAL DO JOGO E CONTROLADOR 
     // =========================================================================
-    const Game = {
+    var Game = {
         state: 'INIT', 
         lastTime: 0, 
         player: null,
@@ -333,90 +319,130 @@
         hangarTimer: 3.0,
         hotas: { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 },
         network: { lastSyncTime: 0, remotePlayers: {}, sendRate: 100 },
+        fatalError: null,
 
         // =====================================================================
-        // AS 3 PORTAS DE ENTRADA DO SEU CORE.JS
+        // ALIAS DUPLOS PARA GARANTIR A CHAMADA DO CORE.JS
         // =====================================================================
+        init: function(missionData) { this._init(missionData); },
+        update: function(kps, w, h) { this._update(kps, w, h); },
+        draw: function(ctx, w, h) { this._draw(ctx, w, h); },
+        render: function(ctx, w, h) { this._draw(ctx, w, h); },
+
         _init: function(missionData) {
-            this.state = 'HANGAR'; 
-            this.hangarTimer = 3.0;
-            this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
-            this.keys = {};
-            this.session = { 
-                kills: 0, cash: 0, time: 0, wave: 1, 
-                mode: (missionData && missionData.mode) ? missionData.mode : 'SINGLE',
-                selectedPlane: PLANES.falcon_lite 
-            };
-            
-            this.player = new PhysicsEntity(0, 3000, 0, this.session.selectedPlane);
-            this.entities = { missiles: [], enemies: [], particles: [] };
-            this.lastTime = performance.now();
-            this.spawnWave();
+            try {
+                this.fatalError = null;
+                this.state = 'HANGAR'; 
+                this.hangarTimer = 3.0;
+                this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
+                this.keys = {};
+                this.session = { 
+                    kills: 0, cash: 0, time: 0, wave: 1, 
+                    mode: (missionData && missionData.mode) ? missionData.mode : 'SINGLE',
+                    selectedPlane: PLANES.falcon_lite 
+                };
+                
+                this.player = new PhysicsEntity(0, 3000, 0, this.session.selectedPlane);
+                this.entities = { missiles: [], enemies: [], particles: [] };
+                this.lastTime = performance.now();
+                this.spawnWave();
 
-            if(window.Sfx && window.Sfx.play) window.Sfx.play(400, 'sine', 0.5, 0.1); 
+                if(window.Sfx && window.Sfx.play) window.Sfx.play(400, 'sine', 0.5, 0.1); 
 
-            if (!this.keysBound) {
-                let self = this;
-                window.addEventListener('keydown', function(e) {
-                    self.keys[e.key] = true;
-                    if (self.state === 'HANGAR' && e.key === ' ') self.state = 'CALIBRATING';
-                    if (self.state === 'CALIBRATING' && ['ArrowUp', 'ArrowDown', 'w', 's', ' '].indexOf(e.key) !== -1) self.state = 'PLAYING';
-                    if (e.key === ' ' && self.state === 'PLAYING') self.fireMissile();
-                });
-                window.addEventListener('keyup', function(e) { self.keys[e.key] = false; });
-                this.keysBound = true;
-            }
+                if (!this.keysBound) {
+                    var self = this;
+                    window.addEventListener('keydown', function(e) {
+                        self.keys[e.key] = true;
+                        if (self.state === 'HANGAR' && e.key === ' ') self.state = 'CALIBRATING';
+                        if (self.state === 'CALIBRATING' && ['ArrowUp', 'ArrowDown', 'w', 's', ' '].indexOf(e.key) !== -1) self.state = 'PLAYING';
+                        if (e.key === ' ' && self.state === 'PLAYING') self.fireMissile();
+                    });
+                    window.addEventListener('keyup', function(e) { self.keys[e.key] = false; });
+                    this.keysBound = true;
+                }
 
-            if (this.session.mode === 'PVP' || this.session.mode === 'COOP') {
-                this.initMultiplayer();
+                if (this.session.mode === 'PVP' || this.session.mode === 'COOP') {
+                    this.initMultiplayer();
+                }
+            } catch(e) {
+                this.fatalError = "ERRO NO INIT: " + e.message;
             }
         },
 
         _update: function(kps, w, h) {
-            if (!this.player) return; // Proteção contra crash de array vazia
+            if (this.fatalError) return;
+            if (!this.player) return; 
             
-            let now = performance.now();
-            if (this.lastTime === 0) this.lastTime = now;
-            let dt = (now - this.lastTime) / 1000;
-            this.lastTime = now;
-            
-            if (dt < 0.005) return; 
-            if (dt > 0.05) dt = 0.05; 
+            try {
+                var now = performance.now();
+                if (this.lastTime === 0) this.lastTime = now;
+                var dt = (now - this.lastTime) / 1000;
+                this.lastTime = now;
+                
+                if (dt < 0.005) return; 
+                if (dt > 0.05) dt = 0.05; 
 
-            if (this.state === 'HANGAR') {
-                this.hangarTimer -= dt;
-                if (this.hangarTimer <= 0) this.state = 'CALIBRATING';
-            } else if (this.state === 'CALIBRATING' || this.state === 'PLAYING') {
-                this.processMobileInputs(kps, dt);
-                if (this.state === 'PLAYING') {
-                    this.session.time += dt;
-                    this.player.updatePhysics(dt);
-                    this.updateAI(dt);
-                    this.updateEntities(dt);
-                    this.updateCombatSystem(dt);
-                    this.updateMissionSystem();
-                    this.updateMultiplayer(dt);
-                    
-                    if (this.player.hp <= 0 || !this.player.active) this.endGame('GAMEOVER');
+                if (this.state === 'HANGAR') {
+                    this.hangarTimer -= dt;
+                    if (this.hangarTimer <= 0) this.state = 'CALIBRATING';
+                } else if (this.state === 'CALIBRATING' || this.state === 'PLAYING') {
+                    this.processMobileInputs(kps, dt);
+                    if (this.state === 'PLAYING') {
+                        this.session.time += dt;
+                        this.player.updatePhysics(dt);
+                        this.updateAI(dt);
+                        this.updateEntities(dt);
+                        this.updateCombatSystem(dt);
+                        this.updateMissionSystem();
+                        this.updateMultiplayer(dt);
+                        
+                        if (this.player.hp <= 0 || !this.player.active) this.endGame('GAMEOVER');
+                    }
                 }
+            } catch(e) {
+                this.fatalError = "CRASH NO UPDATE: " + e.message;
             }
         },
 
         _draw: function(ctx, w, h) {
-            if (!ctx || !this.player) return; // Evita a tela branca instantânea
-            ctx.clearRect(0, 0, w, h);
-            
-            if (this.state === 'HANGAR') {
-                this.drawHangar(ctx, w, h);
-            } else if (this.state === 'CALIBRATING') {
-                this.drawCalibration(ctx, w, h);
-            } else if (this.state === 'GAMEOVER' || this.state === 'VICTORY') {
-                this._drawEnd(ctx, w, h);
-            } else {
-                this.draw3DWorld(ctx, w, h);
-                this.drawHUD(ctx, w, h);
-                this.drawRadar(ctx, w, h); 
-                this.drawPilotFX(ctx, w, h);
+            if (!ctx) return;
+            w = w || window.innerWidth || 640;
+            h = h || window.innerHeight || 480;
+
+            if (this.fatalError) {
+                ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
+                ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
+                ctx.fillText("⚠️ AERO STRIKE SYSTEM CRASH ⚠️", 20, 50);
+                ctx.font = "14px monospace"; 
+                var lines = this.fatalError.split("\n");
+                for(var i=0; i<lines.length; i++) ctx.fillText(lines[i], 20, 90 + (i*20));
+                return;
+            }
+
+            if (!this.player) {
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+                ctx.fillStyle = "#0f0"; ctx.font = "bold 20px 'Chakra Petch'"; ctx.textAlign = "center";
+                ctx.fillText("A CARREGAR MOTOR FÍSICO AAA...", w/2, h/2);
+                return;
+            }
+
+            try {
+                ctx.clearRect(0, 0, w, h);
+                
+                if (this.state === 'HANGAR') {
+                    this.drawHangar(ctx, w, h);
+                } else if (this.state === 'CALIBRATING') {
+                    this.drawCalibration(ctx, w, h);
+                } else if (this.state === 'GAMEOVER' || this.state === 'VICTORY') {
+                    this._drawEnd(ctx, w, h);
+                } else {
+                    this.draw3DWorld(ctx, w, h);
+                    this.drawHUD(ctx, w, h);
+                    this.drawRadar(ctx, w, h); 
+                    this.drawPilotFX(ctx, w, h);
+                }
+            } catch(e) {
+                this.fatalError = "CRASH NO RENDER: " + e.message;
             }
         },
 
@@ -435,53 +461,59 @@
         },
 
         // =====================================================================
-        // SISTEMAS DE LÓGICA E CONTROLO
+        // CONTROLE E CÂMERA (COMPATIBILIDADE NATIVA TENNIS)
         // =====================================================================
         processMobileInputs: function(kps, dt) {
             if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
             
-            let rawPitch = 0, rawRoll = 0, rawThr = this.player.throttle;
+            var rawPitch = 0, rawRoll = 0, rawThr = this.player.throttle;
 
             if (this.keys['ArrowUp']) rawPitch = 1.0; else if (this.keys['ArrowDown']) rawPitch = -1.0;
             if (this.keys['ArrowRight']) rawRoll = 1.0; else if (this.keys['ArrowLeft']) rawRoll = -1.0;
             if (this.keys['w']) rawThr = 1.0; else if (this.keys['s']) rawThr = 0.2;
 
-            // Extração Nativa e Compatível de Câmera (Idêntico ao jogo de Tênis)
-            let kpDict = {};
+            // Extração Nativa e Compatível idêntica ao game_tennis.js
+            var rightWrist = null, leftWrist = null, nose = null;
+            
             if (kps && Array.isArray(kps)) {
-                kps.forEach(function(k) {
-                    if (k && k.name) kpDict[k.name] = k;
-                });
+                // Tenta pelo índice do MoveNet Padrão primeiro
+                if (kps[10] && kps[10].score > 0.3) rightWrist = kps[10];
+                if (kps[9] && kps[9].score > 0.3) leftWrist = kps[9];
+                if (kps[0] && kps[0].score > 0.3) nose = kps[0];
+                
+                // Fallback pelo nome se a array for mapeada diferente
+                if (!rightWrist || !leftWrist || !nose) {
+                    kps.forEach(function(k) {
+                        if (k && k.name === 'right_wrist' && k.score > 0.3) rightWrist = k;
+                        if (k && k.name === 'left_wrist' && k.score > 0.3) leftWrist = k;
+                        if (k && k.name === 'nose' && k.score > 0.3) nose = k;
+                    });
+                }
             }
 
-            let rightWrist = kpDict['right_wrist'], leftWrist = kpDict['left_wrist'], nose = kpDict['nose'];
-
-            // Reconhecimento rápido de pose
-            if (rightWrist && rightWrist.score > 0.3 && nose && nose.score > 0.3) {
+            if (rightWrist && nose) {
                 if (this.state === 'CALIBRATING') {
-                    this.hotas.calibratedX = rightWrist.x; 
-                    this.hotas.calibratedY = rightWrist.y;
+                    this.hotas.calibratedX = typeof rightWrist.x === 'number' ? rightWrist.x : 320; 
+                    this.hotas.calibratedY = typeof rightWrist.y === 'number' ? rightWrist.y : 240;
                     this.state = 'PLAYING';
                     if(window.System && window.System.msg) window.System.msg("FCS ONLINE", "#2ecc71");
                 }
                 if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
-                    let dy = (rightWrist.y - this.hotas.calibratedY) / 120;
-                    let dx = (rightWrist.x - this.hotas.calibratedX) / 120;
+                    var dy = (rightWrist.y - this.hotas.calibratedY) / 120;
+                    var dx = (rightWrist.x - this.hotas.calibratedX) / 120;
                     rawPitch = Math.max(-1, Math.min(1, isNaN(dy) ? 0 : dy));
                     rawRoll = Math.max(-1, Math.min(1, isNaN(dx) ? 0 : dx));
-                    
                     this.hotas.lastValidPitch = rawPitch;
                     this.hotas.lastValidRoll = rawRoll;
                 }
             } else if (this.state === 'PLAYING' && !this.keys['ArrowUp'] && !this.keys['ArrowDown']) {
-                // Prevenção de perda de tracking: Mantém o avião voando
                 rawPitch = this.hotas.lastValidPitch || 0;
                 rawRoll = this.hotas.lastValidRoll || 0;
             }
 
-            if (leftWrist && leftWrist.score > 0.3 && this.state === 'PLAYING' && !this.keys['w']) {
-                let lwY = leftWrist.y;
-                let thr = 1.1 - (lwY / 480);
+            if (leftWrist && this.state === 'PLAYING' && !this.keys['w']) {
+                var lwY = typeof leftWrist.y === 'number' ? leftWrist.y : 240;
+                var thr = 1.1 - (lwY / 480);
                 rawThr = Math.max(0.1, Math.min(1.0, isNaN(thr) ? 0.5 : thr));
                 this.hotas.lastValidThr = rawThr;
 
@@ -490,16 +522,16 @@
                 rawThr = this.hotas.lastValidThr !== undefined ? this.hotas.lastValidThr : this.player.throttle;
             }
 
-            let applyCurve = function(val, deadzone, expo) {
+            var applyCurve = function(val, deadzone, expo) {
                 if (Math.abs(val) < deadzone) return 0;
-                let sign = val < 0 ? -1 : 1;
-                let normalized = (Math.abs(val) - deadzone) / (1.0 - deadzone);
+                var sign = val < 0 ? -1 : 1;
+                var normalized = (Math.abs(val) - deadzone) / (1.0 - deadzone);
                 return sign * Math.pow(Math.max(0, normalized), expo);
             };
 
-            let targetPitch = applyCurve(rawPitch, 0.1, 1.5);
-            let targetRoll = applyCurve(rawRoll, 0.1, 1.5);
-            let targetThrottle = Math.max(0.1, Math.min(1.0, isNaN(rawThr) ? 0.5 : rawThr));
+            var targetPitch = applyCurve(rawPitch, 0.1, 1.5);
+            var targetRoll = applyCurve(rawRoll, 0.1, 1.5);
+            var targetThrottle = Math.max(0.1, Math.min(1.0, isNaN(rawThr) ? 0.5 : rawThr));
 
             this.player.inputs.pitch += (targetPitch - this.player.inputs.pitch) * (dt * 10.0);
             this.player.inputs.roll += (targetRoll - this.player.inputs.roll) * (dt * 10.0);
@@ -509,11 +541,11 @@
         },
 
         spawnWave: function() {
-            let count = (this.session.wave === 3) ? 1 : 3; 
-            let planeType = (this.session.wave === 3) ? PLANES.boss_su57 : PLANES.falcon_lite;
+            var count = (this.session.wave === 3) ? 1 : 3; 
+            var planeType = (this.session.wave === 3) ? PLANES.boss_su57 : PLANES.falcon_lite;
 
-            for(let i=0; i<count; i++) {
-                let e = new PhysicsEntity(
+            for(var i=0; i<count; i++) {
+                var e = new PhysicsEntity(
                     this.player.pos.x + (Math.random() * 8000 - 4000), 
                     3000 + Math.random() * 2000, 
                     this.player.pos.z + 4000 + (Math.random() * 8000),
@@ -542,18 +574,18 @@
         },
 
         updateAI: function(dt) {
-            let self = this;
+            var self = this;
             this.entities.enemies.forEach(function(e) {
                 if (!e.active) return;
                 
                 e.stateTimer -= dt;
                 if (e.stateTimer <= 0) e.stateTimer = 1.0 + Math.random() * 2.0;
 
-                let dx = self.player.pos.x - e.pos.x;
-                let dy = self.player.pos.y - e.pos.y;
-                let dz = self.player.pos.z - e.pos.z;
+                var dx = self.player.pos.x - e.pos.x;
+                var dy = self.player.pos.y - e.pos.y;
+                var dz = self.player.pos.z - e.pos.z;
                 
-                let distToPlayer = Math.sqrt((dx*dx) + (dy*dy) + (dz*dz));
+                var distToPlayer = Math.sqrt((dx*dx) + (dy*dy) + (dz*dz));
                 
                 e.throttle = 0.8; 
 
@@ -563,8 +595,8 @@
                 } else if (e.isStalling) {
                     e.inputs.pitch = -1.0;
                 } else {
-                    let targetYaw = Math.atan2(dx, dz);
-                    let yawDiff = targetYaw - e.yaw;
+                    var targetYaw = Math.atan2(dx, dz);
+                    var yawDiff = targetYaw - e.yaw;
                     while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
                     while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
 
@@ -581,14 +613,14 @@
         },
 
         updateEntities: function(dt) {
-            let self = this;
+            var self = this;
             this.entities.missiles.forEach(function(m) { 
                 m.update(dt); 
                 if (m.active && Math.random() > 0.3) self.entities.particles.push(new Particle(m.pos.x, m.pos.y, m.pos.z, m.isEnemy ? "#e74c3c" : "#ddd", 5, 1.0)); 
             });
             
-            let activeMissiles = [];
-            for(let i=0; i<this.entities.missiles.length; i++) {
+            var activeMissiles = [];
+            for(var i=0; i<this.entities.missiles.length; i++) {
                 if(this.entities.missiles[i].active) activeMissiles.push(this.entities.missiles[i]);
             }
             this.entities.missiles = activeMissiles;
@@ -596,39 +628,39 @@
             this.entities.enemies.forEach(function(e) {
                 if (e.hp <= 0 && e.active) {
                     e.active = false;
-                    for(let i=0; i<30; i++) self.entities.particles.push(new Particle(e.pos.x, e.pos.y, e.pos.z, "#e74c3c", Math.random()*20+10, 2.5));
+                    for(var j=0; j<30; j++) self.entities.particles.push(new Particle(e.pos.x, e.pos.y, e.pos.z, "#e74c3c", Math.random()*20+10, 2.5));
                     self.session.kills++; 
                     self.session.cash += e.isBoss ? GAME_CONFIG.MONEY_BOSS_BONUS : GAME_CONFIG.MONEY_PER_KILL; 
                     if(window.Sfx && window.Sfx.play) window.Sfx.play(150, 'square', 0.8, 0.4); 
                 }
             });
             
-            let activeEnemies = [];
-            for(let i=0; i<this.entities.enemies.length; i++) {
-                if(this.entities.enemies[i].active) activeEnemies.push(this.entities.enemies[i]);
+            var activeEnemies = [];
+            for(var k=0; k<this.entities.enemies.length; k++) {
+                if(this.entities.enemies[k].active) activeEnemies.push(this.entities.enemies[k]);
             }
             this.entities.enemies = activeEnemies;
 
             this.entities.particles.forEach(function(p) { p.update(dt); });
             
-            let activeParticles = [];
-            for(let i=0; i<this.entities.particles.length; i++) {
-                if(this.entities.particles[i].life > 0) activeParticles.push(this.entities.particles[i]);
+            var activeParticles = [];
+            for(var p=0; p<this.entities.particles.length; p++) {
+                if(this.entities.particles[p].life > 0) activeParticles.push(this.entities.particles[p]);
             }
             this.entities.particles = activeParticles;
         },
 
         updateCombatSystem: function(dt) {
-            let closestDist = Infinity, target = null;
-            let self = this;
+            var closestDist = Infinity, target = null;
+            var self = this;
             this.entities.enemies.forEach(function(e) {
                 if(!e.active) return;
-                let dx = e.pos.x - self.player.pos.x, dy = e.pos.y - self.player.pos.y, dz = e.pos.z - self.player.pos.z;
-                let dist = Math.sqrt((dx*dx) + (dy*dy) + (dz*dz));
+                var dx = e.pos.x - self.player.pos.x, dy = e.pos.y - self.player.pos.y, dz = e.pos.z - self.player.pos.z;
+                var dist = Math.sqrt((dx*dx) + (dy*dy) + (dz*dz));
                 
-                let vDir = { x: Math.sin(self.player.yaw)*Math.cos(self.player.pitch), y: Math.sin(self.player.pitch), z: Math.cos(self.player.yaw)*Math.cos(self.player.pitch) };
-                let targetDir = { x: dx/dist, y: dy/dist, z: dz/dist };
-                let angleToTarget = Math.acos(Math.max(-1, Math.min(1, (vDir.x*targetDir.x) + (vDir.y*targetDir.y) + (vDir.z*targetDir.z))));
+                var vDir = { x: Math.sin(self.player.yaw)*Math.cos(self.player.pitch), y: Math.sin(self.player.pitch), z: Math.cos(self.player.yaw)*Math.cos(self.player.pitch) };
+                var targetDir = { x: dx/dist, y: dy/dist, z: dz/dist };
+                var angleToTarget = Math.acos(Math.max(-1, Math.min(1, (vDir.x*targetDir.x) + (vDir.y*targetDir.y) + (vDir.z*targetDir.z))));
 
                 if (angleToTarget < 0.35 && dist < 8000 && dist < closestDist) { closestDist = dist; target = e; }
             });
@@ -653,16 +685,16 @@
 
         initMultiplayer: function() {
             if (!window.DB || !window.System || !window.System.playerId) return;
-            let self = this;
-            let ref = window.DB.ref("games/flight_" + window.System.playerId);
+            var self = this;
+            var ref = window.DB.ref("games/flight_" + window.System.playerId);
             ref.on('value', function(snap) {
-                let data = snap.val();
+                var data = snap.val();
                 if (data && data.players) {
-                    for(let id in data.players) {
+                    for(var id in data.players) {
                         if (id !== window.System.playerId) {
                             if(!self.network.remotePlayers[id]) self.network.remotePlayers[id] = new PhysicsEntity(0,3000,0, PLANES.falcon_lite);
-                            let rd = data.players[id];
-                            let rPlayer = self.network.remotePlayers[id];
+                            var rd = data.players[id];
+                            var rPlayer = self.network.remotePlayers[id];
                             rPlayer.targetPos = { x: rd.x, y: rd.y, z: rd.z };
                             rPlayer.targetVel = { x: rd.vx, y: rd.vy, z: rd.vz };
                             rPlayer.targetRot = { p: rd.p, y: rd.yaw, r: rd.r };
@@ -675,7 +707,7 @@
         updateMultiplayer: function(dt) {
             if (this.session.mode !== 'PVP' && this.session.mode !== 'COOP') return;
             
-            let now = performance.now();
+            var now = performance.now();
             if (now - this.network.lastSyncTime > this.network.sendRate && window.DB && window.System.playerId) {
                 window.DB.ref("games/flight_" + window.System.playerId + "/players/" + window.System.playerId).set({
                     x: Number(this.player.pos.x.toFixed(2)), y: Number(this.player.pos.y.toFixed(2)), z: Number(this.player.pos.z.toFixed(2)),
@@ -686,8 +718,8 @@
                 this.network.lastSyncTime = now;
             }
 
-            for(let id in this.network.remotePlayers) {
-                let rp = this.network.remotePlayers[id];
+            for(var id in this.network.remotePlayers) {
+                var rp = this.network.remotePlayers[id];
                 if(rp.targetPos) {
                     rp.pos.x += (rp.targetPos.x - rp.pos.x) * dt * 5.0 + (rp.targetVel.x * dt);
                     rp.pos.y += (rp.targetPos.y - rp.pos.y) * dt * 5.0 + (rp.targetVel.y * dt);
@@ -701,9 +733,9 @@
 
         endGame: function(finalState) {
             this.state = finalState;
-            let self = this;
+            var self = this;
             setTimeout(function() {
-                let totalCash = self.session.cash + (finalState === 'VICTORY' ? GAME_CONFIG.MONEY_MISSION_BONUS : 0);
+                var totalCash = self.session.cash + (finalState === 'VICTORY' ? GAME_CONFIG.MONEY_MISSION_BONUS : 0);
                 if (window.System && window.System.gameOver) window.System.gameOver(self.session.kills, finalState === 'VICTORY', totalCash);
                 else if (window.System && window.System.home) window.System.home();
             }, 4000);
@@ -725,60 +757,60 @@
         },
 
         draw3DWorld: function(ctx, w, h) {
-            let p = this.player;
+            var p = this.player;
             ctx.save(); ctx.translate(w/2, h/2); ctx.rotate(p.roll);
-            let horizonY = p.pitch * (h/2); 
+            var horizonY = p.pitch * (h/2); 
             ctx.fillStyle = "rgba(46, 204, 113, 0.15)"; ctx.fillRect(-w*2, horizonY, w*4, h*4);
             ctx.fillStyle = "rgba(52, 152, 219, 0.15)"; ctx.fillRect(-w*2, -h*4 + horizonY, w*4, h*4);
             ctx.beginPath(); ctx.moveTo(-w, horizonY); ctx.lineTo(w, horizonY);
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)"; ctx.lineWidth = 1; ctx.stroke();
             ctx.restore();
 
-            let self = this;
+            var self = this;
             this.entities.enemies.forEach(function(e) {
-                let proj = Engine3D.project(e.pos, p, w, h);
+                var proj = Engine3D.project(e.pos, p, w, h);
                 if (proj.visible) {
                     Engine3D.drawJetModel(ctx, proj.x, proj.y, Math.max(0.1, proj.s * 2), e.roll - p.roll, true, e.stats.color);
                     if (self.radarTarget === e) {
                         ctx.strokeStyle = self.lockTimer > 1.5 ? "#e74c3c" : "#f1c40f"; ctx.lineWidth = 2;
-                        let size = 30 * proj.s; ctx.strokeRect(proj.x - size/2, proj.y - size/2, size, size);
+                        var size = 30 * proj.s; ctx.strokeRect(proj.x - size/2, proj.y - size/2, size, size);
                         if (self.lockTimer > 1.5) { ctx.fillStyle = "#e74c3c"; ctx.font = "12px Arial"; ctx.fillText("LOCK", proj.x + size/2 + 5, proj.y); }
                     }
                 }
             });
 
-            for(let id in this.network.remotePlayers) {
-                let rp = this.network.remotePlayers[id];
-                let proj = Engine3D.project(rp.pos, p, w, h);
+            for(var id in this.network.remotePlayers) {
+                var rp = this.network.remotePlayers[id];
+                var proj = Engine3D.project(rp.pos, p, w, h);
                 if (proj.visible) Engine3D.drawJetModel(ctx, proj.x, proj.y, Math.max(0.1, proj.s * 2), rp.roll - p.roll, false, "#2ecc71");
             }
 
             this.entities.particles.forEach(function(part) {
-                let proj = Engine3D.project(part.pos, p, w, h);
-                if (proj.visible) {
+                var proj2 = Engine3D.project(part.pos, p, w, h);
+                if (proj2.visible) {
                     ctx.fillStyle = part.color; ctx.globalAlpha = part.life / part.maxLife;
-                    ctx.beginPath(); ctx.arc(proj.x, proj.y, part.size * proj.s, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(proj2.x, proj2.y, part.size * proj2.s, 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1.0;
                 }
             });
 
             this.entities.missiles.forEach(function(m) {
-                let proj = Engine3D.project(m.pos, p, w, h);
-                if (proj.visible) { ctx.fillStyle = m.isEnemy ? "#e74c3c" : "#fff"; ctx.beginPath(); ctx.arc(proj.x, proj.y, 4 * proj.s, 0, Math.PI*2); ctx.fill(); }
+                var proj3 = Engine3D.project(m.pos, p, w, h);
+                if (proj3.visible) { ctx.fillStyle = m.isEnemy ? "#e74c3c" : "#fff"; ctx.beginPath(); ctx.arc(proj3.x, proj3.y, 4 * proj3.s, 0, Math.PI*2); ctx.fill(); }
             });
         },
 
         drawHUD: function(ctx, w, h) {
-            let p = this.player, hudColor = this.session.selectedPlane.color;
+            var p = this.player, hudColor = this.session.selectedPlane.color;
             ctx.fillStyle = hudColor; ctx.strokeStyle = hudColor; ctx.font = "bold 16px 'Chakra Petch', sans-serif";
 
             ctx.beginPath(); ctx.moveTo(w/2 - 15, h/2); ctx.lineTo(w/2 - 5, h/2); ctx.moveTo(w/2 + 15, h/2); ctx.lineTo(w/2 + 5, h/2); ctx.moveTo(w/2, h/2 - 15); ctx.lineTo(w/2, h/2 - 5); ctx.stroke();
             ctx.beginPath(); ctx.arc(w/2, h/2, 2, 0, Math.PI*2); ctx.fill();
 
             ctx.save(); ctx.translate(w/2, h/2); ctx.rotate(p.roll);
-            for(let i = -3; i <= 3; i++) {
+            for(var i = -3; i <= 3; i++) {
                 if (i === 0) continue;
-                let yPos = ((i * 0.17) + p.pitch) * 400; 
+                var yPos = ((i * 0.17) + p.pitch) * 400; 
                 if (yPos > -h/2 && yPos < h/2) {
                     ctx.beginPath(); if (i < 0) ctx.setLineDash([5, 5]); 
                     ctx.moveTo(-40, yPos); ctx.lineTo(-20, yPos); ctx.lineTo(-20, yPos + (i < 0 ? -5 : 5)); 
@@ -788,8 +820,8 @@
             }
             ctx.restore();
 
-            let V2 = (p.vel.x * p.vel.x) + (p.vel.y * p.vel.y) + (p.vel.z * p.vel.z);
-            let V = Math.sqrt(V2);
+            var V2 = (p.vel.x * p.vel.x) + (p.vel.y * p.vel.y) + (p.vel.z * p.vel.z);
+            var V = Math.sqrt(V2);
             ctx.strokeRect(30, h/2 - 100, 40, 200); ctx.textAlign = "center"; ctx.fillText("SPD", 50, h/2 - 110);
             ctx.beginPath(); ctx.moveTo(70, h/2); ctx.lineTo(80, h/2 - 5); ctx.lineTo(80, h/2 + 5); ctx.fill(); 
             ctx.fillText(Math.floor(V), 50, h/2 + 5); ctx.font = "12px Arial"; ctx.fillText("M " + p.mach.toFixed(2), 50, h/2 + 120);
@@ -798,7 +830,7 @@
             ctx.beginPath(); ctx.moveTo(w - 70, h/2); ctx.lineTo(w - 80, h/2 - 5); ctx.lineTo(w - 80, h/2 + 5); ctx.fill(); 
             ctx.fillText(Math.floor(p.pos.y), w - 50, h/2 + 5);
 
-            ctx.strokeRect(w/2 - 100, 20, 200, 25); let heading = (p.yaw * 180 / Math.PI) % 360; if (heading < 0) heading += 360;
+            ctx.strokeRect(w/2 - 100, 20, 200, 25); var heading = (p.yaw * 180 / Math.PI) % 360; if (heading < 0) heading += 360;
             ctx.fillText(Math.floor(heading) + "°", w/2, 40); ctx.beginPath(); ctx.moveTo(w/2, 45); ctx.lineTo(w/2 - 5, 55); ctx.lineTo(w/2 + 5, 55); ctx.fill();
 
             ctx.textAlign = "left"; ctx.fillText("G-FORCE: " + p.gForce.toFixed(1) + "G", 20, h - 80);
@@ -814,41 +846,41 @@
         },
 
         drawRadar: function(ctx, w, h) {
-            let radarSize = 100; let rx = w - radarSize - 20; let ry = h - radarSize - 20;
+            var radarSize = 100; var rx = w - radarSize - 20; var ry = h - radarSize - 20;
             ctx.strokeStyle = "rgba(0, 255, 204, 0.5)"; ctx.lineWidth = 1;
             ctx.fillStyle = "rgba(0, 20, 40, 0.6)"; ctx.fillRect(rx, ry, radarSize, radarSize);
             ctx.strokeRect(rx, ry, radarSize, radarSize);
             
             ctx.fillStyle = "#0f0"; ctx.fillRect(rx + radarSize/2 - 2, ry + radarSize/2 - 2, 4, 4);
 
-            let self = this;
+            var self = this;
             this.entities.enemies.forEach(function(e) {
-                let dx = (e.pos.x - self.player.pos.x) * 0.01; let dz = (e.pos.z - self.player.pos.z) * 0.01;
-                let px = rx + radarSize/2 + dx; let py = ry + radarSize/2 + dz;
+                var dx = (e.pos.x - self.player.pos.x) * 0.01; var dz = (e.pos.z - self.player.pos.z) * 0.01;
+                var px = rx + radarSize/2 + dx; var py = ry + radarSize/2 + dz;
                 if (px > rx && px < rx + radarSize && py > ry && py < ry + radarSize) {
                     ctx.fillStyle = e.isBoss ? "#f39c12" : "#e74c3c"; 
                     ctx.fillRect(px, py, e.isBoss ? 6 : 4, e.isBoss ? 6 : 4);
                 }
             });
             
-            for(let id in this.network.remotePlayers) {
-                let rp = this.network.remotePlayers[id];
-                let dx = (rp.pos.x - this.player.pos.x) * 0.01; let dz = (rp.pos.z - this.player.pos.z) * 0.01;
-                let px = rx + radarSize/2 + dx; let py = ry + radarSize/2 + dz;
-                if (px > rx && px < rx + radarSize && py > ry && py < ry + radarSize) {
-                    ctx.fillStyle = "#2ecc71"; ctx.fillRect(px, py, 4, 4);
+            for(var id in this.network.remotePlayers) {
+                var rp = this.network.remotePlayers[id];
+                var dx2 = (rp.pos.x - this.player.pos.x) * 0.01; var dz2 = (rp.pos.z - this.player.pos.z) * 0.01;
+                var px2 = rx + radarSize/2 + dx2; var py2 = ry + radarSize/2 + dz2;
+                if (px2 > rx && px2 < rx + radarSize && py2 > ry && py2 < ry + radarSize) {
+                    ctx.fillStyle = "#2ecc71"; ctx.fillRect(px2, py2, 4, 4);
                 }
             }
         },
 
         drawPilotFX: function(ctx, w, h) {
-            let p = this.player;
+            var p = this.player;
             if (p.gForce > 5.0) {
-                let intensity = Math.min(1.0, (p.gForce - 5.0) / 4.0); 
+                var intensity = Math.min(1.0, (p.gForce - 5.0) / 4.0); 
                 ctx.fillStyle = "rgba(0, 0, 0, " + (intensity * 0.8) + ")"; ctx.fillRect(0,0,w,h);
             } else if (p.gForce < -1.5) {
-                let intensity = Math.min(1.0, (Math.abs(p.gForce) - 1.5) / 2.0);
-                ctx.fillStyle = "rgba(231, 76, 60, " + (intensity * 0.6) + ")"; ctx.fillRect(0,0,w,h);
+                var intensityN = Math.min(1.0, (Math.abs(p.gForce) - 1.5) / 2.0);
+                ctx.fillStyle = "rgba(231, 76, 60, " + (intensityN * 0.6) + ")"; ctx.fillRect(0,0,w,h);
             }
         },
 
@@ -863,7 +895,7 @@
             ctx.fillText("Mão Esquerda: Acelerador. Junte as mãos: Atirar.", w/2, h/2 + 70);
             
             ctx.strokeStyle = "#00ffcc"; ctx.lineWidth = 2;
-            let scannerY = (h/2 + 150) + Math.sin(performance.now() * 0.005) * 20;
+            var scannerY = (h/2 + 150) + Math.sin(performance.now() * 0.005) * 20;
             ctx.beginPath(); ctx.moveTo(w/2 - 100, scannerY); ctx.lineTo(w/2 + 100, scannerY); ctx.stroke();
         }
     };
@@ -871,10 +903,10 @@
     // =========================================================================
     // 6. REGISTRO NO SISTEMA (THIAGUINHO OS)
     // =========================================================================
-    const register = function() {
+    var register = function() {
         if (window.System && window.System.registerGame) {
-            // REGISTRADO EXATAMENTE COMO NO SEU ANTIGO ARQUIVO (flight_sim)
-            window.System.registerGame('flight_sim', 'Aero Strike WAR', '✈️', Game, {
+            // REGISTRADO EXATAMENTE COMO NO SEU ÚLTIMO ZIP (usarmy_flight_sim)
+            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.4, 
                 phases: [
                     { id: 'single', name: 'CAMPANHA SOLO', desc: 'Derrote 3 Waves (Inclui Boss Final).', mode: 'SINGLE', reqLvl: 1 },
@@ -885,6 +917,6 @@
             clearInterval(regLoop);
         }
     };
-    const regLoop = setInterval(register, 100);
+    var regLoop = setInterval(register, 100);
 
 })();
