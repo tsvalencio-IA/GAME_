@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL SIMULATOR (COMMERCIAL PLATINUM EDITION - TRUE AAA)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT (DIVISÃO DE SIMULAÇÃO MILITAR)
-// STATUS: TRUE 6DOF PHYSICS, ISA ATMOSPHERE, TRUE PN GUIDANCE, ANTI-WHITE-SCREEN
+// STATUS: TRUE 6DOF PHYSICS, PN GUIDANCE, 100% ES5 SYNTAX (CRASH-PROOF)
 // =============================================================================
 
 (function() {
@@ -412,7 +412,7 @@
             if (this.fatalError) {
                 ctx.fillStyle = "#c0392b"; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
-                ctx.fillText("⚠️ AERO STRIKE SYSTEM CRASH ⚠️", 20, 50);
+                ctx.fillText("CRITICAL ERROR NO JOGO", 20, 50);
                 ctx.font = "14px monospace"; 
                 var lines = this.fatalError.split("\n");
                 for(var i=0; i<lines.length; i++) ctx.fillText(lines[i], 20, 90 + (i*20));
@@ -422,7 +422,7 @@
             if (!this.player) {
                 ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = "#0f0"; ctx.font = "bold 20px 'Chakra Petch'"; ctx.textAlign = "center";
-                ctx.fillText("A CARREGAR MOTOR FÍSICO AAA...", w/2, h/2);
+                ctx.fillText("INICIANDO SIMULADOR...", w/2, h/2);
                 return;
             }
 
@@ -461,7 +461,7 @@
         },
 
         // =====================================================================
-        // CONTROLE E CÂMERA (COMPATIBILIDADE NATIVA TENNIS)
+        // CONTROLE E CÂMERA BLINDADO
         // =====================================================================
         processMobileInputs: function(kps, dt) {
             if (!this.hotas) this.hotas = { pitchInput: 0, rollInput: 0, calibratedY: 0, calibratedX: 0, lastValidPitch: 0, lastValidRoll: 0, lastValidThr: 0.5 };
@@ -472,18 +472,21 @@
             if (this.keys['ArrowRight']) rawRoll = 1.0; else if (this.keys['ArrowLeft']) rawRoll = -1.0;
             if (this.keys['w']) rawThr = 1.0; else if (this.keys['s']) rawThr = 0.2;
 
-            // Extração Nativa e Compatível idêntica ao game_tennis.js
+            // Extração Nativa Compatível
             var rightWrist = null, leftWrist = null, nose = null;
             
-            if (kps && Array.isArray(kps)) {
-                // Tenta pelo índice do MoveNet Padrão primeiro
-                if (kps[10] && kps[10].score > 0.3) rightWrist = kps[10];
-                if (kps[9] && kps[9].score > 0.3) leftWrist = kps[9];
-                if (kps[0] && kps[0].score > 0.3) nose = kps[0];
+            var arr = kps;
+            if (kps && !Array.isArray(kps) && kps[0] && kps[0].keypoints) {
+                arr = kps[0].keypoints;
+            }
+
+            if (arr && Array.isArray(arr)) {
+                if (arr[10] && arr[10].score > 0.3) rightWrist = arr[10];
+                if (arr[9] && arr[9].score > 0.3) leftWrist = arr[9];
+                if (arr[0] && arr[0].score > 0.3) nose = arr[0];
                 
-                // Fallback pelo nome se a array for mapeada diferente
                 if (!rightWrist || !leftWrist || !nose) {
-                    kps.forEach(function(k) {
+                    arr.forEach(function(k) {
                         if (k && k.name === 'right_wrist' && k.score > 0.3) rightWrist = k;
                         if (k && k.name === 'left_wrist' && k.score > 0.3) leftWrist = k;
                         if (k && k.name === 'nose' && k.score > 0.3) nose = k;
@@ -708,7 +711,7 @@
             if (this.session.mode !== 'PVP' && this.session.mode !== 'COOP') return;
             
             var now = performance.now();
-            if (now - this.network.lastSyncTime > this.network.sendRate && window.DB && window.System.playerId) {
+            if (now - this.network.lastSyncTime > this.network.sendRate && window.DB && window.System && window.System.playerId) {
                 window.DB.ref("games/flight_" + window.System.playerId + "/players/" + window.System.playerId).set({
                     x: Number(this.player.pos.x.toFixed(2)), y: Number(this.player.pos.y.toFixed(2)), z: Number(this.player.pos.z.toFixed(2)),
                     vx: Number(this.player.vel.x.toFixed(2)), vy: Number(this.player.vel.y.toFixed(2)), vz: Number(this.player.vel.z.toFixed(2)),
@@ -788,7 +791,7 @@
             this.entities.particles.forEach(function(part) {
                 var proj2 = Engine3D.project(part.pos, p, w, h);
                 if (proj2.visible) {
-                    ctx.fillStyle = part.color; ctx.globalAlpha = part.life / part.maxLife;
+                    ctx.fillStyle = part.color; ctx.globalAlpha = Math.max(0, part.life / part.maxLife);
                     ctx.beginPath(); ctx.arc(proj2.x, proj2.y, part.size * proj2.s, 0, Math.PI*2); ctx.fill();
                     ctx.globalAlpha = 1.0;
                 }
@@ -905,7 +908,7 @@
     // =========================================================================
     var register = function() {
         if (window.System && window.System.registerGame) {
-            window.System.registerGame('flight_sim', 'Aero Strike WAR', '✈️', Game, {
+            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.4, 
                 phases: [
                     { id: 'single', name: 'CAMPANHA SOLO', desc: 'Derrote 3 Waves (Inclui Boss Final).', mode: 'SINGLE', reqLvl: 1 },
