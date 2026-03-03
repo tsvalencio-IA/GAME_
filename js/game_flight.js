@@ -1,14 +1,14 @@
 // =============================================================================
-// AERO STRIKE: BLACK OPS (TRUE AAA PHYSICS + 3D RADAR + SMOOTH MULTIPLAYER)
+// AERO STRIKE: TACTICAL YOKE SIMULATOR (EDICAO BRASIL - MULTIPLAYER FIX)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: RADAR TÁTICO AWACS, MULTIPLAYER DEAD RECKONING, V10 ARCHITECTURE.
+// STATUS: RADAR LIMPO, CALIBRACAO INTELIGENTE (5S), TEXTOS PT-BR, FIREBASE FIX
 // =============================================================================
 
 (function() {
     "use strict";
 
     // -----------------------------------------------------------------
-    // 1. CONFIGURAÇÕES FÍSICAS REAIS 
+    // 1. CONFIGURAÇÕES FÍSICAS REAIS (AJUSTADAS PARA JOGABILIDADE)
     // -----------------------------------------------------------------
     const GAME_CONFIG = {
         MONEY_PER_KILL: 150,
@@ -32,7 +32,7 @@
     // -----------------------------------------------------------------
     const Engine3D = {
         fov: 800,
-        project: (objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) => {
+        project: function(objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) {
             let dx = objX - camX, dy = objY - camY, dz = objZ - camZ;
             let cy = Math.cos(-yaw), sy = Math.sin(-yaw);
             let x1 = dx * cy - dz * sy, z1 = dx * sy + dz * cy;
@@ -45,7 +45,7 @@
             return { x: (w/2) + (finalX * scale), y: (h/2) - (finalY * scale), s: scale, z: z2, visible: true };
         },
         
-        drawJetModel: (ctx, px, py, scale, roll, isEnemy, color) => {
+        drawJetModel: function(ctx, px, py, scale, roll, isEnemy, color) {
             color = color || "#00ffcc";
             ctx.save(); 
             ctx.translate(px, py); 
@@ -120,8 +120,8 @@
             this.engineSrc.start();
         },
         play: function(type) {
-            if (type === 'lock') window.Sfx?.play(1000, 'square', 0.1, 0.1);
-            else if (type === 'vulcan') window.Sfx?.play(300, 'sawtooth', 0.08, 0.15);
+            if (type === 'lock' && window.Sfx && window.Sfx.play) window.Sfx.play(1000, 'square', 0.1, 0.1);
+            else if (type === 'vulcan' && window.Sfx && window.Sfx.play) window.Sfx.play(300, 'sawtooth', 0.08, 0.15);
             else if (type === 'missile') {
                 if(this.ctx) {
                     const t=this.ctx.currentTime, o=this.ctx.createOscillator(), g=this.ctx.createGain();
@@ -130,20 +130,20 @@
                     o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t+1);
                 }
             }
-            else if (type === 'boom') window.Sfx?.play(80, 'sawtooth', 0.4, 0.2);
+            else if (type === 'boom' && window.Sfx && window.Sfx.play) window.Sfx.play(80, 'sawtooth', 0.4, 0.2);
         },
         stop: function() { if (this.engineSrc) { try { this.engineSrc.stop(); } catch(e){} this.engineSrc = null; } }
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL V10.JS COM MULTIPLAYER SUAVE E FÍSICA AAA
+    // 3. ESTRUTURA PRINCIPAL (FÍSICA + MULTIPLAYER FIREBASE)
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
         session: { kills: 0, cash: 0, goal: 30 },
         ship: { hp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false },
-        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.9 },
-        timer: 3.0, keys: {}, keysBound: false, touchBound: false,
+        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.85 },
+        timer: 5.0, keys: {}, keysBound: false, touchBound: false,
         entities: [], bullets: [], missiles: [], clouds: [], fx: [], floaters: [],
         combat: { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 },
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, loop: null },
@@ -152,7 +152,7 @@
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: 0, goal: 30 };
             this.ship = { hp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false };
-            this.pilot = { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.9 };
+            this.pilot = { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.85 };
             this.entities = []; this.bullets = []; this.missiles = []; this.clouds = []; this.fx = []; this.floaters = [];
             this.combat = { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 };
             
@@ -168,6 +168,7 @@
                 window.addEventListener('keyup', (e) => this.keys[e.key] = false);
                 this.keysBound = true;
             }
+            
             if (!this.touchBound) {
                 const handleTap = () => {
                     if (this.state === 'LOBBY') {
@@ -177,24 +178,32 @@
                             this.net.playersRef.child(this.net.uid).update({ready: true});
                         }
                     } else if (this.state === 'CALIBRATION') {
-                        this.timer = 0; 
+                        this.timer = 0; // Pula direto
                     }
                 };
-                window.addEventListener('pointerdown', handleTap);
-                window.addEventListener('touchstart', handleTap);
+                // Liga o clique direto no Canvas do jogo para evitar falhas de contexto
+                const cvs = window.System?.canvas || document.getElementById('game-canvas');
+                if (cvs) {
+                    cvs.addEventListener('pointerdown', handleTap);
+                    cvs.addEventListener('touchstart', handleTap);
+                } else {
+                    window.addEventListener('pointerdown', handleTap);
+                }
                 this.touchBound = true;
             }
 
             if (this.mode !== 'SINGLE' && window.DB) this._initNet();
-            else { this.state = 'CALIBRATION'; this.timer = 3.0; }
+            else { this.state = 'CALIBRATION'; this.timer = 5.0; } // Aumentado tempo
             GameSfx.init();
         },
 
         _initNet: function() {
             this.state = 'LOBBY'; this.net.players = {};
-            this.net.sessionRef = window.DB.ref('usarmy_sessions/aero_' + this.mode);
-            this.net.playersRef = this.net.sessionRef.child('pilots');
+            // Alinhado com o sistema do jogo de Kart para evitar bugs de permissão
+            this.net.sessionRef = window.DB.ref('sessions/flight_' + this.mode);
+            this.net.playersRef = this.net.sessionRef.child('players');
             this.net.playersRef.child(this.net.uid).onDisconnect().remove();
+            
             this.net.sessionRef.child('host').once('value').then(snap => {
                 if (!snap.val()) {
                     this.net.isHost = true;
@@ -203,13 +212,13 @@
                     this.net.playersRef.remove();
                 }
                 this.net.playersRef.child(this.net.uid).set({
-                    name: window.Profile?.username || 'PILOT', ready: false, hp: 100,
-                    x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0
+                    name: window.Profile?.username || 'PILOTO DESCONHECIDO', 
+                    ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0
                 });
             });
             this.net.playersRef.on('value', snap => { this.net.players = snap.val() || {}; });
             this.net.sessionRef.child('state').on('value', snap => {
-                if (snap.val() === 'PLAYING' && this.state === 'LOBBY') { this.state = 'CALIBRATION'; this.timer = 3.0; }
+                if (snap.val() === 'PLAYING' && this.state === 'LOBBY') { this.state = 'CALIBRATION'; this.timer = 5.0; }
             });
         },
 
@@ -222,7 +231,7 @@
             if (dt < 0.001) return this.session.cash || 0;
 
             if (this.state === 'LOBBY') { 
-                if (this.keys[' '] || this.keys['ArrowUp']) {
+                if (this.keys[' ']) {
                     if (this.net.isHost && Object.keys(this.net.players).length >= 1) { this.net.sessionRef?.child('state').set('PLAYING'); }
                     else if (!this.net.isHost && this.net.playersRef) { this.net.playersRef.child(this.net.uid).update({ready: true}); }
                 }
@@ -233,7 +242,13 @@
             this._readPose(pose, w, h, dt); 
             
             if (this.state === 'CALIBRATION') {
-                this.timer -= dt;
+                // SÓ CONTA O TEMPO SE O JOGADOR ESTIVER POSICIONADO
+                if (this.pilot.active) {
+                    this.timer -= dt;
+                } else {
+                    this.timer = 5.0; // Reinicia o tempo se as mãos sumirem
+                }
+                
                 this._drawCalib(ctx, w, h);
                 if (this.timer <= 0 || this.keys[' ']) this._startMission();
                 return 0;
@@ -243,9 +258,7 @@
                 return this.session.cash;
             }
 
-            // -----------------------------------------------------------------
-            // MULTIPLAYER DEAD RECKONING (INTERPOLAÇÃO SUAVE EM TEMPO REAL)
-            // -----------------------------------------------------------------
+            // MULTIPLAYER DEAD RECKONING
             if (this.mode !== 'SINGLE' && this.net.players) {
                 Object.keys(this.net.players).forEach(uid => {
                     if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
@@ -253,23 +266,11 @@
                         rp.x += (rp.vx || 0) * dt;
                         rp.y += (rp.vy || 0) * dt;
                         rp.z += (rp.vz || 0) * dt;
-                        
-                        // Suaviza a rotação do avião remoto também
-                        let pSpd = Math.hypot(rp.vx || 0, rp.vy || 0, rp.vz || 0);
-                        if (pSpd > 10) {
-                            let tY = Math.atan2((rp.vx||0), (rp.vz||0));
-                            let tP = Math.asin((rp.vy||0) / pSpd);
-                            // Ajuste contínuo para evitar saltos visuais
-                            rp.yaw = tY; 
-                            rp.pitch = tP;
-                        }
                     }
                 });
             }
 
-            // -----------------------------------------------------------------
             // FÍSICA AERODINÂMICA AAA
-            // -----------------------------------------------------------------
             let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
             let tempK = 288.15 - 0.0065 * altitude; 
             let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -356,11 +357,10 @@
             }
             this.ship.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.ship.pitch));
             
+            // Failsafe
             if (!Number.isFinite(this.ship.x)) this.ship.x = 0;
             if (!Number.isFinite(this.ship.y)) this.ship.y = 3000;
             if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
-
-            // -----------------------------------------------------------------
 
             this._processCombat(dt, w, h);
             this._spawnEnemies();
@@ -386,6 +386,7 @@
             }
         },
 
+        // YOKE DE DUAS MÃOS
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false; 
@@ -434,6 +435,7 @@
                         else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY)/200); 
                     }
 
+                    // Bater palmas atira
                     if (Math.hypot(rx - lx, ry - ly) < 120 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
@@ -588,7 +590,7 @@
                             if (uid!==this.net.uid && this.net.players[uid]?.hp>0 && Math.hypot(b.x-this.net.players[uid].x, b.y-this.net.players[uid].y, b.z-this.net.players[uid].z)<150) {
                                 b.life=0;
                                 this._fx(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,'#f90',4,50);
-                                window.DB?.ref(`usarmy_sessions/aero_${this.mode}/pilots/${uid}/hp`).set(this.net.players[uid].hp-10);
+                                window.DB?.ref(`sessions/flight_${this.mode}/players/${uid}/hp`).set(this.net.players[uid].hp-10);
                             }
                         });
                     }
@@ -610,7 +612,7 @@
                     
                     if (dist < 80) { 
                         if (m.target.isPlayer && this.mode==='PVP') {
-                            window.DB?.ref(`usarmy_sessions/aero_${this.mode}/pilots/${m.target.uid}/hp`).set(m.target.hp-50);
+                            window.DB?.ref(`sessions/flight_${this.mode}/players/${m.target.uid}/hp`).set(m.target.hp-50);
                             this._fx(m.target.x,m.target.y,m.target.z,'#f33',40,300);
                             this.session.cash += 500;
                         } else if (!m.target.isPlayer) {
@@ -667,7 +669,7 @@
             GameSfx.play('boom');
             this._fx(t.x,t.y,t.z,'#f33',40,300);
             this._fx(t.x,t.y,t.z,'#234',30,600);
-            this.floaters.push({x:t.x,y:t.y,z:t.z,text:`+$${rew}`,life:2});
+            this.floaters.push({x:t.x,y:t.y,z:t.z,text:`+ R$ ${rew}`,life:2});
             this.session.kills++;
             this.session.cash += rew;
             if (this.session.kills >= this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
@@ -704,14 +706,11 @@
             }
         },
 
-        // =====================================================================
-        // VISUAIS COMPLETOS (BLACK PS2 & RADAR TÁTICO)
-        // =====================================================================
         _draw: function(ctx, w, h) {
             ctx.save();
-            if (this.ship.gForce > 3.0) {
-                let shake = (this.ship.gForce - 3.0) * 2;
-                ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+            let gShake = Math.min(20, Math.max(0, (this.ship.gForce - 3.0) * 2));
+            if (gShake > 0) {
+                ctx.translate((Math.random()-0.5)*gShake, (Math.random()-0.5)*gShake);
             } else if (window.Gfx?.shake > 0.5) {
                 ctx.translate((Math.random()-0.5)*window.Gfx.shake, (Math.random()-0.5)*window.Gfx.shake);
             }
@@ -768,7 +767,8 @@
             if(this.mode!=='SINGLE' && this.net.players) Object.keys(this.net.players).forEach(uid=>{
                 if(uid!==this.net.uid&&this.net.players[uid]?.hp>0){
                     let rp = this.net.players[uid];
-                    let p=Engine3D.project(rp.x, rp.y, rp.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                    let px = rp.x + (rp.vx||0)*0.05, py = rp.y + (rp.vy||0)*0.05, pz = rp.z + (rp.vz||0)*0.05; 
+                    let p=Engine3D.project(px, py, pz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                     if(p.visible)buf.push({p,t:'p',o:rp,id:uid});
                 }
             });
@@ -780,7 +780,7 @@
                 else if(d.t==='e'||d.t==='p'){
                     let isNet=d.t==='p';
                     Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#0ff':'#f33'):'#00ffcc');
-                    if(isNet){ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALLY',p.x,p.y-300*s-10);}
+                    if(isNet){ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
                     
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
                     let bs = Math.max(40, 250*s); 
@@ -790,7 +790,7 @@
                         ctx.beginPath(); ctx.moveTo(p.x, p.y + bs); ctx.lineTo(p.x, p.y + bs + 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x - bs, p.y); ctx.lineTo(p.x - bs - 20, p.y); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x + bs, p.y); ctx.lineTo(p.x + bs + 20, p.y); ctx.stroke();
-                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('LOCKED',p.x,p.y+bs+35);
+                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('MIRA TRAVADA',p.x,p.y+bs+35);
                     }
                 }
                 else if(d.t==='b'){ctx.globalCompositeOperation='lighter';ctx.fillStyle=o.isEnemy?'#f00':'#ff0';ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2,6*s),0,Math.PI*2);ctx.fill();ctx.globalCompositeOperation='source-over';}
@@ -809,9 +809,7 @@
             }
         },
         
-        // -----------------------------------------------------------------
-        // O NOVO RADAR TÁTICO TRIDIMENSIONAL (AWACS)
-        // -----------------------------------------------------------------
+        // NOVO RADAR 2D LIMPO
         _drawHUD: function(ctx,w,h){
             let p = this.ship;
             ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,w,50);
@@ -833,68 +831,39 @@
 
             if (p.isStalling) {
                 ctx.fillStyle = (Math.floor(performance.now() / 150) % 2 === 0) ? "#e74c3c" : "#fff"; 
-                ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One'"; ctx.fillText("STALL - PUSH DOWN", w/2, h/2 - 100); 
+                ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One'"; ctx.fillText("ESTOL! DESÇA O NARIZ!", w/2, h/2 - 100); 
             }
 
-            // RADAR TÁTICO HD
-            const rx=w-90, ry=140, rr=75; // Tamanho expandido
-            ctx.fillStyle='rgba(0,30,10,0.85)'; ctx.beginPath(); ctx.arc(rx,ry,rr,0,Math.PI*2); ctx.fill();
+            const rx=w-80,ry=130,rr=60;
+            ctx.fillStyle='rgba(0,30,10,0.7)';ctx.beginPath();ctx.arc(rx,ry,rr,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='#00ffcc';ctx.lineWidth=2;ctx.stroke();
+            ctx.beginPath();ctx.moveTo(rx,ry-rr);ctx.lineTo(rx,ry+rr);ctx.moveTo(rx-rr,ry);ctx.lineTo(rx+rr,ry);ctx.stroke();
+            ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(rx,ry-6);ctx.lineTo(rx-5,ry+4);ctx.lineTo(rx+5,ry+4);ctx.fill();
             
-            // Grelha de Radar
-            ctx.strokeStyle='rgba(0,255,204,0.3)'; ctx.lineWidth=1;
-            ctx.beginPath(); ctx.arc(rx,ry,rr*0.5,0,Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(rx,ry,rr,0,Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(rx,ry-rr); ctx.lineTo(rx,ry+rr); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(rx-rr,ry); ctx.lineTo(rx+rr,ry); ctx.stroke();
-            
-            // Cone de FOV Frontal (Onde o avião está a olhar)
-            ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx-rr*0.6, ry-rr*0.8); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx+rr*0.6, ry-rr*0.8); ctx.stroke();
-
-            // Ponto do Jogador
-            ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(rx,ry-6); ctx.lineTo(rx-5,ry+4); ctx.lineTo(rx+5,ry+4); ctx.fill();
-            
-            // Plotador Avançado com Indicação de Altitude (Stems)
             const RADAR_RANGE = 40000;
-            const plot=(tx, ty, tz, col, isTarget)=>{
-                let dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
+            const plot = (tx, tz, col, isTarget) => {
+                let dx = tx - p.x, dz = tz - p.z;
                 let cr = Math.cos(p.yaw), sr = Math.sin(p.yaw);
-                
-                // Rotaciona o vetor inimigo para o espaço local do avião
                 let lx = dx*cr - dz*sr;
                 let lz = dx*sr + dz*cr;
                 let d = Math.hypot(lx, lz);
                 
-                if(d < RADAR_RANGE) {
+                if (d < RADAR_RANGE) {
                     let px = rx + (lx/RADAR_RANGE)*rr;
-                    let py = ry - (lz/RADAR_RANGE)*rr; // Menos porque o Canvas inverte o Y
+                    let py = ry - (lz/RADAR_RANGE)*rr;
                     
-                    // Desenha o Stem de Altitude (1px para cada 500m de diferença)
-                    let altDiff = (dy / 500); 
-                    ctx.strokeStyle = col; ctx.lineWidth = 1;
-                    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - altDiff); ctx.stroke();
+                    ctx.fillStyle = col;
+                    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
                     
-                    // Bolinha do inimigo
-                    ctx.fillStyle=col; 
-                    ctx.beginPath(); ctx.arc(px, py - altDiff, 3, 0, Math.PI*2); ctx.fill();
-                    
-                    // Círculo se estiver trancado
                     if (isTarget) {
-                        ctx.strokeStyle = '#ff0000'; 
-                        ctx.beginPath(); ctx.arc(px, py - altDiff, 6, 0, Math.PI*2); ctx.stroke();
+                        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.stroke();
                     }
                 }
             };
 
-            this.entities.forEach(e => plot(e.x, e.y, e.z, e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
-            
-            if(this.mode!=='SINGLE' && this.net.players) {
-                Object.keys(this.net.players).forEach(uid => {
-                    if(uid!==this.net.uid && this.net.players[uid]?.hp>0) {
-                        plot(this.net.players[uid].x, this.net.players[uid].y, this.net.players[uid].z, this.mode==='COOP'?'#00ffff':'#ff0000', false);
-                    }
-                });
-            }
+            this.entities.forEach(e => plot(e.x, e.z, '#ff0000', this.combat.target === e));
+            if(this.mode!=='SINGLE'&&this.net.players)Object.keys(this.net.players).forEach(uid=>{if(uid!==this.net.uid&&this.net.players[uid]?.hp>0)plot(this.net.players[uid].x,this.net.players[uid].z,this.mode==='COOP'?'#00ffff':'#ff0000', false);});
         },
 
         _drawCockpit: function(ctx,w,h){
@@ -940,59 +909,66 @@
                 if (this.combat.target) {
                     if (this.combat.lockTimer >= 0.5) {
                         ctx.fillStyle = "#ff0000"; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
-                        ctx.fillText("CLAP TO FIRE!", 0, -50);
+                        ctx.fillText("JUNTE AS MÃOS E ATIRE!", 0, -50);
                     } else {
                         ctx.fillStyle = "#ffcc00"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
-                        ctx.fillText("LOCKING...", 0, -50);
+                        ctx.fillText("TRAVANDO MIRA...", 0, -50);
                     }
                 }
 
                 ctx.restore();
             } else {
-                ctx.fillStyle='#ff0000';ctx.textAlign='center';ctx.font='bold 22px Arial';ctx.fillText('PLACE HANDS ON SCREEN',cx,h-100);
+                ctx.fillStyle='#ff0000';ctx.textAlign='center';ctx.font='bold 22px Arial';ctx.fillText('POSICIONE AS MÃOS NO ECRÃ',cx,h-100);
             }
 
             ctx.fillStyle='rgba(0,15,10,0.8)';ctx.fillRect(0,h-50,w,50);
             ctx.fillStyle='#222';ctx.fillRect(20,h-30,w/2 - 40,12);
             ctx.fillStyle=this.ship.hp>30?'#00ffcc':'#ff3300';
             ctx.fillRect(20,h-30,(w/2 - 40)*(Math.max(0,this.ship.hp)/100),12);
-            ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='left';ctx.fillText(`HP: ${Math.floor(this.ship.hp)}%`,20,h-35);
-            ctx.fillStyle='#f1c40f';ctx.font='bold 22px "Russo One"';ctx.textAlign='right';ctx.fillText(`$${this.session.cash}`,w-20,h-20);
+            ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='left';ctx.fillText(`INTEGRIDADE: ${Math.floor(this.ship.hp)}%`,20,h-35);
+            ctx.fillStyle='#f1c40f';ctx.font='bold 22px "Russo One"';ctx.textAlign='right';ctx.fillText(`R$ ${this.session.cash}`,w-20,h-20);
         },
         
         _drawLobby: function(ctx,w,h){
             ctx.fillStyle='rgba(10,20,10,0.95)';ctx.fillRect(0,0,w,h);
-            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 40px "Russo One"';ctx.fillText('AERO STRIKE: MULTIPLAYER',w/2,h*0.15);
+            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 40px "Russo One"';ctx.fillText('SALA DE ESPERA',w/2,h*0.15);
             const ps=Object.keys(this.net.players);
-            ctx.font='bold 24px Arial';ctx.fillStyle='#fff';ctx.fillText(`PILOTS: ${ps.length}`,w/2,h*0.25);
+            ctx.font='bold 24px Arial';ctx.fillStyle='#fff';ctx.fillText(`PILOTOS CONECTADOS: ${ps.length}`,w/2,h*0.25);
             let py=h*0.35;
             ps.forEach(uid=>{
                 let p = this.net.players[uid];
-                ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';ctx.fillText(`[${p.ready?'READY':'WAITING'}] ${p.name}`,w/2,py);py+=40;
+                ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';ctx.fillText(`[${p.ready?'PRONTO':'AGUARDANDO'}] ${p.name}`,w/2,py);py+=40;
             });
             
             if(this.net.isHost){
                 const r=ps.length>=1;
                 ctx.fillStyle=r?'#c00':'#333';ctx.fillRect(w/2-200,h*0.85,400,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(r?'TOQUE NA TELA PARA INICIAR':'WAITING...',w/2,h*0.85+38);
+                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(r?'TOQUE PARA INICIAR A MISSÃO':'AGUARDANDO...',w/2,h*0.85+38);
             }else{
                 let isR = this.net.players[this.net.uid]?.ready;
                 ctx.fillStyle=isR?'#e83':'#27a';ctx.fillRect(w/2-200,h*0.85,400,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(isR?'STANDBY':'TOQUE NA TELA: READY',w/2,h*0.85+38);
+                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(isR?'AGUARDANDO LÍDER':'TOQUE PARA CONFIRMAR',w/2,h*0.85+38);
             }
         },
 
         _drawCalib: function(ctx,w,h){
             ctx.fillStyle='rgba(0,10,15,0.95)';ctx.fillRect(0,0,w,h);
             ctx.strokeStyle='rgba(0,255,204,0.2)';ctx.lineWidth=2;ctx.strokeRect(50,50,w-100,h-100);
-            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 30px "Russo One"';ctx.fillText('PILOT CALIBRATION',w/2,h*0.3);
-            ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('Coloque as DUAS MÃOS no ecrã.',w/2,h*0.4);
-            ctx.fillStyle='#f1c40f';ctx.font='bold 16px Arial';ctx.fillText('RAISE ARMS = CLIMB | LOWER ARMS = DIVE | CLAP = FIRE',w/2,h*0.5);
-            let pct=1-this.timer/3;
-            ctx.fillStyle='#111';ctx.fillRect(w/2-200,h*0.6,400,10);
-            ctx.fillStyle='#00ffcc';ctx.fillRect(w/2-200,h*0.6,400*pct,10);
-            ctx.fillStyle=this.pilot.active?'#00ffcc':'#f33';
-            ctx.fillText(this.pilot.active?'>> INPUT DETECTED':'>> POSITION CAMERA',w/2,h*0.7);
+            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 30px "Russo One"';ctx.fillText('CALIBRAÇÃO DO PILOTO',w/2,h*0.3);
+            ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('Posicione as DUAS MÃOS na frente da câmera.',w/2,h*0.4);
+            ctx.fillStyle='#f1c40f';ctx.font='bold 16px Arial';ctx.fillText('Gire como um volante para curvar. Suba/Desça para controlar o nariz.',w/2,h*0.48);
+            ctx.fillStyle='#ff5555';ctx.fillText('Junte as mãos (Palma) para disparar Mísseis.',w/2,h*0.53);
+            
+            let pct = 1 - (this.timer / 5.0);
+            ctx.fillStyle='#111';ctx.fillRect(w/2-200,h*0.65,400,15);
+            
+            if (this.pilot.active) {
+                ctx.fillStyle='#00ffcc';ctx.fillRect(w/2-200,h*0.65,400*pct,15);
+                ctx.fillText('MÃOS DETECTADAS - MANTENHA A POSIÇÃO (' + Math.ceil(this.timer) + 's)', w/2, h*0.75);
+            } else {
+                ctx.fillStyle='#f33';
+                ctx.fillText('AGUARDANDO MÃOS NA CÂMERA', w/2, h*0.75);
+            }
         },
 
         _drawEnd: function(ctx,w,h){
@@ -1000,21 +976,21 @@
             ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,w,h);
             ctx.textAlign='center';ctx.font='bold 40px "Russo One"';
             ctx.fillStyle=this.state==='VICTORY'?'#2ecc71':'#e74c3c';
-            ctx.fillText(this.state==='VICTORY'?'MISSION COMPLETE':'AIRCRAFT LOST',w/2,h/2);
+            ctx.fillText(this.state==='VICTORY'?'MISSÃO CUMPRIDA':'CAÇA ABATIDO',w/2,h/2);
             ctx.fillStyle='#f1c40f';ctx.font='bold 30px Arial';
-            ctx.fillText(`REWARDS: $${this.session.cash}`,w/2,h/2+60);
+            ctx.fillText(`RECOMPENSA: R$ ${this.session.cash}`,w/2,h/2+60);
         }
     };
 
     // Registro Automático
     const register = () => {
         if (window.System?.registerGame) {
-            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
+            window.System.registerGame('usarmy_flight_sim', 'Aero Strike: Combate', '✈️', Game, {
                 camera: 'user', camOpacity: 0.2,
                 phases: [
-                    { id: 'training', name: 'CAMPANHA SOLO', desc: 'Calibrate controls. Engage aerial targets.', mode: 'SINGLE', reqLvl: 1 },
-                    { id: 'coop', name: 'SQUADRON CO-OP', desc: 'Team up with allies vs AI.', mode: 'COOP', reqLvl: 1 },
-                    { id: 'pvp', name: 'AIR SUPERIORITY', desc: 'PvP dogfight for rewards.', mode: 'PVP', reqLvl: 1 }
+                    { id: 'training', name: 'TREINAMENTO BÁSICO', desc: 'Calibre os controles e abata os drones.', mode: 'SINGLE', reqLvl: 1 },
+                    { id: 'coop', name: 'CO-OP ESQUADRÃO', desc: 'Junte-se a aliados contra a IA.', mode: 'COOP', reqLvl: 1 },
+                    { id: 'pvp', name: 'COMBATE PVP', desc: 'Batalha aérea multijogador.', mode: 'PVP', reqLvl: 1 }
                 ]
             });
             return true;
