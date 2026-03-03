@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: ESCUDO ANTI-CRASH, FÍSICA ACE COMBAT, STATE MACHINE IA, PROGRESSÃO
+// STATUS: CRASH RESOLVIDO (PARTÍCULAS), FIX MODO SOLO, AUTO-HOST MIGRATION
 // =============================================================================
 
 (function() {
@@ -29,6 +29,16 @@
         maxRollRate: 4.5,
         overheatThreshold: 100
     };
+
+    function createParticle(x, y, z, c, size, life, type) {
+        return {
+            x: x, y: y, z: z,
+            vx: (Math.random() - 0.5) * 200,
+            vy: (Math.random() - 0.5) * 200,
+            vz: (Math.random() - 0.5) * 200,
+            life: life, maxLife: life, c: c, size: size, type: type
+        };
+    }
 
     // -----------------------------------------------------------------
     // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL (BLACK PS2 STYLE)
@@ -212,8 +222,13 @@
                 this.touchBound = true;
             }
 
-            if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && window.DB) this._initNet();
-            else this.state = 'LOBBY'; 
+            // CORREÇÃO MODO SOLO: Evita entrar no Lobby Firebase quando é Singleplayer
+            if ((this.mode === 'PVP' || this.mode === 'COOP') && window.DB) {
+                this._initNet();
+            } else {
+                this.state = 'HANGAR'; 
+                this.net.isHost = true; // Força permissões locais
+            }
             GameSfx.init();
         },
 
@@ -226,20 +241,29 @@
             this.net.playersRef.child(this.net.uid).onDisconnect().remove();
             
             let self = this;
-            this.net.sessionRef.child('host').once('value').then(snap => {
-                if (!snap.val()) {
-                    self.net.isHost = true;
-                    self.net.sessionRef.child('host').set(self.net.uid);
-                    self.net.sessionRef.child('state').set('LOBBY');
-                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
-                    self.net.playersRef.remove();
-                }
-                let uname = (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOTO';
-                self.net.playersRef.child(self.net.uid).set({
-                    name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
+            let uname = (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOTO';
+            
+            self.net.playersRef.child(self.net.uid).set({
+                name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
+            });
+
+            this.net.playersRef.on('value', snap => { 
+                self.net.players = snap.val() || {}; 
+                // AUTO HOST MIGRATION (Evita ficar preso esperando líder)
+                self.net.sessionRef.child('host').once('value').then(hSnap => {
+                    let currentHost = hSnap.val();
+                    if (!currentHost || !self.net.players[currentHost]) {
+                        self.net.isHost = true;
+                        self.net.sessionRef.child('host').set(self.net.uid);
+                        if (!currentHost) {
+                            self.net.sessionRef.child('state').set('LOBBY');
+                            self.net.sharedRef.set({ wave: 1, teamKills: 0 });
+                        }
+                    } else {
+                        self.net.isHost = (currentHost === self.net.uid);
+                    }
                 });
             });
-            this.net.playersRef.on('value', snap => { self.net.players = snap.val() || {}; });
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
             this.net.sessionRef.child('state').on('value', snap => {
                 if (snap.val() === 'HANGAR' && self.state === 'LOBBY') self.state = 'HANGAR';
@@ -269,14 +293,14 @@
             else if (y > h*0.48 && y < h*0.63) buy(800 * this.upgrades.missiles, 'missiles');
             else if (y > h*0.66 && y < h*0.81) buy(1000 * this.upgrades.armor, 'armor');
             else if (y > h*0.85) {
-                if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.isHost && this.net.sessionRef) this.net.sessionRef.child('state').set('PLAYING');
-                else if (this.mode === 'SINGLE' || this.mode === 'FREE') { this.state = 'CALIBRATION'; this.timer = 5.0; }
+                if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.isHost && this.net.sessionRef) {
+                    this.net.sessionRef.child('state').set('PLAYING');
+                } else if (this.mode === 'SINGLE' || this.mode === 'FREE') { 
+                    this.state = 'CALIBRATION'; this.timer = 5.0; 
+                }
             }
         },
 
-        // =====================================================================
-        // O UPDATE VITAL: ENVOLVIDO EM TRY/CATCH PARA NUNCA DAR TELA BRANCA
-        // =====================================================================
         update: function(ctx, w, h, pose) {
             try {
                 const now = performance.now();
@@ -288,9 +312,13 @@
 
                 if (this.state === 'LOBBY') { 
                     if (this.keys[' ']) {
-                        if (this.net.isHost && Object.keys(this.net.players).length >= 1) { if(this.net.sessionRef) this.net.sessionRef.child('state').set('HANGAR'); }
-                        else if (!this.net.isHost && this.net.playersRef) { this.net.playersRef.child(this.net.uid).update({ready: true}); }
-                        else if (this.mode === 'SINGLE' || this.mode === 'FREE') this.state = 'HANGAR';
+                        if (this.mode === 'SINGLE' || this.mode === 'FREE') {
+                            this.state = 'HANGAR';
+                        } else if (this.net.isHost && Object.keys(this.net.players).length > 0) { 
+                            if(this.net.sessionRef) this.net.sessionRef.child('state').set('HANGAR'); 
+                        } else if (!this.net.isHost && this.net.playersRef) { 
+                            this.net.playersRef.child(this.net.uid).update({ready: true}); 
+                        }
                     }
                     this._drawLobby(ctx, w, h); 
                     return 0; 
@@ -298,8 +326,11 @@
 
                 if (this.state === 'HANGAR') {
                     if (this.keys[' ']) {
-                        if (this.mode === 'SINGLE' || this.mode === 'FREE') { this.state = 'CALIBRATION'; this.timer = 5.0; }
-                        else if (this.net.isHost && this.net.sessionRef) { this.net.sessionRef.child('state').set('PLAYING'); }
+                        if (this.mode === 'SINGLE' || this.mode === 'FREE') { 
+                            this.state = 'CALIBRATION'; this.timer = 5.0; 
+                        } else if (this.net.isHost && this.net.sessionRef) { 
+                            this.net.sessionRef.child('state').set('PLAYING'); 
+                        }
                     }
                     this._drawHangar(ctx, w, h);
                     return 0;
@@ -316,7 +347,6 @@
                     
                     this._drawCalib(ctx, w, h);
                     if (this.timer <= 0 || this.keys[' ']) {
-                        // Aplica Upgrades sem mutar BASE global
                         this.currentStats.thrust = BASE_PLANE_STATS.thrust + ((this.upgrades.engine - 1) * 50000);
                         this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
                         this.ship.hp = this.ship.maxHp;
@@ -333,9 +363,7 @@
                     return this.session.cash;
                 }
 
-                // -------------------------------------------------------------
                 // SISTEMA DE DANO MODULAR
-                // -------------------------------------------------------------
                 if (this.ship.hp < this.ship.maxHp) {
                     let hpRatio = this.ship.hp / this.ship.maxHp;
                     if (hpRatio < 0.4) {
@@ -353,15 +381,11 @@
                 let wingEff = Math.max(0.3, this.ship.wingHealth / 100);
                 let structEff = Math.max(0.3, this.ship.structuralIntegrity / 100);
 
-                // -------------------------------------------------------------
                 // MULTIPLAYER INTERPOLATION PROFESSIONAL
-                // -------------------------------------------------------------
-                if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.players) {
+                if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.players) {
                     Object.keys(this.net.players).forEach(uid => {
                         if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                             let rp = this.net.players[uid];
-                            
-                            // Interpolation smoothing based on dt
                             rp.x += (rp.vx || 0) * dt; 
                             rp.y += (rp.vy || 0) * dt; 
                             rp.z += (rp.vz || 0) * dt;
@@ -380,9 +404,7 @@
                     });
                 }
 
-                // -------------------------------------------------------------
                 // FÍSICA ARCADE-SIM TÁTICA 
-                // -------------------------------------------------------------
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
                 let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -499,16 +521,14 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
+                // ESCUDO ANTI-CRASH VISUAL (PREVINE TELA BRANCA)
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
-                ctx.fillStyle = '#ff0000'; ctx.font = '20px Arial';
-                ctx.fillText("SISTEMA DE VOO REINICIANDO (AUTO-RECOVERY)...", 50, 50);
+                ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
+                ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
                 return 0;
             }
         },
 
-        // =====================================================================
-        // O VERDADEIRO VOLANTE (YOKE) DE DUAS MÃOS - SUPER RESPONSIVO
-        // =====================================================================
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false; 
@@ -588,7 +608,7 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
-                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.707 && p.z < closestZ) { // 45 deg FOV
+                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.707 && p.z < closestZ) { 
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
                 }
@@ -596,7 +616,7 @@
 
             this.entities.forEach(e => { if(e.type && (e.type.startsWith('jet') || e.type === 'boss')) scan(e, false); });
 
-            if (this.mode === 'PVP' && this.net.players) {
+            if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.players) {
                 Object.keys(this.net.players).forEach(id => {
                     if (id !== this.net.uid && this.net.players[id]?.hp > 0) scan(this.net.players[id], true, id);
                 });
@@ -620,13 +640,9 @@
                 this.combat.vulcanCd = performance.now();
                 let spd = this.ship.speed + 1200;
                 
-                let dist = Math.hypot(this.combat.target.x - this.ship.x, this.combat.target.y - this.ship.y, this.combat.target.z - this.ship.z);
-                if (dist < 1) dist = 1;
-                let leadTime = dist / spd;
-                
-                let tX = this.combat.target.x + (this.combat.target.vx || 0) * leadTime;
-                let tY = this.combat.target.y + (this.combat.target.vy || 0) * leadTime;
-                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * leadTime;
+                let tX = this.combat.target.x + (this.combat.target.vx || 0) * 0.1;
+                let tY = this.combat.target.y + (this.combat.target.vy || 0) * 0.1;
+                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * 0.1;
 
                 let dx = tX - this.ship.x, dy = tY - this.ship.y, dz = tZ - this.ship.z;
                 let distLead = Math.hypot(dx,dy,dz);
@@ -644,21 +660,21 @@
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
 
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0) {
-                if (Math.random() < 0.95) { // 5% failure chance
+                if (Math.random() < 0.95) { 
                     this.missiles.push({
                         x: this.ship.x, y: this.ship.y-50, z: this.ship.z,
                         vx: this.ship.vx, vy: this.ship.vy, vz: this.ship.vz,
                         target: this.combat.target, life: 10, maxG: 40 + (this.upgrades.missiles * 5), trackTime: 0
                     });
                     GameSfx.play('missile');
-                    if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.playersRef && this.net.uid) {
+                    if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.playersRef && this.net.uid) {
                         this.net.playersRef.child(this.net.uid).child('missilesFired').transaction(current => (current || 0) + 1);
                     }
                 }
                 this.combat.missileCd = Math.max(0.5, 1.5 - (this.upgrades.missiles * 0.2)); 
             }
 
-            if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.playersRef) {
+            if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.playersRef) {
                 if (performance.now() - this.net.lastSend > 100) {
                     this.net.playersRef.child(this.net.uid).update({ firing: firingState, timestamp: Date.now() });
                     this.net.lastSend = performance.now();
@@ -932,7 +948,7 @@
                 m.vx += vDirX * 800 * dt; m.vy += vDirY * 800 * dt; m.vz += vDirZ * 800 * dt;
 
                 m.x += m.vx*dt; m.y += m.vy*dt; m.z += m.vz*dt; m.life -= dt;
-                this.fx.push({x:m.x,y:m.y,z:m.z,vx:(Math.random()-0.5)*15,vy:(Math.random()-0.5)*15,vz:(Math.random()-0.5)*15,life:0.5,c:'rgba(255,200,100,0.8)',size:8});
+                this.fx.push(createParticle(m.x, m.y, m.z, 'rgba(255,200,100,0.8)', 8, 0.5, 'smoke'));
                 if (m.life <= 0) this.missiles.splice(i,1);
             }
         },
@@ -950,6 +966,12 @@
             
             if (this.fx.length > 150) this.fx.splice(0, this.fx.length - 150);
             this.fx = this.fx.filter(f => { f.x+=f.vx/60; f.y+=f.vy/60; f.z+=f.vz/60; f.life-=1/60; return f.life>0; });
+        },
+
+        _fx: function(x, y, z, c, n, s) {
+            for(let i=0; i<n; i++) {
+                this.fx.push(createParticle(x, y, z, c, s + Math.random()*200, 1+Math.random(), 'explosion'));
+            }
         },
 
         _kill: function(t, rew) {
@@ -1076,14 +1098,16 @@
             });
             add(this.clouds,'c'); add(this.entities,'e'); add(this.bullets,'b'); add(this.missiles,'m'); add(this.fx,'f'); add(this.floaters,'x');
             
-            if(this.mode!=='SINGLE' && this.mode!=='FREE' && this.net.players) Object.keys(this.net.players).forEach(uid=>{
-                if(uid!==this.net.uid&&this.net.players[uid]?.hp>0){
-                    let rp = this.net.players[uid];
-                    let px = rp.x + (rp.vx||0)*0.05, py = rp.y + (rp.vy||0)*0.05, pz = rp.z + (rp.vz||0)*0.05; 
-                    let p=Engine3D.project(px, py, pz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                    if(p.visible)buf.push({p,t:'p',o:rp,id:uid});
-                }
-            });
+            if((this.mode==='PVP' || this.mode==='COOP') && this.net.players) {
+                Object.keys(this.net.players).forEach(uid=>{
+                    if(uid!==this.net.uid&&this.net.players[uid]?.hp>0){
+                        let rp = this.net.players[uid];
+                        let px = rp.x + (rp.vx||0)*0.05, py = rp.y + (rp.vy||0)*0.05, pz = rp.z + (rp.vz||0)*0.05; 
+                        let p=Engine3D.project(px, py, pz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                        if(p.visible)buf.push({p,t:'p',o:rp,id:uid});
+                    }
+                });
+            }
             buf.sort((a,b)=>b.p.z-a.p.z);
             buf.forEach(d=>{
                 let p=d.p,s=p.s,o=d.o;
@@ -1220,7 +1244,7 @@
             };
 
             this.entities.forEach(e => plot(e.x, e.y, e.z, e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
-            if(this.mode!=='SINGLE' && this.mode!=='FREE' && this.net.players) {
+            if((this.mode==='PVP' || this.mode==='COOP') && this.net.players) {
                 Object.keys(this.net.players).forEach(uid => {
                     if(uid!==this.net.uid && this.net.players[uid]?.hp>0) {
                         plot(this.net.players[uid].x, this.net.players[uid].y, this.net.players[uid].z, this.mode==='COOP'?'#00ffff':'#ff0000', false);
