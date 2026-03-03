@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. BULLETPROOF PHYSICS, 360 SKYBOX, DOGFIGHT AI & HUD.
+// STATUS: 100% COMPLETO. FÍSICA CORRIGIDA, DOGFIGHT AI, SKYBOX 360, RADAR DE ALTITUDE.
 // =============================================================================
 
 (function() {
@@ -41,21 +41,38 @@
     }
 
     // -----------------------------------------------------------------
-    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL (TRUE 3D PROJECTION)
+    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL (TRUE 3D PROJECTION CORRECTED)
     // -----------------------------------------------------------------
     const Engine3D = {
         fov: 800,
         project: function(objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) {
             let dx = objX - camX, dy = objY - camY, dz = objZ - camZ;
-            let cy = Math.cos(-yaw), sy = Math.sin(-yaw);
-            let x1 = dx * cy - dz * sy, z1 = dx * sy + dz * cy;
-            let cp = Math.cos(-pitch), sp = Math.sin(-pitch);
-            let y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
+            
+            // CORREÇÃO CRÍTICA: Rotação Yaw (Direção) correta
+            let cy = Math.cos(yaw), sy = Math.sin(yaw);
+            let x1 = dx * cy - dz * sy;
+            let z1 = dx * sy + dz * cy;
+            
+            // CORREÇÃO CRÍTICA: Rotação Pitch (Bico) correta
+            let cp = Math.cos(pitch), sp = Math.sin(pitch);
+            let y2 = dy * cp - z1 * sp;
+            let z2 = dy * sp + z1 * cp;
+            
             if (z2 < 10) return { visible: false };
+            
+            // Rotação Roll (Inclinação lateral)
             let cr = Math.cos(roll), sr = Math.sin(roll);
-            let finalX = x1 * cr - y2 * sr, finalY = x1 * sr + y2 * cr;
+            let finalX = x1 * cr - y2 * sr;
+            let finalY = x1 * sr + y2 * cr;
+            
             let scale = Engine3D.fov / z2;
-            return { x: (w/2) + (finalX * scale), y: (h/2) - (finalY * scale), s: scale, z: z2, visible: true };
+            return { 
+                x: (w/2) + (finalX * scale), 
+                y: (h/2) - (finalY * scale), // Canvas Y cresce para baixo, então subtraímos
+                s: scale, 
+                z: z2, 
+                visible: true 
+            };
         },
         
         drawJetModel: function(ctx, px, py, scale, roll, isEnemy, color) {
@@ -232,7 +249,10 @@
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
                         } else if (self.state === 'CALIBRATION') {
                             self.timer = 0; 
-                        } 
+                        } else if (self.state === 'PLAYING') {
+                            self.pilot.headTilt = true;
+                            setTimeout(() => { self.pilot.headTilt = false; }, 250);
+                        }
                     } catch(err) { console.error("Touch Error:", err); }
                 };
                 window.addEventListener('pointerdown', handleTap);
@@ -380,16 +400,16 @@
                 if (dt > 0.05) dt = 0.05; 
                 if (dt < 0.001) return this.session.cash || 0;
 
-                // PROTEÇÃO ANTI-CRASH (Limpeza de NaN na raiz)
-                if (isNaN(this.ship.vx) || !Number.isFinite(this.ship.vx)) this.ship.vx = 0;
-                if (isNaN(this.ship.vy) || !Number.isFinite(this.ship.vy)) this.ship.vy = 0;
-                if (isNaN(this.ship.vz) || !Number.isFinite(this.ship.vz)) this.ship.vz = 250;
-                if (isNaN(this.ship.x)  || !Number.isFinite(this.ship.x))  this.ship.x = 0;
-                if (isNaN(this.ship.y)  || !Number.isFinite(this.ship.y))  this.ship.y = 3000;
-                if (isNaN(this.ship.z)  || !Number.isFinite(this.ship.z))  this.ship.z = 0;
-                if (isNaN(this.ship.pitch) || !Number.isFinite(this.ship.pitch)) this.ship.pitch = 0;
-                if (isNaN(this.ship.yaw)   || !Number.isFinite(this.ship.yaw))   this.ship.yaw = 0;
-                if (isNaN(this.ship.roll)  || !Number.isFinite(this.ship.roll))  this.ship.roll = 0;
+                // PROTEÇÃO ABSOLUTA ANTI-CRASH (Evita Tela de Recuperação)
+                if (!Number.isFinite(this.ship.vx)) this.ship.vx = 0;
+                if (!Number.isFinite(this.ship.vy)) this.ship.vy = 0;
+                if (!Number.isFinite(this.ship.vz)) this.ship.vz = 250;
+                if (!Number.isFinite(this.ship.x))  this.ship.x = 0;
+                if (!Number.isFinite(this.ship.y))  this.ship.y = 3000;
+                if (!Number.isFinite(this.ship.z))  this.ship.z = 0;
+                if (!Number.isFinite(this.ship.pitch)) this.ship.pitch = 0;
+                if (!Number.isFinite(this.ship.yaw))   this.ship.yaw = 0;
+                if (!Number.isFinite(this.ship.roll))  this.ship.roll = 0;
 
                 if (this.state === 'LOBBY') { 
                     if (this.keys[' ']) {
@@ -553,7 +573,7 @@
                 this.ship.vx += ax * dt;
                 this.ship.vz += az * dt;
 
-                // FÍSICA DE BICO (PITCH): Altitude diretamente atrelada ao ângulo de visão frontal
+                // CORREÇÃO CRÍTICA FÍSICA E ALTITUDE (Física atrelada ao bico)
                 let targetVy = fwdY * this.ship.speed;
                 this.ship.vy += (targetVy - this.ship.vy) * 5.0 * dt;
 
@@ -639,7 +659,7 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // INVERSÃO CORRETA DA CÂMARA FRONTAL (Espelhamento Perfeito)
+                    // CÁLCULO E INVERSÃO DE ESPELHO CORRETA (Direita/Esquerda)
                     let rx = (1 - ((rightWrist.x || 0) / 640)) * w; 
                     let ry = ((rightWrist.y || 0) / 480) * h;
                     let lx = (1 - ((leftWrist.x || 0) / 640)) * w; 
@@ -653,9 +673,9 @@
                         this.pilot.baseY = this.pilot.baseY * 0.95 + avgY * 0.05;
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
-                        // Subir os braços na câmera (avgY menor) = Subir o Bico (Pitch positivo)
+                        // LEVANTAR OS BRAÇOS = SUBIR O BICO DO AVIÃO E A ALTITUDE
                         let deltaY = avgY - this.pilot.baseY;
-                        let safeH = h > 0 ? h : 1; 
+                        let safeH = h > 0 ? h : 100; 
                         let pitchInput = -deltaY / (safeH * 0.15); 
                         trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput || 0)); 
                     }
@@ -730,7 +750,6 @@
             if (this.combat.locked && this.combat.target && performance.now() - this.combat.vulcanCd > 80) {
                 this.combat.vulcanCd = performance.now();
                 let spd = this.ship.speed + 1200;
-                if (isNaN(spd)) spd = 1500;
                 
                 let tX = this.combat.target.x + (this.combat.target.vx || 0) * 0.1;
                 let tY = this.combat.target.y + (this.combat.target.vy || 0) * 0.1;
@@ -796,6 +815,7 @@
             });
         },
 
+        // CORREÇÃO CRÍTICA DE IA: Modo "Dogfight / TAIL" e perseguição ativa
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -829,7 +849,7 @@
                     else if (minDist < 2000) e.state = 'EVADE'; 
                     else if (minDist > 12000) e.state = 'INTERCEPT';
                     else {
-                        // IA CAÇADORA: Procura perseguir a sua cauda.
+                        // IA Tenta ir para trás do jogador (as "6 horas") em 40% das vezes
                         e.state = Math.random() > 0.4 ? 'TAIL' : 'ENGAGE';
                     }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
@@ -1155,30 +1175,41 @@
             }
         },
 
+        // CORREÇÃO CRÍTICA DO VISUAL (Céu Seguro e Mundo em 360 Graus sem Fundo Preto)
         _drawWorld: function(ctx,w,h) {
-            // RENDERIZAÇÃO TÁTICA 10/10 SEM DOUBLE-ROTATION NO CÉU/TERRENO
-            let hy = Math.sin(this.ship.pitch) * h * 1.5;
+            let safeH = h > 0 ? h : 100; // Escudo final contra divisões e gradientes por 0
+            let hy = Math.sin(this.ship.pitch || 0) * safeH * 1.5;
             
             ctx.save();
-            ctx.translate(w/2,h/2);
-            ctx.rotate(-this.ship.roll);
+            ctx.translate(w/2, safeH/2);
+            ctx.rotate(-(this.ship.roll || 0));
             
-            let sG = ctx.createLinearGradient(0, -h*4, 0, hy + 0.1);
+            // CÉU REALISTA E SEGURO (Impede IndexSizeError no Gradient)
+            let skyY0 = -safeH * 4;
+            let skyY1 = hy;
+            if (Math.abs(skyY0 - skyY1) < 1) skyY1 = skyY0 + 1; 
+
+            let sG = ctx.createLinearGradient(0, skyY0, 0, skyY1);
             sG.addColorStop(0,'#020b14'); sG.addColorStop(0.6,'#0a2342'); sG.addColorStop(1,'#1d4d76');
             ctx.fillStyle = sG;
-            ctx.fillRect(-w*3, -h*4, w*6, hy + h*4);
+            ctx.fillRect(-w*3, -safeH*4, w*6, hy + safeH*4);
             
-            let gG = ctx.createLinearGradient(0, hy, 0, h*4 + 0.1);
+            // CHÃO VERDE TÁTICO E SEGURO
+            let groundY0 = hy;
+            let groundY1 = safeH * 4;
+            if (Math.abs(groundY0 - groundY1) < 1) groundY1 = groundY0 + 1;
+
+            let gG = ctx.createLinearGradient(0, groundY0, 0, groundY1);
             gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
             ctx.fillStyle = gG;
-            ctx.fillRect(-w*3, hy, w*6, h*4);
+            ctx.fillRect(-w*3, hy, w*6, safeH*4);
             ctx.restore();
 
-            // SOL DIRECIONAL FIXO (Mundo Real, não gira com a tela mas responde à câmera)
+            // SOL DIRECIONAL ABSOLUTO 3D
             let sunP = Engine3D.project(
                 this.ship.x, this.ship.y + 50000, this.ship.z + 200000, 
                 this.ship.x, this.ship.y, this.ship.z, 
-                this.ship.pitch, this.ship.yaw, this.ship.roll, w, h
+                this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH
             );
             
             if (sunP.visible) {
@@ -1188,26 +1219,34 @@
                  ctx.shadowBlur = 0;
             }
 
-            // GRID TÁTICO E PRÉDIOS: Desenhados de forma absoluta, sem rotação dupla
+            // GRID TÁTICO: Renderização de Profundidade Expandida
             ctx.strokeStyle='rgba(40, 150, 40, 0.3)'; ctx.lineWidth=2; ctx.beginPath();
-            let st=4000, sx=Math.floor(this.ship.x/st)*st-st*15, sz=Math.floor(this.ship.z/st)*st-st*15;
+            let st=4000;
+            let sx=Math.floor((this.ship.x||0)/st)*st - st*15;
+            let sz=Math.floor((this.ship.z||0)/st)*st - st*15;
+            
             for(let x=0; x<=30; x++) {
-                let p1 = Engine3D.project(sx + x*st, 0, sz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                let p2 = Engine3D.project(sx + x*st, 0, sz + 60*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
+                let p1 = Engine3D.project(sx + x*st, 0, sz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
+                let p2 = Engine3D.project(sx + x*st, 0, sz + 60*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
+                if (p1.visible && p2.visible && Number.isFinite(p1.x) && Number.isFinite(p2.x)) { 
+                    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); 
+                }
             }
             for (let z = 0; z <= 60; z++) {
-                let p1 = Engine3D.project(sx, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                let p2 = Engine3D.project(sx + 30*st, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
+                let p1 = Engine3D.project(sx, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
+                let p2 = Engine3D.project(sx + 30*st, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
+                if (p1.visible && p2.visible && Number.isFinite(p1.x) && Number.isFinite(p2.x)) { 
+                    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); 
+                }
             }
             ctx.stroke();
 
+            // PRÉDIOS E CENÁRIO 3D CORRETO
             this.scenery.forEach(s => {
-                let baseP = Engine3D.project(s.x, 0, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                let topP = Engine3D.project(s.x, s.h, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+                let baseP = Engine3D.project(s.x, 0, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
+                let topP = Engine3D.project(s.x, s.h, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
                 
-                if (baseP.visible && topP.visible && baseP.y > topP.y) {
+                if (baseP.visible && topP.visible && baseP.y > topP.y && Number.isFinite(baseP.x)) {
                     ctx.strokeStyle = s.color;
                     ctx.lineWidth = s.w * baseP.s;
                     ctx.lineCap = 'butt';
@@ -1221,7 +1260,7 @@
             let buf=[];
             const add=(list,t)=>list.forEach(o=>{
                 let p=Engine3D.project(o.x,o.y,o.z,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
-                if(p.visible)buf.push({p,t,o});
+                if(p.visible && Number.isFinite(p.x)) buf.push({p,t,o});
             });
             add(this.clouds,'c'); add(this.entities,'e'); add(this.bullets,'b'); add(this.missiles,'m'); add(this.fx,'f'); add(this.floaters,'x');
             
@@ -1231,7 +1270,7 @@
                         let rp = this.net.players[uid];
                         let px = rp.x + (rp.vx||0)*0.05, py = rp.y + (rp.vy||0)*0.05, pz = rp.z + (rp.vz||0)*0.05; 
                         let p=Engine3D.project(px, py, pz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                        if(p.visible)buf.push({p,t:'p',o:rp,id:uid});
+                        if(p.visible && Number.isFinite(p.x)) buf.push({p,t:'p',o:rp,id:uid});
                     }
                 });
             }
@@ -1375,7 +1414,7 @@
             ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(rx,ry-6); ctx.lineTo(rx-5,ry+4); ctx.lineTo(rx+5,ry+4); ctx.fill();
             
             const RADAR_RANGE = 40000;
-            const plot=(ty, tx, tz, col, isTarget)=>{
+            const plot=(tx, ty, tz, col, isTarget)=>{
                 let dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
                 let cr = Math.cos(p.yaw), sr = Math.sin(p.yaw);
                 let lx = dx*cr - dz*sr;
@@ -1389,17 +1428,14 @@
                     ctx.fillStyle=col; 
                     ctx.beginPath();
                     
-                    // CORREÇÃO CRÍTICA DO RADAR (INDICADOR REAL DE ALTITUDE ACIMA/ABAIXO)
+                    // CORREÇÃO RADAR: Sistema de Coordenadas Invertido Corrigido (Inimigo ACIMA = Seta para CIMA)
                     if (dy > 500) { 
-                        // Inimigo Acima -> Triângulo aponta para CIMA (▲)
                         ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); 
                         ctx.fill(); 
                     } else if (dy < -500) { 
-                        // Inimigo Abaixo -> Triângulo aponta para BAIXO (▼)
                         ctx.moveTo(px, py + 6); ctx.lineTo(px - 5, py - 4); ctx.lineTo(px + 5, py - 4); 
                         ctx.fill(); 
                     } else {
-                        // Mesma Altitude -> Círculo
                         ctx.arc(px, py, 4, 0, Math.PI*2); 
                         ctx.fill(); 
                     }
@@ -1411,11 +1447,11 @@
                 }
             };
 
-            this.entities.forEach(e => plot(e.y, e.x, e.z, e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
+            this.entities.forEach(e => plot(e.x, e.y, e.z, e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
             if((this.mode==='PVP' || this.mode==='COOP') && this.net.players) {
                 Object.keys(this.net.players).forEach(uid => {
                     if(uid!==this.net.uid && this.net.players[uid]?.hp>0) {
-                        plot(this.net.players[uid].y, this.net.players[uid].x, this.net.players[uid].z, this.mode==='COOP'?'#00ffff':'#ff0000', false);
+                        plot(this.net.players[uid].x, this.net.players[uid].y, this.net.players[uid].z, this.mode==='COOP'?'#00ffff':'#ff0000', false);
                     }
                 });
             }
