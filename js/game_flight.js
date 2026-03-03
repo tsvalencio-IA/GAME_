@@ -150,12 +150,12 @@
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, sharedRef: null, loop: null, sharedData: { wave: 1, teamKills: 0 }, lastSend: 0 },
 
         init: function(faseData) {
-            // FORÇA A LIMPEZA DE REDE IMEDIATA AO INICIAR
             this._cleanupNet();
             
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: (window.Profile && window.Profile.coins) ? window.Profile.coins : 0, goal: 15, wave: 1, xp: (window.Profile && window.Profile.xp) ? window.Profile.xp : 0 };
             this.upgrades = { engine: 1, missiles: 1, armor: 1 };
+            
             this.currentStats = JSON.parse(JSON.stringify(BASE_PLANE_STATS));
             
             this.ship = { 
@@ -202,21 +202,10 @@
                         
                         let touchX = ((cx - rect.left) / rect.width) * window.innerWidth;
                         let touchY = ((cy - rect.top) / rect.height) * window.innerHeight;
-                        let sc = Math.min(1, window.innerWidth / 600); // Fator Mobile para cliques
 
-                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20*sc && touchX < 120*sc && touchY > 20*sc && touchY < 60*sc) {
+                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20 && touchX < 120 && touchY > 20 && touchY < 60) {
                             self.cleanup();
                             if(window.System && window.System.home) window.System.home();
-                            return;
-                        }
-
-                        if (self.state === 'LOBBY' && (self.mode === 'PVP' || self.mode === 'COOP') && touchX > window.innerWidth - 180*sc && touchY > 20*sc && touchY < 60*sc) {
-                            if (self.net.sessionRef) {
-                                self.net.sessionRef.child('host').set(self.net.uid);
-                                self.net.sessionRef.child('state').set('LOBBY'); 
-                                self.net.isHost = true;
-                                if(window.System && window.System.msg) window.System.msg("VOCÊ ASSUMIU O CONTROLE (RESET)!", "#00ffcc");
-                            }
                             return;
                         }
 
@@ -233,10 +222,6 @@
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
                         } else if (self.state === 'CALIBRATION') {
                             self.timer = 0; 
-                        } else if (self.state === 'PLAYING') {
-                            // FALLBACK MOBILE: Toque na tela simula "juntar as mãos" para atirar mísseis no celular
-                            self.pilot.headTilt = true;
-                            setTimeout(() => { self.pilot.headTilt = false; }, 250);
                         }
                     } catch(err) { console.error("Touch Error:", err); }
                 };
@@ -248,7 +233,6 @@
             if ((this.mode === 'PVP' || this.mode === 'COOP') && window.DB) {
                 this._initNet();
             } else {
-                // FALLBACK ABSOLUTO PARA MODO OFFLINE (Ignora Firebase 100%)
                 this.state = 'HANGAR'; 
                 this.net.isHost = true; 
             }
@@ -285,28 +269,6 @@
 
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
-                // AUTO HOST MIGRATION (Evita ficar preso esperando líder)
-                self.net.sessionRef.child('host').once('value').then(hSnap => {
-                    let currentHost = hSnap.val();
-                    let connectedUIDs = Object.keys(self.net.players);
-                    if (!currentHost || !self.net.players[currentHost]) {
-                        if (connectedUIDs.length > 0) {
-                            let newHost = connectedUIDs[0];
-                            if (newHost === self.net.uid) {
-                                self.net.isHost = true;
-                                self.net.sessionRef.child('host').set(self.net.uid);
-                                if (!currentHost) {
-                                    self.net.sessionRef.child('state').set('LOBBY');
-                                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
-                                }
-                            } else {
-                                self.net.isHost = false;
-                            }
-                        }
-                    } else {
-                        self.net.isHost = (currentHost === self.net.uid);
-                    }
-                });
             });
 
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
@@ -357,7 +319,6 @@
                 } else GameSfx.play('vulcan');
             };
 
-            // Cliques responsivos baseados em % de altura
             if (y > h*0.3 && y < h*0.45) buy(500 * this.upgrades.engine, 'engine');
             else if (y > h*0.48 && y < h*0.63) buy(800 * this.upgrades.missiles, 'missiles');
             else if (y > h*0.66 && y < h*0.81) buy(1000 * this.upgrades.armor, 'armor');
@@ -370,14 +331,6 @@
             }
         },
 
-        _startMission: function() {
-            this.state = 'PLAYING';
-            this.session.wave = 1;
-            this.entities = [];
-            this.bullets = [];
-            this.missiles = [];
-        },
-
         update: function(ctx, w, h, pose) {
             try {
                 const now = performance.now();
@@ -387,7 +340,6 @@
                 if (dt > 0.05) dt = 0.05; 
                 if (dt < 0.001) return this.session.cash || 0;
 
-                // Proteção de Variáveis (Evita propagação de NaN na física)
                 if (isNaN(this.ship.vx)) this.ship.vx = 0;
                 if (isNaN(this.ship.vy)) this.ship.vy = 0;
                 if (isNaN(this.ship.vz)) this.ship.vz = 250;
@@ -432,14 +384,13 @@
                     
                     this._drawCalib(ctx, w, h);
                     if (this.timer <= 0 || this.keys[' ']) {
-                        // Aplica Upgrades sem mutar BASE global
                         this.currentStats.thrust = BASE_PLANE_STATS.thrust + ((this.upgrades.engine - 1) * 50000);
                         this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
                         this.ship.hp = this.ship.maxHp;
                         this.ship.engineHealth = 100;
                         this.ship.wingHealth = 100;
                         this.ship.structuralIntegrity = 100;
-                        this._startMission(); 
+                        this.state = 'PLAYING';
                     }
                     return 0;
                 }
@@ -449,7 +400,6 @@
                     return this.session.cash;
                 }
 
-                // SISTEMA DE DANO MODULAR
                 if (this.ship.hp < this.ship.maxHp) {
                     let hpRatio = this.ship.hp / this.ship.maxHp;
                     if (hpRatio < 0.4) {
@@ -467,13 +417,10 @@
                 let wingEff = Math.max(0.3, this.ship.wingHealth / 100);
                 let structEff = Math.max(0.3, this.ship.structuralIntegrity / 100);
 
-                // MULTIPLAYER INTERPOLATION PROFESSIONAL
                 if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.players) {
                     Object.keys(this.net.players).forEach(uid => {
                         if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                             let rp = this.net.players[uid];
-                            
-                            // Interpolation smoothing based on dt
                             rp.x += (rp.vx || 0) * dt; 
                             rp.y += (rp.vy || 0) * dt; 
                             rp.z += (rp.vz || 0) * dt;
@@ -492,7 +439,6 @@
                     });
                 }
 
-                // FÍSICA ARCADE-SIM TÁTICA 
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
                 let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -597,7 +543,7 @@
                 if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
 
                 this._processCombat(dt, w, h);
-                this._spawnEnemies(); 
+                this._spawnEnemies();
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -610,7 +556,6 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
-                // ESCUDO ANTI-CRASH VISUAL E RECOVERY
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
                 ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
@@ -649,14 +594,13 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // CORREÇÃO CRÍTICA: Inversão dos eixos X para o efeito de espelho correto da câmera
-                    let rx = (rightWrist.x / 640) * w; 
+                    // REVERTIDO PARA OS CÁLCULOS EXATOS E PERFEITOS DA VERSÃO BASE
+                    let rx = (1 - (rightWrist.x / 640)) * w; 
                     let ry = (rightWrist.y / 480) * h;
-                    let lx = (leftWrist.x / 640) * w; 
+                    let lx = (1 - (leftWrist.x / 640)) * w; 
                     let ly = (leftWrist.y / 480) * h;
                     
-                    let rollInput = Math.atan2(ry - ly, rx - lx) / 0.8;
-                    trgRoll = Math.max(-1.0, Math.min(1.0, rollInput));
+                    trgRoll = Math.max(-1.0, Math.min(1.0, Math.atan2(ry - ly, rx - lx) / 1.5)); // VOLTOU AO 1.5 ORIGINAL
                     
                     let avgY = (ry + ly) / 2;
                     if (this.state === 'CALIBRATION') {
@@ -664,27 +608,24 @@
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
                         let deltaY = avgY - this.pilot.baseY;
-                        let pitchInput = -deltaY / (h * 0.15); 
-                        trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput)); 
+                        let threshold = h * 0.05; 
+                        
+                        if (deltaY < -threshold) trgPitch = 1.0 * Math.min(1, Math.abs(deltaY + threshold)/100);      
+                        else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY - threshold)/100); 
                     }
 
-                    // AUMENTADO O ALCANCE PARA FACILITAR O GATILHO NA CÂMERA (Mobile/Desktop)
-                    let handsDist = Math.hypot(rx - lx, ry - ly);
-                    if (handsDist < w * 0.25 && this.state === 'PLAYING') {
+                    if (Math.hypot(rx - lx, ry - ly) < 120 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
-                    if (handsDist > w * 0.5) {
-                        this.ship.afterburner = true; 
-                    } else {
-                        this.ship.afterburner = false;
-                    }
+                    if (Math.abs(ry - ly) > 150) this.ship.afterburner = true; else this.ship.afterburner = false;
                 }
             }
 
             if (inputDetected) {
                 this.pilot.active = true;
-                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 15 * dt;
-                this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 15 * dt;
+                // REVERTIDO PARA O VALOR DE SUAVIZAÇÃO ORIGINAL (12)
+                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 12 * dt;
+                this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 12 * dt;
             } else {
                 this.pilot.active = false;
                 this.pilot.targetRoll *= 0.9;
@@ -708,7 +649,6 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
-                // CAMPO DE VISÃO ALARGADO (dot > 0.5 garante que a mira é muito mais tolerante)
                 if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.5 && p.z < closestZ) { 
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
