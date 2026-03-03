@@ -1,5 +1,5 @@
 // =============================================================================
-// AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (EDICAO BRASIL - AAA EVOLUTION)
+// AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
 // STATUS: ESCUDO ANTI-CRASH, FÍSICA ACE COMBAT, STATE MACHINE IA, PROGRESSÃO
 // =============================================================================
@@ -120,7 +120,7 @@
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL V10.JS (MANTIDA E EVOLUIDA)
+    // 3. ESTRUTURA PRINCIPAL V10.JS (EVOLUÍDA, INTOCADA NA BASE)
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
@@ -143,6 +143,7 @@
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: (window.Profile && window.Profile.coins) ? window.Profile.coins : 0, goal: 15, wave: 1, xp: (window.Profile && window.Profile.xp) ? window.Profile.xp : 0 };
             this.upgrades = { engine: 1, missiles: 1, armor: 1 };
+            
             this.currentStats = JSON.parse(JSON.stringify(BASE_PLANE_STATS));
             
             this.ship = { 
@@ -211,7 +212,7 @@
                 this.touchBound = true;
             }
 
-            if (this.mode !== 'SINGLE' && window.DB) this._initNet();
+            if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && window.DB) this._initNet();
             else this.state = 'LOBBY'; 
             GameSfx.init();
         },
@@ -235,7 +236,7 @@
                 }
                 let uname = (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOTO';
                 self.net.playersRef.child(self.net.uid).set({
-                    name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: performance.now(), firing: false
+                    name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
                 });
             });
             this.net.playersRef.on('value', snap => { self.net.players = snap.val() || {}; });
@@ -273,6 +274,9 @@
             }
         },
 
+        // =====================================================================
+        // O UPDATE VITAL: ENVOLVIDO EM TRY/CATCH PARA NUNCA DAR TELA BRANCA
+        // =====================================================================
         update: function(ctx, w, h, pose) {
             try {
                 const now = performance.now();
@@ -286,6 +290,7 @@
                     if (this.keys[' ']) {
                         if (this.net.isHost && Object.keys(this.net.players).length >= 1) { if(this.net.sessionRef) this.net.sessionRef.child('state').set('HANGAR'); }
                         else if (!this.net.isHost && this.net.playersRef) { this.net.playersRef.child(this.net.uid).update({ready: true}); }
+                        else if (this.mode === 'SINGLE' || this.mode === 'FREE') this.state = 'HANGAR';
                     }
                     this._drawLobby(ctx, w, h); 
                     return 0; 
@@ -315,6 +320,9 @@
                         this.currentStats.thrust = BASE_PLANE_STATS.thrust + ((this.upgrades.engine - 1) * 50000);
                         this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
                         this.ship.hp = this.ship.maxHp;
+                        this.ship.engineHealth = 100;
+                        this.ship.wingHealth = 100;
+                        this.ship.structuralIntegrity = 100;
                         this._startMission();
                     }
                     return 0;
@@ -335,7 +343,7 @@
                         if (Math.random() < 0.1) this.fx.push(createParticle(this.ship.x, this.ship.y, this.ship.z, "#333", 10, 1.0, 'smoke'));
                     }
                     if (hpRatio < 0.3) this.ship.wingHealth *= 0.999;
-                    if (hpRatio < 0.2) {
+                    if (hpRatio < 0.15) {
                         this.ship.structuralIntegrity *= 0.999;
                         if (Math.random() < 0.05) this.fx.push(createParticle(this.ship.x, this.ship.y, this.ship.z, "#f30", 15, 0.5, 'fire'));
                     }
@@ -352,20 +360,28 @@
                     Object.keys(this.net.players).forEach(uid => {
                         if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                             let rp = this.net.players[uid];
-                            rp.x += (rp.vx || 0) * dt; rp.y += (rp.vy || 0) * dt; rp.z += (rp.vz || 0) * dt;
-                            // Renderiza tiros do oponente se estiver com flag firing
+                            
+                            // Interpolation smoothing based on dt
+                            rp.x += (rp.vx || 0) * dt; 
+                            rp.y += (rp.vy || 0) * dt; 
+                            rp.z += (rp.vz || 0) * dt;
+                            
                             if (rp.firing && Math.random() < 0.2) {
                                 let tX = Math.sin(rp.yaw)*Math.cos(rp.pitch);
                                 let tY = Math.sin(rp.pitch);
                                 let tZ = Math.cos(rp.yaw)*Math.cos(rp.pitch);
                                 this.fx.push(createParticle(rp.x+tX*50, rp.y-10, rp.z+tZ*50, "#ff0", 5, 0.2, 'tracer'));
                             }
+                            if (rp.missilesFired > (rp.lastMissilesFired || 0)) {
+                                rp.lastMissilesFired = rp.missilesFired;
+                                this.fx.push(createParticle(rp.x, rp.y-20, rp.z, "#ff9900", 20, 1.0, 'fire'));
+                            }
                         }
                     });
                 }
 
                 // -------------------------------------------------------------
-                // FÍSICA ARCADE-SIM 
+                // FÍSICA ARCADE-SIM TÁTICA 
                 // -------------------------------------------------------------
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
@@ -393,7 +409,7 @@
                 if (this.ship.isStalling) CL = 0.1; 
 
                 let CD = this.currentStats.cd0 + this.currentStats.kInduced * (CL * CL);
-                CD *= (2.0 - structEff); // Aumenta arrasto se estrutura danificada
+                CD *= (1.0 + (1.0 - structEff)); 
 
                 let dynPress = 0.5 * airDensity * (V * V);
                 let liftMag = dynPress * this.currentStats.wingArea * CL;
@@ -402,15 +418,14 @@
                 let liftFx = upX * liftMag, liftFy = upY * liftMag, liftFz = upZ * liftMag;
                 let dragFx = -vDirX * dragMag, dragFy = -vDirY * dragMag, dragFz = -vDirZ * dragMag;
                 
-                // SISTEMA DE CALOR E AFTERBURNER
                 let currentThrust = this.currentStats.thrust * engEff;
                 if (this.ship.afterburner) {
                     this.ship.engineHeat += dt * 20;
                     if (this.ship.engineHeat < this.currentStats.overheatThreshold) {
                         currentThrust *= 1.5;
-                        this.fx.push(createParticle(this.ship.x - fwdX*20, this.ship.y - fwdY*20, this.ship.z - fwdZ*20, "#0cf", 8, 0.2, 'afterburner'));
+                        if(Math.random() < 0.3) this.fx.push(createParticle(this.ship.x - fwdX*30, this.ship.y - fwdY*30, this.ship.z - fwdZ*30, "#0cf", 8, 0.2, 'afterburner'));
                     } else {
-                        currentThrust *= 0.5; // Overheated penalty
+                        currentThrust *= 0.5; 
                     }
                 } else {
                     this.ship.engineHeat = Math.max(0, this.ship.engineHeat - dt * 10);
@@ -491,6 +506,9 @@
             }
         },
 
+        // =====================================================================
+        // O VERDADEIRO VOLANTE (YOKE) DE DUAS MÃOS - SUPER RESPONSIVO
+        // =====================================================================
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false; 
@@ -570,7 +588,7 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
-                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.7 && p.z < closestZ) {
+                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.707 && p.z < closestZ) { // 45 deg FOV
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
                 }
@@ -602,15 +620,21 @@
                 this.combat.vulcanCd = performance.now();
                 let spd = this.ship.speed + 1200;
                 
-                let tX = this.combat.target.x + (this.combat.target.vx || 0) * 0.1;
-                let tY = this.combat.target.y + (this.combat.target.vy || 0) * 0.1;
-                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * 0.1;
+                let dist = Math.hypot(this.combat.target.x - this.ship.x, this.combat.target.y - this.ship.y, this.combat.target.z - this.ship.z);
+                if (dist < 1) dist = 1;
+                let leadTime = dist / spd;
+                
+                let tX = this.combat.target.x + (this.combat.target.vx || 0) * leadTime;
+                let tY = this.combat.target.y + (this.combat.target.vy || 0) * leadTime;
+                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * leadTime;
 
                 let dx = tX - this.ship.x, dy = tY - this.ship.y, dz = tZ - this.ship.z;
-                let dist = Math.hypot(dx,dy,dz);
+                let distLead = Math.hypot(dx,dy,dz);
+                if (distLead < 1) distLead = 1;
+
                 this.bullets.push({
                     x: this.ship.x + Math.cos(this.ship.yaw)*60, y: this.ship.y-20, z: this.ship.z - Math.sin(this.ship.yaw)*60,
-                    vx: this.ship.vx + (dx/dist)*spd, vy: this.ship.vy + (dy/dist)*spd, vz: this.ship.vz + (dz/dist)*spd,
+                    vx: this.ship.vx + (dx/distLead)*spd, vy: this.ship.vy + (dy/distLead)*spd, vz: this.ship.vz + (dz/distLead)*spd,
                     isEnemy: false, life: 2
                 });
                 GameSfx.play('vulcan');
@@ -620,19 +644,23 @@
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
 
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0) {
+                if (Math.random() < 0.95) { // 5% failure chance
+                    this.missiles.push({
+                        x: this.ship.x, y: this.ship.y-50, z: this.ship.z,
+                        vx: this.ship.vx, vy: this.ship.vy, vz: this.ship.vz,
+                        target: this.combat.target, life: 10, maxG: 40 + (this.upgrades.missiles * 5), trackTime: 0
+                    });
+                    GameSfx.play('missile');
+                    if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.playersRef && this.net.uid) {
+                        this.net.playersRef.child(this.net.uid).child('missilesFired').transaction(current => (current || 0) + 1);
+                    }
+                }
                 this.combat.missileCd = Math.max(0.5, 1.5 - (this.upgrades.missiles * 0.2)); 
-                this.missiles.push({
-                    x: this.ship.x, y: this.ship.y-50, z: this.ship.z,
-                    vx: this.ship.vx, vy: this.ship.vy, vz: this.ship.vz,
-                    target: this.combat.target, life: 10, maxG: 40 + (this.upgrades.missiles * 5)
-                });
-                GameSfx.play('missile');
-                firingState = true;
             }
 
             if (this.mode !== 'SINGLE' && this.mode !== 'FREE' && this.net.playersRef) {
                 if (performance.now() - this.net.lastSend > 100) {
-                    this.net.playersRef.child(this.net.uid).update({ firing: firingState });
+                    this.net.playersRef.child(this.net.uid).update({ firing: firingState, timestamp: Date.now() });
                     this.net.lastSend = performance.now();
                 }
             }
@@ -656,7 +684,7 @@
             this.entities.push({ 
                 type: 'jet_fighter', state: 'PATROL', x: sx, y: Math.max(1000, this.ship.y+(Math.random()-0.5)*4000), z: sz, 
                 vx: -fX*250, vy: 0, vz: -fZ*250, hp: 150 * this.session.wave, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0,
-                target: null, stateTimer: 0, active: true
+                target: null, stateTimer: 0, active: true, engineHealth: 100, wingHealth: 100, structuralIntegrity: 100
             });
         },
 
@@ -689,20 +717,29 @@
 
                 if (e.stateTimer <= 0) {
                     if (e.hp < 30) e.state = 'RETREAT';
-                    else if (e.isBoss && e.hp < 1000) e.state = 'BOSS_PHASE';
-                    else if (minDist < 3000 && Math.abs(yawDiff) > Math.PI/2) e.state = 'EVADE'; 
-                    else if (minDist < 5000 && e.y < 15000) e.state = 'VERTICAL_MANEUVER';
+                    else if (e.isBoss && e.hp < 1000 && Math.random() < 0.3) e.state = 'BOSS_PHASE';
+                    else if (minDist < 3000 && Math.abs(yawDiff) > Math.PI/2) {
+                        let maneuvers = ['BARREL_ROLL', 'SPLIT_S', 'BREAK_TURN'];
+                        e.state = maneuvers[Math.floor(Math.random() * maneuvers.length)];
+                    }
+                    else if (minDist < 5000 && e.y < 15000 && Math.random() < 0.4) e.state = 'IMMELMANN';
                     else if (minDist > 15000) e.state = 'INTERCEPT';
                     else e.state = 'ENGAGE';
-                    e.stateTimer = 2.0 + Math.random() * 2.0;
+                    e.stateTimer = 1.5 + Math.random() * 2.0;
                 }
                 
-                if (e.state === 'EVADE') {
+                if (e.state === 'BARREL_ROLL') {
+                    e.roll += 5 * dt;
+                    targetPitch += Math.PI/6;
+                } else if (e.state === 'SPLIT_S') {
+                    e.roll += (Math.PI - e.roll) * 5 * dt;
+                    targetPitch -= Math.PI/2;
+                } else if (e.state === 'BREAK_TURN') {
                     targetYaw += Math.PI/2; 
                     e.roll += (Math.PI/2 - e.roll) * 2 * dt;
-                } else if (e.state === 'VERTICAL_MANEUVER') {
-                    targetPitch += Math.PI/4; 
-                    e.roll += (0 - e.roll) * 2 * dt;
+                } else if (e.state === 'IMMELMANN') {
+                    targetPitch += Math.PI/2;
+                    if (e.pitch > Math.PI/3) e.roll += (Math.PI - e.roll) * 5 * dt;
                 } else if (e.state === 'RETREAT') {
                     targetYaw += Math.PI; 
                     targetPitch = 0;
@@ -715,18 +752,23 @@
                 while (newYawDiff > Math.PI) newYawDiff -= Math.PI * 2;
                 while (newYawDiff < -Math.PI) newYawDiff += Math.PI * 2;
                 
-                e.yaw += newYawDiff * (e.isBoss ? 1.5 : 1.0) * dt;
-                e.pitch += (targetPitch - e.pitch) * (e.isBoss ? 1.5 : 1.0) * dt;
-                if (e.state !== 'EVADE' && e.state !== 'VERTICAL_MANEUVER' && e.state !== 'RETREAT') e.roll = newYawDiff * 2.0;
+                let wingEff = e.wingHealth ? Math.max(0.3, e.wingHealth / 100) : 1;
+                e.yaw += newYawDiff * (e.isBoss ? 1.5 : 1.0) * wingEff * dt;
+                e.pitch += (targetPitch - e.pitch) * (e.isBoss ? 1.5 : 1.0) * wingEff * dt;
+                if (!['BARREL_ROLL', 'SPLIT_S', 'IMMELMANN'].includes(e.state)) e.roll = newYawDiff * 2.0;
 
                 let speed = e.isBoss ? 400 : (e.state === 'EVADE' ? 350 : 280);
+                let engEff = e.engineHealth ? Math.max(0.3, e.engineHealth / 100) : 1;
+                speed *= engEff;
+                
                 e.vx = Math.sin(e.yaw) * Math.cos(e.pitch) * speed;
                 e.vy = Math.sin(e.pitch) * speed;
                 e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed;
 
                 if (minDist < 8000 && Math.abs(newYawDiff) < 0.2 && (e.state === 'INTERCEPT' || e.state === 'ENGAGE' || e.state === 'BOSS_PHASE')) {
-                    if (Math.random() < (e.isBoss ? 0.06 : 0.02)) {
+                    if (Math.random() < (e.isBoss ? 0.08 : 0.02)) {
                         let bSpd = 600;
+                        if (minDist < 1) minDist = 1;
                         this.bullets.push({
                             x: e.x, y: e.y, z: e.z,
                             vx: e.vx + (dx/minDist)*bSpd, vy: e.vy + (dy/minDist)*bSpd, vz: e.vz + (dz/minDist)*bSpd,
@@ -758,7 +800,7 @@
                 let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
                 this.entities.push({ 
                     type: 'boss', state: 'ENGAGE', x: this.ship.x + fX*12000, y: this.ship.y+2000, z: this.ship.z + fZ*12000, 
-                    vx: -fX*350, vy: 0, vz: -fZ*350, hp: 2000, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0, isBoss: true, active: true, stateTimer: 0 
+                    vx: -fX*350, vy: 0, vz: -fZ*350, hp: 2000, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0, isBoss: true, active: true, stateTimer: 0, engineHealth: 100, wingHealth: 100, structuralIntegrity: 100 
                 });
             } else if (currentKills >= 31 && this.session.wave === 3) {
                 this.session.xp += 1000; 
@@ -784,17 +826,28 @@
                 b.x += b.vx*dt; b.y += b.vy*dt; b.z += b.vz*dt; b.life -= dt;
                 if (b.isEnemy) {
                     if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 80) {
+                        let randHit = Math.random();
+                        if (randHit < 0.3) this.ship.engineHealth -= 10;
+                        else if (randHit < 0.6) this.ship.wingHealth -= 10;
+                        else this.ship.structuralIntegrity -= 10;
+
                         this.ship.hp -= 10;
                         if (window.Gfx && window.Gfx.shakeScreen) window.Gfx.shakeScreen(15);
-                        if (this.ship.hp <= 0) this._endGame('GAMEOVER');
                         b.life = 0;
                     }
                 } else {
                     for (let e of this.entities) {
                         if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < (e.isBoss? 300 : 150)) {
-                            e.hp -= 50; b.life = 0;
+                            if (this.mode === 'SINGLE' || this.mode === 'FREE' || this.net.isHost) {
+                                e.hp -= 50; 
+                                let randHit = Math.random();
+                                if (randHit < 0.3) e.engineHealth -= 10;
+                                else if (randHit < 0.6) e.wingHealth -= 10;
+                                else e.structuralIntegrity -= 10;
+                                if (e.hp <= 0) this._kill(e, e.isBoss?2000:150);
+                            }
+                            b.life = 0;
                             this._fx(e.x,e.y,e.z,'#f90',4,40);
-                            if (e.hp <= 0) this._kill(e, e.isBoss?2000:150);
                             break;
                         }
                     }
@@ -818,13 +871,16 @@
         _updateMissiles: function(dt) {
             for (let i = this.missiles.length-1; i >= 0; i--) {
                 let m = this.missiles[i];
-                let V = Math.hypot(m.vx, m.vy, m.vz) || 1;
+                let V = Math.hypot(m.vx, m.vy, m.vz);
+                if (V < 1) V = 1;
+
+                m.trackTime = (m.trackTime || 0) + dt;
 
                 if (m.target && (m.target.hp>0 || m.target.isPlayer)) {
                     let rx = m.target.x - m.x, ry = m.target.y - m.y, rz = m.target.z - m.z;
-                    let dist2 = rx*rx + ry*ry + rz*rz;
-                    let dist = Math.sqrt(dist2);
+                    let dist = Math.hypot(rx, ry, rz);
                     if (dist < 1) dist = 1;
+                    let dist2 = dist * dist;
                     
                     if (dist < 100) { 
                         if (m.target.isPlayer && this.mode==='PVP') {
@@ -833,17 +889,19 @@
                             this.session.cash += 500;
                             this.session.xp += 100;
                         } else if (!m.target.isPlayer) {
-                            m.target.hp -= 400 + (this.upgrades.missiles * 100);
-                            if (m.target.hp <= 0) this._kill(m.target, m.target.isBoss?2000:300);
+                            if (this.mode === 'SINGLE' || this.mode === 'FREE' || this.net.isHost) {
+                                m.target.hp -= 400 + (this.upgrades.missiles * 100);
+                                if (m.target.hp <= 0) this._kill(m.target, m.target.isBoss?2000:300);
+                            }
+                            this._fx(m.target.x,m.target.y,m.target.z,'#f33',40,300);
                         }
                         m.life = 0;
                     } else {
-                        // FOV Loss of Lock
                         let vDirX = m.vx/V, vDirY = m.vy/V, vDirZ = m.vz/V;
                         let tDirX = rx/dist, tDirY = ry/dist, tDirZ = rz/dist;
                         let dot = vDirX*tDirX + vDirY*tDirY + vDirZ*tDirZ;
                         
-                        if (dot < 0.5 || Math.random() < 0.005) { 
+                        if (dot < 0.5 || Math.random() < 0.005 || m.trackTime > 15) { 
                             m.target = null; 
                         }
 
@@ -890,7 +948,7 @@
             }
             this.floaters = this.floaters.filter(f => { f.life -= 1/60; f.y -= 80/60; return f.life > 0; });
             
-            if (this.fx.length > 200) this.fx.splice(0, this.fx.length - 200);
+            if (this.fx.length > 150) this.fx.splice(0, this.fx.length - 150);
             this.fx = this.fx.filter(f => { f.x+=f.vx/60; f.y+=f.vy/60; f.z+=f.vz/60; f.life-=1/60; return f.life>0; });
         },
 
@@ -1033,8 +1091,8 @@
                 else if(d.t==='x'){ctx.fillStyle='#2ecc71';ctx.font=`bold ${Math.max(16,1500*s)}px 'Russo One'`;ctx.textAlign='center';ctx.fillText(o.text,p.x,p.y);}
                 else if(d.t==='e'||d.t==='p'){
                     let isNet=d.t==='p';
-                    Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#0ff':'#f33'):(o.isBoss?'#f39c12':'#00ffcc'));
-                    if(isNet){ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
+                    Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#00ffcc':'#ff3300'):(o.isBoss?'#f39c12':'#00ffcc'));
+                    if(isNet){ctx.fillStyle=this.mode==='COOP'?'#00ffcc':'#ff3300';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
                     
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
                     let bs = Math.max(40, 250*s); 
@@ -1079,9 +1137,12 @@
             ctx.beginPath(); ctx.moveTo(w/2, h/2 - 40); ctx.lineTo(w/2, h/2 - 20); ctx.stroke();
 
             if (this.combat.target) {
-                let tX = this.combat.target.x + (this.combat.target.vx || 0) * 0.1;
-                let tY = this.combat.target.y + (this.combat.target.vy || 0) * 0.1;
-                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * 0.1;
+                let distToTarget = Math.hypot(this.combat.target.x - p.x, this.combat.target.y - p.y, this.combat.target.z - p.z);
+                let spd = p.speed + 1200;
+                let leadTime = distToTarget / spd;
+                let tX = this.combat.target.x + (this.combat.target.vx || 0) * leadTime;
+                let tY = this.combat.target.y + (this.combat.target.vy || 0) * leadTime;
+                let tZ = this.combat.target.z + (this.combat.target.vz || 0) * leadTime;
                 let leadP = Engine3D.project(tX, tY, tZ, p.x, p.y, p.z, p.pitch, p.yaw, p.roll, w, h);
                 if (leadP.visible) {
                     ctx.strokeStyle = 'rgba(255, 200, 0, 0.5)';
@@ -1109,12 +1170,14 @@
                 ctx.fillText(`AQUECIMENTO: ${Math.floor(p.engineHeat)}%`, 20, 140);
             }
 
-            if (p.isStalling) {
+            if (p.mach > 2.2) {
+                ctx.fillStyle='#ff0000'; ctx.font='bold 24px Arial'; ctx.textAlign='center';
+                ctx.fillText("ALERTA: OVERSPEED!", w/2, h/2 - 130);
+            } else if (p.isStalling) {
                 ctx.fillStyle = (Math.floor(performance.now() / 150) % 2 === 0) ? "#ff0000" : "#fff"; 
                 ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One', Arial"; ctx.fillText("ALERTA DE ESTOL! BAIXE O BICO!", w/2, h/2 - 100); 
             }
 
-            // RADAR TÁTICO
             const rx=w-90, ry=140, rr=75;
             ctx.fillStyle='rgba(0,30,10,0.85)'; ctx.beginPath(); ctx.arc(rx,ry,rr,0,Math.PI*2); ctx.fill();
             ctx.strokeStyle='rgba(0,255,204,0.3)'; ctx.lineWidth=1;
@@ -1286,7 +1349,7 @@
 
     const register = () => {
         if (window.System && window.System.registerGame) {
-            window.System.registerGame('usarmy_flight_sim', 'Aero Strike: Combate', '✈️', Game, {
+            window.System.registerGame('usarmy_flight_sim', 'Aero Strike WAR', '✈️', Game, {
                 camera: 'user', camOpacity: 0.2,
                 phases: [
                     { id: 'training', name: 'CAMPANHA SOLO', desc: 'Destrua as ameaças e evolua o seu caça.', mode: 'SINGLE', reqLvl: 1 },
