@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: ESCUDO ANTI-CRASH, FÍSICA ACE COMBAT, IA TÁTICA, MULTIPLAYER FIX, HUD AAA
+// STATUS: CORREÇÃO DEFINITIVA DE ESTADOS DE SESSÃO E MULTIPLAYER FIX
 // =============================================================================
 
 (function() {
@@ -130,7 +130,7 @@
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL V10.JS (EVOLUÍDA, INTOCADA NA BASE)
+    // 3. ESTRUTURA PRINCIPAL V10.JS (EVOLUÍDA E INTOCADA NA BASE)
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
@@ -150,10 +150,12 @@
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, sharedRef: null, loop: null, sharedData: { wave: 1, teamKills: 0 }, lastSend: 0 },
 
         init: function(faseData) {
+            // FORÇA A LIMPEZA DE REDE IMEDIATA AO INICIAR
+            this._cleanupNet();
+            
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: (window.Profile && window.Profile.coins) ? window.Profile.coins : 0, goal: 15, wave: 1, xp: (window.Profile && window.Profile.xp) ? window.Profile.xp : 0 };
             this.upgrades = { engine: 1, missiles: 1, armor: 1 };
-            
             this.currentStats = JSON.parse(JSON.stringify(BASE_PLANE_STATS));
             
             this.ship = { 
@@ -201,7 +203,6 @@
                         let touchX = ((cx - rect.left) / rect.width) * window.innerWidth;
                         let touchY = ((cy - rect.top) / rect.height) * window.innerHeight;
 
-                        // SAIR BUTTON LOGIC
                         if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20 && touchX < 120 && touchY > 20 && touchY < 60) {
                             self.cleanup();
                             if(window.System && window.System.home) window.System.home();
@@ -211,13 +212,11 @@
                         if (self.state === 'LOBBY') {
                             if (self.mode === 'SINGLE' || self.mode === 'FREE') {
                                 self.state = 'HANGAR';
-                            } else if (self.net.isHost && Object.keys(self.net.players).length > 0) {
+                            } else if (self.net.isHost) {
                                 if (self.net.sessionRef) self.net.sessionRef.child('state').set('HANGAR');
                                 else self.state = 'HANGAR';
                             } else if (!self.net.isHost && self.net.uid && self.net.playersRef) {
                                 self.net.playersRef.child(self.net.uid).update({ready: true});
-                            } else {
-                                self.state = 'HANGAR'; 
                             }
                         } else if (self.state === 'HANGAR') {
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
@@ -231,12 +230,12 @@
                 this.touchBound = true;
             }
 
-            // CORREÇÃO MODO SOLO: Evita tentar conectar no Firebase em modos offline
             if ((this.mode === 'PVP' || this.mode === 'COOP') && window.DB) {
                 this._initNet();
             } else {
+                // FALLBACK ABSOLUTO PARA MODO OFFLINE (Ignora Firebase 100%)
                 this.state = 'HANGAR'; 
-                this.net.isHost = true; // Garante permissão local
+                this.net.isHost = true; 
             }
             GameSfx.init();
         },
@@ -252,45 +251,36 @@
             let self = this;
             let uname = (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOTO';
             
-            self.net.playersRef.child(self.net.uid).set({
-                name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
+            this.net.sessionRef.child('host').once('value').then(snap => {
+                let currentHost = snap.val();
+                if (!currentHost) {
+                    self.net.isHost = true;
+                    self.net.sessionRef.child('host').set(self.net.uid);
+                    self.net.sessionRef.child('state').set('LOBBY');
+                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
+                    self.net.playersRef.remove();
+                } else {
+                    self.net.isHost = false;
+                }
+                
+                self.net.playersRef.child(self.net.uid).set({
+                    name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
+                });
             });
 
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
-                // AUTO HOST MIGRATION EVITA FICAR PRESO ESPERANDO LÍDER
-                self.net.sessionRef.child('host').once('value').then(hSnap => {
-                    let currentHost = hSnap.val();
-                    let connectedUIDs = Object.keys(self.net.players);
-                    if (!currentHost || !self.net.players[currentHost]) {
-                        if (connectedUIDs.length > 0) {
-                            let newHost = connectedUIDs[0];
-                            if (newHost === self.net.uid) {
-                                self.net.isHost = true;
-                                self.net.sessionRef.child('host').set(self.net.uid);
-                                if (!currentHost) {
-                                    self.net.sessionRef.child('state').set('LOBBY');
-                                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
-                                }
-                            } else {
-                                self.net.isHost = false;
-                            }
-                        }
-                    } else {
-                        self.net.isHost = (currentHost === self.net.uid);
-                    }
-                });
             });
+
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
+            
             this.net.sessionRef.child('state').on('value', snap => {
                 if (snap.val() === 'HANGAR' && self.state === 'LOBBY') self.state = 'HANGAR';
                 if (snap.val() === 'PLAYING' && self.state === 'HANGAR') { self.state = 'CALIBRATION'; self.timer = 5.0; }
             });
         },
 
-        // CLEANUP OBRIGATÓRIO (Previne bugs entre sessões solo/multi)
-        cleanup: function() {
-            GameSfx.stop();
+        _cleanupNet: function() {
             if (this.net.loop) { clearInterval(this.net.loop); this.net.loop = null; }
             if (this.net.playersRef && this.net.uid) {
                 this.net.playersRef.child(this.net.uid).remove();
@@ -298,6 +288,17 @@
             }
             if (this.net.sharedRef) this.net.sharedRef.off();
             if (this.net.sessionRef) this.net.sessionRef.child('state').off();
+            
+            this.net.isHost = false;
+            this.net.players = {};
+            this.net.sessionRef = null;
+            this.net.playersRef = null;
+            this.net.sharedRef = null;
+        },
+
+        cleanup: function() {
+            GameSfx.stop();
+            this._cleanupNet();
             this.state = 'INIT';
         },
 
@@ -545,6 +546,10 @@
                 }
                 this.ship.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.ship.pitch));
                 
+                if (!Number.isFinite(this.ship.x)) this.ship.x = 0;
+                if (!Number.isFinite(this.ship.y)) this.ship.y = 3000;
+                if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
+
                 this._processCombat(dt, w, h);
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
@@ -558,13 +563,16 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
-                // ESCUDO ANTI-CRASH VISUAL + AUTO RECOVERY SILENCIOSO
-                this.ship.x = 0; this.ship.y = 3000; this.ship.z = 0;
-                this.ship.vx = 0; this.ship.vy = 0; this.ship.vz = 250;
-                
+                // ESCUDO ANTI-CRASH VISUAL (PREVINE TELA BRANCA E VOLTA PRO HANGAR)
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
                 ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
+                
+                // Reseta as variáveis que possam ter corrompido a sessão
+                this.ship.x = 0; this.ship.y = 3000; this.ship.z = 0;
+                this.ship.vx = 0; this.ship.vy = 0; this.ship.vz = 250;
+                this.state = 'HANGAR'; // Força volta ao hangar em caso de catástrofe
+                
                 return 0;
             }
         },
@@ -1168,25 +1176,15 @@
                     Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#00ffcc':'#ff3300'):(o.isBoss?'#f39c12':'#00ffcc'));
                     if(isNet){ctx.fillStyle=this.mode==='COOP'?'#00ffcc':'#ff3300';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
                     
-                    let dist = Math.hypot(o.x - this.ship.x, o.y - this.ship.y, o.z - this.ship.z);
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
-                    
-                    // ACE COMBAT UI MARKER
-                    ctx.strokeStyle = locked ? '#ff0000' : (isNet && this.mode==='COOP' ? '#00ffcc' : '#ff9900');
-                    ctx.lineWidth = locked ? 2 : 1;
-                    ctx.strokeRect(p.x - 20, p.y - 20, 40, 40);
-                    ctx.fillStyle = ctx.strokeStyle;
-                    ctx.font = '10px "Russo One", Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(Math.floor(dist) + 'm', p.x, p.y - 25);
-
+                    let bs = Math.max(40, 250*s); 
                     if(locked){
-                        let bs = Math.max(40, 250*s); 
+                        ctx.strokeStyle='#ff0000';ctx.lineWidth=2;ctx.strokeRect(p.x-bs,p.y-bs,bs*2,bs*2);
                         ctx.beginPath(); ctx.moveTo(p.x, p.y - bs); ctx.lineTo(p.x, p.y - bs - 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x, p.y + bs); ctx.lineTo(p.x, p.y + bs + 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x - bs, p.y); ctx.lineTo(p.x - bs - 20, p.y); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x + bs, p.y); ctx.lineTo(p.x + bs + 20, p.y); ctx.stroke();
-                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.fillText('MIRA TRAVADA',p.x,p.y+bs+35);
+                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('MIRA TRAVADA',p.x,p.y+bs+35);
                     }
                 }
                 else if(d.t==='b'){ctx.globalCompositeOperation='lighter';ctx.fillStyle=o.isEnemy?'#ff0000':'#ffff00';ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2,6*s),0,Math.PI*2);ctx.fill();ctx.globalCompositeOperation='source-over';}
