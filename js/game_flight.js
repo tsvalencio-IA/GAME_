@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: IA DOGFIGHTER, SKYBOX DIRECIONAL, RADAR TÁTICO E FÍSICA CORRIGIDA
+// STATUS: IA DOGFIGHTER, SKYBOX DIRECIONAL, RADAR TÁTICO E CONTROLES 100% FIÉIS
 // =============================================================================
 
 (function() {
@@ -171,7 +171,6 @@
                 this.clouds.push({ x: (Math.random()-0.5)*120000, y: 4000+Math.random()*15000, z: (Math.random()-0.5)*120000, size: 3000+Math.random()*6000 });
             }
 
-            // CORREÇÃO: Dobrado a quantidade de cenário para preencher melhor o solo
             for (let j = 0; j < 300; j++) {
                 this.scenery.push({
                     x: (Math.random() - 0.5) * 100000,
@@ -414,27 +413,6 @@
                 }
                 
                 this._readPose(pose, w, h, dt); 
-                
-                // MIRA AUTOMÁTICA E SUAVE (MAGNETISMO) ATIVADA APENAS PARA AUXILIAR TIRO
-                if (this.combat.target && this.combat.locked) {
-                    let dx = this.combat.target.x - this.ship.x;
-                    let dy = this.combat.target.y - this.ship.y;
-                    let dz = this.combat.target.z - this.ship.z;
-                    let targetYaw = Math.atan2(dx, dz);
-                    let targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
-                    
-                    let yawDiff = targetYaw - this.ship.yaw;
-                    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-                    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-                    
-                    let pitchDiff = targetPitch - this.ship.pitch;
-                    while (pitchDiff > Math.PI) pitchDiff -= Math.PI * 2;
-                    while (pitchDiff < -Math.PI) pitchDiff += Math.PI * 2;
-
-                    // Assistência para colar a mira no alvo sem roubar o controle total (Mais leve que antes)
-                    this.pilot.targetRoll += (yawDiff * 1.5 - this.pilot.targetRoll) * 2 * dt; 
-                    this.pilot.targetPitch += (pitchDiff * 1.5 - this.pilot.targetPitch) * 2 * dt;
-                }
 
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
@@ -570,8 +548,6 @@
                 this.ship.vy += ay * dt;
                 this.ship.vz += az * dt;
 
-                // CORREÇÃO CRÍTICA DE ALTITUDE: Força a velocidade vertical a alinhar-se com o bico do avião.
-                // Se apontar para baixo (Pitch Negativo), o avião TEM de descer.
                 let targetVy = fwdY * this.ship.speed;
                 this.ship.vy += (targetVy - this.ship.vy) * 4.0 * dt; 
 
@@ -660,13 +636,13 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // RESTAURADO OS CÁLCULOS EXATOS DE ESPELHO E SENSIBILIDADE
-                    let rx = (rightWrist.x / 640) * w; 
+                    
+                    // CÁLCULO EXATO DA BASE FUNCIONAL E INVERSÃO DE ESPELHO CORRIGIDA
+                    let rx = (1 - (rightWrist.x / 640)) * w; 
                     let ry = (rightWrist.y / 480) * h;
-                    let lx = (leftWrist.x / 640) * w; 
+                    let lx = (1 - (leftWrist.x / 640)) * w; 
                     let ly = (leftWrist.y / 480) * h;
                     
-                    // Rotação exata original (divisor 1.5)
                     trgRoll = Math.max(-1.0, Math.min(1.0, Math.atan2(ry - ly, rx - lx) / 1.5));
                     
                     let avgY = (ry + ly) / 2;
@@ -681,7 +657,6 @@
                         else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY - threshold)/100); 
                     }
 
-                    // RESTAURADO DISTÂNCIA PARA ATIRAR MÍSSIL À DISTÂNCIA
                     let handsDist = Math.hypot(rx - lx, ry - ly);
                     if (handsDist < w * 0.25 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
@@ -696,7 +671,6 @@
 
             if (inputDetected) {
                 this.pilot.active = true;
-                // RESTAURADO SUAVIZAÇÃO EXATA ORIGINAL (VELOCIDADE 12)
                 this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 12 * dt;
                 this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 12 * dt;
             } else {
@@ -722,7 +696,6 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
-                // CAMPO DE VISÃO ALARGADO (dot > 0.5 garante que a mira é muito mais tolerante)
                 if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.5 && p.z < closestZ) { 
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
@@ -819,7 +792,6 @@
             });
         },
 
-        // CORREÇÃO CRÍTICA IA: Implementada Rotina de Perseguição Real (Dogfight / Tail)
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -854,14 +826,12 @@
                     else if (minDist < 2000) e.state = 'EVADE'; 
                     else if (minDist > 8000) e.state = 'INTERCEPT';
                     else {
-                        // 50% de chance de tentar ir para as 6 horas do jogador (Dogfight)
                         e.state = Math.random() > 0.5 ? 'TAIL' : 'ENGAGE';
                     }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
                 }
 
                 if (e.state === 'TAIL') {
-                    // Mira num ponto 2000m atrás da cauda do jogador
                     tX = target.x - Math.sin(target.yaw) * 2000;
                     tZ = target.z - Math.cos(target.yaw) * 2000;
                     tY = target.y + 300;
@@ -1148,7 +1118,7 @@
         },
 
         _drawHangar: function(ctx, w, h) {
-            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE
+            let sc = Math.min(1, w / 600); 
             
             ctx.fillStyle='rgba(10,15,20,0.95)'; ctx.fillRect(0,0,w,h);
             
@@ -1188,13 +1158,11 @@
             ctx.rotate(-this.ship.roll);
             let hy = Math.sin(this.ship.pitch) * h * 1.5;
             
-            // CÉU REALISTA
             let sG = ctx.createLinearGradient(0,-h*4,0,hy);
             sG.addColorStop(0,'#0a1a2a'); sG.addColorStop(0.6,'#2a4a6a'); sG.addColorStop(1,'#88aacc');
             ctx.fillStyle = sG;
             ctx.fillRect(-w*3,-h*4,w*6,hy+h*4);
             
-            // CORREÇÃO CRÍTICA DO SOL: Sol Direcional (Fica no Norte Global, desaparece se rodar)
             let sunHdg = 0; 
             let hdgDiff = sunHdg - this.ship.yaw;
             while(hdgDiff > Math.PI) hdgDiff -= Math.PI*2;
@@ -1209,7 +1177,6 @@
                  ctx.shadowBlur = 0;
             }
 
-            // CORREÇÃO CRÍTICA DO TERRENO: Cor Sólida Tática e Grade mais densa
             let gG = ctx.createLinearGradient(0,hy,0,h*4);
             gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
             ctx.fillStyle = gG;
@@ -1412,7 +1379,6 @@
                     ctx.fillStyle=col; 
                     ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill(); 
                     
-                    // CORREÇÃO CRÍTICA RADAR: Setas de Elevação Visuais para Cima/Baixo
                     ctx.strokeStyle = col; ctx.lineWidth = 2;
                     ctx.beginPath();
                     ctx.moveTo(px, py);
