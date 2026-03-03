@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: FÍSICA ESTREITA, IA DOGFIGHTER, SKYBOX DIRECCIONAL, RADAR TÁTICO
+// STATUS: 100% COMPLETO. BULLETPROOF PHYSICS, 360 SKYBOX, DOGFIGHT AI & HUD.
 // =============================================================================
 
 (function() {
@@ -380,12 +380,16 @@
                 if (dt > 0.05) dt = 0.05; 
                 if (dt < 0.001) return this.session.cash || 0;
 
-                if (isNaN(this.ship.vx)) this.ship.vx = 0;
-                if (isNaN(this.ship.vy)) this.ship.vy = 0;
-                if (isNaN(this.ship.vz)) this.ship.vz = 250;
-                if (isNaN(this.ship.x)) this.ship.x = 0;
-                if (isNaN(this.ship.y)) this.ship.y = 3000;
-                if (isNaN(this.ship.z)) this.ship.z = 0;
+                // PROTEÇÃO ANTI-CRASH (Limpeza de NaN na raiz)
+                if (isNaN(this.ship.vx) || !Number.isFinite(this.ship.vx)) this.ship.vx = 0;
+                if (isNaN(this.ship.vy) || !Number.isFinite(this.ship.vy)) this.ship.vy = 0;
+                if (isNaN(this.ship.vz) || !Number.isFinite(this.ship.vz)) this.ship.vz = 250;
+                if (isNaN(this.ship.x)  || !Number.isFinite(this.ship.x))  this.ship.x = 0;
+                if (isNaN(this.ship.y)  || !Number.isFinite(this.ship.y))  this.ship.y = 3000;
+                if (isNaN(this.ship.z)  || !Number.isFinite(this.ship.z))  this.ship.z = 0;
+                if (isNaN(this.ship.pitch) || !Number.isFinite(this.ship.pitch)) this.ship.pitch = 0;
+                if (isNaN(this.ship.yaw)   || !Number.isFinite(this.ship.yaw))   this.ship.yaw = 0;
+                if (isNaN(this.ship.roll)  || !Number.isFinite(this.ship.roll))  this.ship.roll = 0;
 
                 if (this.state === 'LOBBY') { 
                     if (this.keys[' ']) {
@@ -414,7 +418,7 @@
                 }
                 
                 this._readPose(pose, w, h, dt); 
-                
+
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
                     else {
@@ -479,10 +483,11 @@
                     });
                 }
 
+                // FÍSICA ARCADE-SIM TÁTICA 
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
                 let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
-                let speedOfSound = Math.sqrt(GAME_CONFIG.GAMMA * GAME_CONFIG.R_GAS * tempK);
+                let speedOfSound = Math.sqrt(Math.max(1, GAME_CONFIG.GAMMA * GAME_CONFIG.R_GAS * tempK));
 
                 let V = Math.hypot(this.ship.vx, this.ship.vy, this.ship.vz);
                 if (V === 0) V = 1;
@@ -548,7 +553,7 @@
                 this.ship.vx += ax * dt;
                 this.ship.vz += az * dt;
 
-                // FÍSICA ARCADE ESTREITA: Velocidade Vertical alinhada ao Pitch
+                // FÍSICA DE BICO (PITCH): Altitude diretamente atrelada ao ângulo de visão frontal
                 let targetVy = fwdY * this.ship.speed;
                 this.ship.vy += (targetVy - this.ship.vy) * 5.0 * dt;
 
@@ -581,12 +586,8 @@
                 }
                 this.ship.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.ship.pitch));
                 
-                if (!Number.isFinite(this.ship.x)) this.ship.x = 0;
-                if (!Number.isFinite(this.ship.y)) this.ship.y = 3000;
-                if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
-
                 this._processCombat(dt, w, h);
-                this._spawnEnemies();
+                this._spawnEnemies(); 
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -599,6 +600,7 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
+                console.error("CRITICAL FLIGHT ERROR:", err);
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
                 ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
@@ -637,10 +639,11 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    let rx = (1 - (rightWrist.x / 640)) * w; 
-                    let ry = (rightWrist.y / 480) * h;
-                    let lx = (1 - (leftWrist.x / 640)) * w; 
-                    let ly = (leftWrist.y / 480) * h;
+                    // INVERSÃO CORRETA DA CÂMARA FRONTAL (Espelhamento Perfeito)
+                    let rx = (1 - ((rightWrist.x || 0) / 640)) * w; 
+                    let ry = ((rightWrist.y || 0) / 480) * h;
+                    let lx = (1 - ((leftWrist.x || 0) / 640)) * w; 
+                    let ly = ((leftWrist.y || 0) / 480) * h;
                     
                     let rollInput = Math.atan2(ry - ly, rx - lx) / 1.5;
                     trgRoll = Math.max(-1.0, Math.min(1.0, rollInput));
@@ -652,8 +655,9 @@
                     } else {
                         // Subir os braços na câmera (avgY menor) = Subir o Bico (Pitch positivo)
                         let deltaY = avgY - this.pilot.baseY;
-                        let pitchInput = -deltaY / (h * 0.15); 
-                        trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput)); 
+                        let safeH = h > 0 ? h : 1; 
+                        let pitchInput = -deltaY / (safeH * 0.15); 
+                        trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput || 0)); 
                     }
 
                     let handsDist = Math.hypot(rx - lx, ry - ly);
@@ -726,6 +730,7 @@
             if (this.combat.locked && this.combat.target && performance.now() - this.combat.vulcanCd > 80) {
                 this.combat.vulcanCd = performance.now();
                 let spd = this.ship.speed + 1200;
+                if (isNaN(spd)) spd = 1500;
                 
                 let tX = this.combat.target.x + (this.combat.target.vx || 0) * 0.1;
                 let tY = this.combat.target.y + (this.combat.target.vy || 0) * 0.1;
@@ -824,6 +829,7 @@
                     else if (minDist < 2000) e.state = 'EVADE'; 
                     else if (minDist > 12000) e.state = 'INTERCEPT';
                     else {
+                        // IA CAÇADORA: Procura perseguir a sua cauda.
                         e.state = Math.random() > 0.4 ? 'TAIL' : 'ENGAGE';
                     }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
@@ -870,9 +876,9 @@
                 let engEff = e.engineHealth ? Math.max(0.3, e.engineHealth / 100) : 1.0;
                 speed *= engEff;
                 
-                e.vx = Math.sin(e.yaw) * Math.cos(e.pitch) * speed;
-                e.vy = Math.sin(e.pitch) * speed;
-                e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed;
+                e.vx = Math.sin(e.yaw) * Math.cos(e.pitch) * speed || 0;
+                e.vy = Math.sin(e.pitch) * speed || 0;
+                e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed || 0;
 
                 if (minDist < 10000 && Math.abs(yawDiffToPlayer) < 0.3 && (e.state === 'INTERCEPT' || e.state === 'ENGAGE' || e.state === 'TAIL')) {
                     if (Math.random() < (e.isBoss ? 0.1 : 0.03)) { 
@@ -1150,46 +1156,50 @@
         },
 
         _drawWorld: function(ctx,w,h) {
+            // RENDERIZAÇÃO TÁTICA 10/10 SEM DOUBLE-ROTATION NO CÉU/TERRENO
+            let hy = Math.sin(this.ship.pitch) * h * 1.5;
+            
             ctx.save();
             ctx.translate(w/2,h/2);
             ctx.rotate(-this.ship.roll);
-            let hy = Math.sin(this.ship.pitch) * h * 1.5;
             
-            let sG = ctx.createLinearGradient(0,-h*4,0,hy);
+            let sG = ctx.createLinearGradient(0, -h*4, 0, hy + 0.1);
             sG.addColorStop(0,'#020b14'); sG.addColorStop(0.6,'#0a2342'); sG.addColorStop(1,'#1d4d76');
             ctx.fillStyle = sG;
-            ctx.fillRect(-w*3,-h*4,w*6,hy+h*4);
+            ctx.fillRect(-w*3, -h*4, w*6, hy + h*4);
             
-            let sunHdg = 0; 
-            let hdgDiff = sunHdg - this.ship.yaw;
-            while(hdgDiff > Math.PI) hdgDiff -= Math.PI*2;
-            while(hdgDiff < -Math.PI) hdgDiff += Math.PI*2;
-            
-            let sunP = Engine3D.project(0, 50000, 200000, 0, 0, 0, this.ship.pitch, this.ship.yaw, 0, w, h);
+            let gG = ctx.createLinearGradient(0, hy, 0, h*4 + 0.1);
+            gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
+            ctx.fillStyle = gG;
+            ctx.fillRect(-w*3, hy, w*6, h*4);
+            ctx.restore();
+
+            // SOL DIRECIONAL FIXO (Mundo Real, não gira com a tela mas responde à câmera)
+            let sunP = Engine3D.project(
+                this.ship.x, this.ship.y + 50000, this.ship.z + 200000, 
+                this.ship.x, this.ship.y, this.ship.z, 
+                this.ship.pitch, this.ship.yaw, this.ship.roll, w, h
+            );
             
             if (sunP.visible) {
                  ctx.fillStyle = "rgba(255, 255, 200, 0.9)";
-                 ctx.shadowBlur = 60; ctx.shadowColor = "#ffaa00";
-                 ctx.beginPath(); ctx.arc(sunP.x - w/2, sunP.y - h/2, 100 * sunP.s, 0, Math.PI*2); ctx.fill();
+                 ctx.shadowBlur = 60 * sunP.s; ctx.shadowColor = "#ffaa00";
+                 ctx.beginPath(); ctx.arc(sunP.x, sunP.y, 10000 * sunP.s, 0, Math.PI*2); ctx.fill();
                  ctx.shadowBlur = 0;
             }
 
-            let gG = ctx.createLinearGradient(0,hy,0,h*4);
-            gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
-            ctx.fillStyle = gG;
-            ctx.fillRect(-w*3,hy,w*6,h*4);
-            
+            // GRID TÁTICO E PRÉDIOS: Desenhados de forma absoluta, sem rotação dupla
             ctx.strokeStyle='rgba(40, 150, 40, 0.3)'; ctx.lineWidth=2; ctx.beginPath();
             let st=4000, sx=Math.floor(this.ship.x/st)*st-st*15, sz=Math.floor(this.ship.z/st)*st-st*15;
-            for(let x=0;x<=30;x++) {
+            for(let x=0; x<=30; x++) {
                 let p1 = Engine3D.project(sx + x*st, 0, sz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 let p2 = Engine3D.project(sx + x*st, 0, sz + 60*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x - w/2, p1.y - h/2); ctx.lineTo(p2.x - w/2, p2.y - h/2); }
+                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
             }
             for (let z = 0; z <= 60; z++) {
                 let p1 = Engine3D.project(sx, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 let p2 = Engine3D.project(sx + 30*st, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x - w/2, p1.y - h/2); ctx.lineTo(p2.x - w/2, p2.y - h/2); }
+                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
             }
             ctx.stroke();
 
@@ -1201,14 +1211,10 @@
                     ctx.strokeStyle = s.color;
                     ctx.lineWidth = s.w * baseP.s;
                     ctx.lineCap = 'butt';
-                    ctx.beginPath(); ctx.moveTo(baseP.x - w/2, baseP.y - h/2); ctx.lineTo(topP.x - w/2, topP.y - h/2); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(baseP.x, baseP.y); ctx.lineTo(topP.x, topP.y); ctx.stroke();
                     ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = (s.w * baseP.s) / 3; ctx.stroke(); 
                 }
             });
-
-            ctx.strokeStyle='rgba(0,255,200,0.6)'; ctx.lineWidth=2;
-            ctx.beginPath(); ctx.moveTo(-w*3,hy); ctx.lineTo(w*3,hy); ctx.stroke();
-            ctx.restore();
         },
 
         _drawEntities: function(ctx,w,h) {
@@ -1370,7 +1376,6 @@
             
             const RADAR_RANGE = 40000;
             const plot=(ty, tx, tz, col, isTarget)=>{
-                // INVERTIDO PARA RESPEITAR OS PARÂMETROS
                 let dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
                 let cr = Math.cos(p.yaw), sr = Math.sin(p.yaw);
                 let lx = dx*cr - dz*sr;
@@ -1384,15 +1389,18 @@
                     ctx.fillStyle=col; 
                     ctx.beginPath();
                     
-                    // CORREÇÃO CRÍTICA DO RADAR: dy > 0 significa INIMIGO ACIMA DE VOCÊ no mundo 3D
+                    // CORREÇÃO CRÍTICA DO RADAR (INDICADOR REAL DE ALTITUDE ACIMA/ABAIXO)
                     if (dy > 500) { 
-                        ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); // Triangulo pra cima
+                        // Inimigo Acima -> Triângulo aponta para CIMA (▲)
+                        ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); 
                         ctx.fill(); 
                     } else if (dy < -500) { 
-                        ctx.moveTo(px, py + 6); ctx.lineTo(px - 5, py - 4); ctx.lineTo(px + 5, py - 4); // Triangulo pra baixo
+                        // Inimigo Abaixo -> Triângulo aponta para BAIXO (▼)
+                        ctx.moveTo(px, py + 6); ctx.lineTo(px - 5, py - 4); ctx.lineTo(px + 5, py - 4); 
                         ctx.fill(); 
                     } else {
-                        ctx.arc(px, py, 4, 0, Math.PI*2); // Bolinha mesma altura
+                        // Mesma Altitude -> Círculo
+                        ctx.arc(px, py, 4, 0, Math.PI*2); 
                         ctx.fill(); 
                     }
                     
