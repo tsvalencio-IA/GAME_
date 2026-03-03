@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: CORREÇÃO DEFINITIVA DE ESTADOS DE SESSÃO E MULTIPLAYER FIX
+// STATUS: ESCUDO ANTI-CRASH, FÍSICA ACE COMBAT, STATE MACHINE IA, PROGRESSÃO
 // =============================================================================
 
 (function() {
@@ -212,11 +212,13 @@
                         if (self.state === 'LOBBY') {
                             if (self.mode === 'SINGLE' || self.mode === 'FREE') {
                                 self.state = 'HANGAR';
-                            } else if (self.net.isHost) {
+                            } else if (self.net.isHost && Object.keys(self.net.players).length > 0) {
                                 if (self.net.sessionRef) self.net.sessionRef.child('state').set('HANGAR');
                                 else self.state = 'HANGAR';
                             } else if (!self.net.isHost && self.net.uid && self.net.playersRef) {
                                 self.net.playersRef.child(self.net.uid).update({ready: true});
+                            } else {
+                                self.state = 'HANGAR'; 
                             }
                         } else if (self.state === 'HANGAR') {
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
@@ -233,7 +235,6 @@
             if ((this.mode === 'PVP' || this.mode === 'COOP') && window.DB) {
                 this._initNet();
             } else {
-                // FALLBACK ABSOLUTO PARA MODO OFFLINE (Ignora Firebase 100%)
                 this.state = 'HANGAR'; 
                 this.net.isHost = true; 
             }
@@ -260,7 +261,7 @@
                     self.net.sharedRef.set({ wave: 1, teamKills: 0 });
                     self.net.playersRef.remove();
                 } else {
-                    self.net.isHost = false;
+                    self.net.isHost = false; 
                 }
                 
                 self.net.playersRef.child(self.net.uid).set({
@@ -270,6 +271,28 @@
 
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
+                // AUTO HOST MIGRATION (Evita ficar preso esperando líder)
+                self.net.sessionRef.child('host').once('value').then(hSnap => {
+                    let currentHost = hSnap.val();
+                    let connectedUIDs = Object.keys(self.net.players);
+                    if (!currentHost || !self.net.players[currentHost]) {
+                        if (connectedUIDs.length > 0) {
+                            let newHost = connectedUIDs[0];
+                            if (newHost === self.net.uid) {
+                                self.net.isHost = true;
+                                self.net.sessionRef.child('host').set(self.net.uid);
+                                if (!currentHost) {
+                                    self.net.sessionRef.child('state').set('LOBBY');
+                                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
+                                }
+                            } else {
+                                self.net.isHost = false;
+                            }
+                        }
+                    } else {
+                        self.net.isHost = (currentHost === self.net.uid);
+                    }
+                });
             });
 
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
@@ -389,6 +412,7 @@
                     
                     this._drawCalib(ctx, w, h);
                     if (this.timer <= 0 || this.keys[' ']) {
+                        // Aplica Upgrades sem mutar BASE global
                         this.currentStats.thrust = BASE_PLANE_STATS.thrust + ((this.upgrades.engine - 1) * 50000);
                         this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
                         this.ship.hp = this.ship.maxHp;
@@ -428,6 +452,8 @@
                     Object.keys(this.net.players).forEach(uid => {
                         if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                             let rp = this.net.players[uid];
+                            
+                            // Interpolation smoothing based on dt
                             rp.x += (rp.vx || 0) * dt; 
                             rp.y += (rp.vy || 0) * dt; 
                             rp.z += (rp.vz || 0) * dt;
