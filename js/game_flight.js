@@ -202,14 +202,15 @@
                         
                         let touchX = ((cx - rect.left) / rect.width) * window.innerWidth;
                         let touchY = ((cy - rect.top) / rect.height) * window.innerHeight;
+                        let sc = Math.min(1, window.innerWidth / 600); // Fator Mobile para cliques
 
-                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20 && touchX < 120 && touchY > 20 && touchY < 60) {
+                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20*sc && touchX < 120*sc && touchY > 20*sc && touchY < 60*sc) {
                             self.cleanup();
                             if(window.System && window.System.home) window.System.home();
                             return;
                         }
 
-                        if (self.state === 'LOBBY' && (self.mode === 'PVP' || self.mode === 'COOP') && touchX > window.innerWidth - 180 && touchY > 20 && touchY < 60) {
+                        if (self.state === 'LOBBY' && (self.mode === 'PVP' || self.mode === 'COOP') && touchX > window.innerWidth - 180*sc && touchY > 20*sc && touchY < 60*sc) {
                             if (self.net.sessionRef) {
                                 self.net.sessionRef.child('host').set(self.net.uid);
                                 self.net.sessionRef.child('state').set('LOBBY'); 
@@ -232,6 +233,10 @@
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
                         } else if (self.state === 'CALIBRATION') {
                             self.timer = 0; 
+                        } else if (self.state === 'PLAYING') {
+                            // FALLBACK MOBILE: Toque na tela simula "juntar as mãos" para atirar mísseis no celular
+                            self.pilot.headTilt = true;
+                            setTimeout(() => { self.pilot.headTilt = false; }, 250);
                         }
                     } catch(err) { console.error("Touch Error:", err); }
                 };
@@ -352,6 +357,7 @@
                 } else GameSfx.play('vulcan');
             };
 
+            // Cliques responsivos baseados em % de altura
             if (y > h*0.3 && y < h*0.45) buy(500 * this.upgrades.engine, 'engine');
             else if (y > h*0.48 && y < h*0.63) buy(800 * this.upgrades.missiles, 'missiles');
             else if (y > h*0.66 && y < h*0.81) buy(1000 * this.upgrades.armor, 'armor');
@@ -416,6 +422,27 @@
                 }
                 
                 this._readPose(pose, w, h, dt); 
+
+                // MIRA AUTOMÁTICA E SUAVE (MAGNETISMO) ATIVADA NO CORE FÍSICO
+                if (this.combat.target && this.combat.locked) {
+                    let dx = this.combat.target.x - this.ship.x;
+                    let dy = this.combat.target.y - this.ship.y;
+                    let dz = this.combat.target.z - this.ship.z;
+                    let targetYaw = Math.atan2(dx, dz);
+                    let targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
+                    
+                    let yawDiff = targetYaw - this.ship.yaw;
+                    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+                    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+                    
+                    let pitchDiff = targetPitch - this.ship.pitch;
+                    while (pitchDiff > Math.PI) pitchDiff -= Math.PI * 2;
+                    while (pitchDiff < -Math.PI) pitchDiff += Math.PI * 2;
+
+                    // Assistência para colar a mira no alvo sem roubar o controle total
+                    this.pilot.targetRoll += (yawDiff * 2.5 - this.pilot.targetRoll) * 4 * dt; 
+                    this.pilot.targetPitch += (pitchDiff * 2.5 - this.pilot.targetPitch) * 4 * dt;
+                }
                 
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
@@ -590,7 +617,7 @@
                 if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
 
                 this._processCombat(dt, w, h);
-                this._spawnEnemies(); // <--- CHAMADA RESTAURADA (GERADOR DE IA)
+                this._spawnEnemies(); 
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -603,7 +630,7 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
-                // ESCUDO ANTI-CRASH VISUAL
+                // ESCUDO ANTI-CRASH VISUAL E RECOVERY
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
                 ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
@@ -660,8 +687,9 @@
                         trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput)); 
                     }
 
+                    // AUMENTADO O ALCANCE PARA FACILITAR O GATILHO NA CÂMERA (Mobile/Desktop)
                     let handsDist = Math.hypot(rx - lx, ry - ly);
-                    if (handsDist < w * 0.15 && this.state === 'PLAYING') {
+                    if (handsDist < w * 0.25 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
                     if (handsDist > w * 0.5) {
@@ -699,7 +727,8 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
-                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.707 && p.z < closestZ) { 
+                // CAMPO DE VISÃO ALARGADO (dot > 0.5 garante que a mira é muito mais tolerante)
+                if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.5 && p.z < closestZ) { 
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
                 }
@@ -999,7 +1028,7 @@
                         let tDirX = rx/dist, tDirY = ry/dist, tDirZ = rz/dist;
                         let dot = vDirX*tDirX + vDirY*tDirY + vDirZ*tDirZ;
                         
-                        if (dot < 0.5 || Math.random() < 0.005 || m.trackTime > 15) { 
+                        if (dot < 0.4 || Math.random() < 0.005 || m.trackTime > 15) { 
                             m.target = null; 
                         }
 
@@ -1104,35 +1133,37 @@
         },
 
         _drawHangar: function(ctx, w, h) {
+            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE
+            
             ctx.fillStyle='rgba(10,15,20,0.95)'; ctx.fillRect(0,0,w,h);
             
-            ctx.fillStyle='#e74c3c'; ctx.fillRect(20, 20, 100, 40);
-            ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; ctx.fillText('SAIR', 70, 45);
+            ctx.fillStyle='#e74c3c'; ctx.fillRect(20*sc, 20*sc, 100*sc, 40*sc);
+            ctx.fillStyle='#fff'; ctx.font=`bold ${14*sc}px Arial`; ctx.textAlign='center'; ctx.fillText('SAIR', 70*sc, 45*sc);
 
-            ctx.fillStyle='#00ffcc'; ctx.font='bold 40px "Russo One", Arial'; 
+            ctx.fillStyle='#00ffcc'; ctx.font=`bold ${40*sc}px "Russo One", Arial`; 
             ctx.fillText('HANGAR MILITAR', w/2, h*0.15);
-            ctx.fillStyle='#f1c40f'; ctx.font='bold 24px Arial'; 
+            ctx.fillStyle='#f1c40f'; ctx.font=`bold ${24*sc}px Arial`; 
             ctx.fillText(`SALDO: R$ ${this.session.cash} | RANK: ${this._getRank()}`, w/2, h*0.25);
 
             let drawCard = (cx, cy, title, desc, cost, level, color) => {
                 ctx.fillStyle = this.session.cash >= cost ? color : '#333';
-                ctx.fillRect(cx - 150, cy - 30, 300, 60);
-                ctx.fillStyle = '#fff'; ctx.font='bold 16px Arial';
-                ctx.fillText(`${title} (LVL ${level})`, cx, cy - 5);
-                ctx.font='12px Arial'; ctx.fillText(`${desc} - R$ ${cost}`, cx, cy + 15);
+                ctx.fillRect(cx - 150*sc, cy - 30*sc, 300*sc, 60*sc);
+                ctx.fillStyle = '#fff'; ctx.font=`bold ${16*sc}px Arial`;
+                ctx.fillText(`${title} (LVL ${level})`, cx, cy - 5*sc);
+                ctx.font=`${12*sc}px Arial`; ctx.fillText(`${desc} - R$ ${cost}`, cx, cy + 15*sc);
             };
 
             drawCard(w/2, h*0.37, "MOTOR TURBINADO", "Potência e Aceleração", 500 * this.upgrades.engine, this.upgrades.engine, '#2980b9');
             drawCard(w/2, h*0.55, "MÍSSEIS AVANÇADOS", "Dano + Recarga", 800 * this.upgrades.missiles, this.upgrades.missiles, '#c0392b');
             drawCard(w/2, h*0.73, "BLINDAGEM PESADA", "Aumenta Integridade", 1000 * this.upgrades.armor, this.upgrades.armor, '#27ae60');
 
-            ctx.fillStyle='#2c3e50'; ctx.fillRect(w/2-200, h*0.85, 400, 60);
-            ctx.fillStyle='#fff'; ctx.font='bold 22px "Russo One", Arial'; 
+            ctx.fillStyle='#2c3e50'; ctx.fillRect(w/2-200*sc, h*0.85, 400*sc, 60*sc);
+            ctx.fillStyle='#fff'; ctx.font=`bold ${22*sc}px "Russo One", Arial`; 
             
             if (this.mode === 'SINGLE' || this.mode === 'FREE' || this.net.isHost) {
-                ctx.fillText('TOQUE AQUI PARA VOAR', w/2, h*0.85+38);
+                ctx.fillText('TOQUE AQUI PARA VOAR', w/2, h*0.85+38*sc);
             } else {
-                ctx.fillText('AGUARDANDO LÍDER INICIAR...', w/2, h*0.85+38);
+                ctx.fillText('AGUARDANDO LÍDER INICIAR...', w/2, h*0.85+38*sc);
             }
         },
 
@@ -1209,15 +1240,27 @@
                     Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#00ffcc':'#ff3300'):(o.isBoss?'#f39c12':'#00ffcc'));
                     if(isNet){ctx.fillStyle=this.mode==='COOP'?'#00ffcc':'#ff3300';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
                     
+                    let dist = Math.hypot(o.x - this.ship.x, o.y - this.ship.y, o.z - this.ship.z);
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
-                    let bs = Math.max(40, 250*s); 
+                    
+                    // INDICADOR DE ALTITUDE NOS INIMIGOS DESTRAVADOS E TRAVADOS
+                    ctx.strokeStyle = locked ? '#ff0000' : (isNet && this.mode==='COOP' ? '#00ffcc' : '#ff9900');
+                    ctx.lineWidth = locked ? 2 : 1;
+                    ctx.strokeRect(p.x - 20, p.y - 20, 40, 40);
+                    ctx.fillStyle = ctx.strokeStyle;
+                    ctx.font = '10px "Russo One", Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(Math.floor(dist) + 'm | ALT: ' + Math.floor(o.y) + 'm', p.x, p.y - 25);
+
                     if(locked){
-                        ctx.strokeStyle='#ff0000';ctx.lineWidth=2;ctx.strokeRect(p.x-bs,p.y-bs,bs*2,bs*2);
+                        let bs = Math.max(40, 250*s); 
                         ctx.beginPath(); ctx.moveTo(p.x, p.y - bs); ctx.lineTo(p.x, p.y - bs - 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x, p.y + bs); ctx.lineTo(p.x, p.y + bs + 20); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x - bs, p.y); ctx.lineTo(p.x - bs - 20, p.y); ctx.stroke();
                         ctx.beginPath(); ctx.moveTo(p.x + bs, p.y); ctx.lineTo(p.x + bs + 20, p.y); ctx.stroke();
-                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('MIRA TRAVADA',p.x,p.y+bs+35);
+                        ctx.fillStyle='#ff0000';ctx.font='bold 14px Arial';ctx.textAlign='center';
+                        ctx.fillText('MIRA TRAVADA',p.x,p.y+bs+35);
+                        ctx.fillText('ALT: ' + Math.floor(o.y) + 'm', p.x, p.y+bs+50);
                     }
                 }
                 else if(d.t==='b'){ctx.globalCompositeOperation='lighter';ctx.fillStyle=o.isEnemy?'#ff0000':'#ffff00';ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2,6*s),0,Math.PI*2);ctx.fill();ctx.globalCompositeOperation='source-over';}
@@ -1373,7 +1416,9 @@
                 if (this.pilot.targetPitch < -0.2) yokeYOffset = 40; 
                 else if (this.pilot.targetPitch > 0.2) yokeYOffset = -40; 
                 
+                let sc = Math.min(1, w/600); // ESCALA COCKPIT MOBILE
                 ctx.translate(cx, h + yokeYOffset + 20); 
+                ctx.scale(sc, sc);
                 
                 ctx.fillStyle='#050a10';ctx.fillRect(-30,-180,60,180);
                 ctx.translate(0,-160);ctx.rotate(this.pilot.targetRoll);
@@ -1430,49 +1475,53 @@
         },
         
         _drawLobby: function(ctx,w,h){
+            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE LOBBY
+            
             ctx.fillStyle='rgba(10,20,10,0.95)';ctx.fillRect(0,0,w,h);
             
-            ctx.fillStyle='#e74c3c'; ctx.fillRect(20, 20, 100, 40);
-            ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; ctx.fillText('SAIR', 70, 45);
+            ctx.fillStyle='#e74c3c'; ctx.fillRect(20*sc, 20*sc, 100*sc, 40*sc);
+            ctx.fillStyle='#fff'; ctx.font=`bold ${14*sc}px Arial`; ctx.textAlign='center'; ctx.fillText('SAIR', 70*sc, 45*sc);
 
             if (this.mode === 'PVP' || this.mode === 'COOP') {
-                ctx.fillStyle='#f39c12'; ctx.fillRect(w - 180, 20, 160, 40);
-                ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; ctx.fillText('🛠️ ASSUMIR LÍDER', w - 100, 45);
+                ctx.fillStyle='#f39c12'; ctx.fillRect(w - 180*sc, 20*sc, 160*sc, 40*sc);
+                ctx.fillStyle='#fff'; ctx.font=`bold ${14*sc}px Arial`; ctx.textAlign='center'; ctx.fillText('🛠️ ASSUMIR LÍDER', w - 100*sc, 45*sc);
             }
 
-            ctx.fillStyle='#00ffcc'; ctx.font='bold 40px "Russo One", Arial';ctx.fillText('SALA DE REUNIÃO TÁTICA',w/2,h*0.15);
+            ctx.fillStyle='#00ffcc'; ctx.font=`bold ${40*sc}px "Russo One", Arial`;ctx.fillText('SALA DE REUNIÃO TÁTICA',w/2,h*0.15);
             const ps=Object.keys(this.net.players);
-            ctx.font='bold 24px Arial';ctx.fillStyle='#fff';ctx.fillText(`PILOTOS CONECTADOS: ${ps.length}`,w/2,h*0.25);
+            ctx.font=`bold ${24*sc}px Arial`;ctx.fillStyle='#fff';ctx.fillText(`PILOTOS CONECTADOS: ${ps.length}`,w/2,h*0.25);
             let py=h*0.35;
             ps.forEach(uid=>{
                 let p = this.net.players[uid];
-                ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';ctx.fillText(`[${p.ready?'PRONTO':'AGUARDANDO'}] ${p.name}`,w/2,py);py+=40;
+                ctx.fillStyle=p.ready?'#2ecc71':'#e74c3c';ctx.fillText(`[${p.ready?'PRONTO':'AGUARDANDO'}] ${p.name}`,w/2,py);py+=40*sc;
             });
             
             if(this.net.isHost){
                 const r=ps.length>=1;
-                ctx.fillStyle=r?'#c00':'#333';ctx.fillRect(w/2-250,h*0.85,500,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One", Arial';ctx.fillText(r?'TOQUE NA TELA PARA INICIAR A MISSÃO':'AGUARDANDO...',w/2,h*0.85+38);
+                ctx.fillStyle=r?'#c00':'#333';ctx.fillRect(w/2-250*sc,h*0.85,500*sc,60*sc);
+                ctx.fillStyle='#fff';ctx.font=`bold ${22*sc}px "Russo One", Arial`;ctx.fillText(r?'TOQUE NA TELA PARA INICIAR A MISSÃO':'AGUARDANDO...',w/2,h*0.85+38*sc);
             }else{
                 let isR = this.net.players[this.net.uid]?.ready;
-                ctx.fillStyle=isR?'#e83':'#27a';ctx.fillRect(w/2-250,h*0.85,500,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One", Arial';ctx.fillText(isR?'AGUARDANDO O LÍDER INICIAR':'TOQUE NA TELA: CONFIRMAR PRESENÇA',w/2,h*0.85+38);
+                ctx.fillStyle=isR?'#e83':'#27a';ctx.fillRect(w/2-250*sc,h*0.85,500*sc,60*sc);
+                ctx.fillStyle='#fff';ctx.font=`bold ${22*sc}px "Russo One", Arial`;ctx.fillText(isR?'AGUARDANDO O LÍDER INICIAR':'TOQUE NA TELA: CONFIRMAR PRESENÇA',w/2,h*0.85+38*sc);
             }
         },
 
         _drawCalib: function(ctx,w,h){
+            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE CALIBRACAO
+            
             ctx.fillStyle='rgba(0,10,15,0.95)';ctx.fillRect(0,0,w,h);
-            ctx.strokeStyle='rgba(0,255,204,0.2)';ctx.lineWidth=2;ctx.strokeRect(50,50,w-100,h-100);
-            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 30px "Russo One", Arial';ctx.fillText('CALIBRAÇÃO DE VOO',w/2,h*0.3);
-            ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('POSICIONE AS DUAS MÃOS FRENTE À CÂMERA.',w/2,h*0.4);
-            ctx.fillStyle='#f1c40f';ctx.font='bold 16px Arial';ctx.fillText('GIRE COMO UM VOLANTE PARA CURVAR. PUXE PARA SUBIR.',w/2,h*0.48);
-            ctx.fillStyle='#ff5555';ctx.fillText('JUNTE AS MÃOS PARA ATIRAR MÍSSEIS.',w/2,h*0.53);
+            ctx.strokeStyle='rgba(0,255,204,0.2)';ctx.lineWidth=2;ctx.strokeRect(50*sc,50*sc,w-100*sc,h-100*sc);
+            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font=`bold ${30*sc}px "Russo One", Arial`;ctx.fillText('CALIBRAÇÃO DE VOO',w/2,h*0.3);
+            ctx.fillStyle='#fff';ctx.font=`bold ${20*sc}px Arial`;ctx.fillText('POSICIONE AS DUAS MÃOS FRENTE À CÂMERA.',w/2,h*0.4);
+            ctx.fillStyle='#f1c40f';ctx.font=`bold ${16*sc}px Arial`;ctx.fillText('GIRE COMO UM VOLANTE PARA CURVAR. PUXE PARA SUBIR.',w/2,h*0.48);
+            ctx.fillStyle='#ff5555';ctx.font=`bold ${16*sc}px Arial`;ctx.fillText('JUNTE AS MÃOS PARA ATIRAR MÍSSEIS.',w/2,h*0.53);
             
             let pct=1-(this.timer/5.0);
-            ctx.fillStyle='#111';ctx.fillRect(w/2-200,h*0.65,400,15);
+            ctx.fillStyle='#111';ctx.fillRect(w/2-200*sc,h*0.65,400*sc,15*sc);
             
             if (this.pilot.active) {
-                ctx.fillStyle='#00ffcc';ctx.fillRect(w/2-200,h*0.65,400*pct,15);
+                ctx.fillStyle='#00ffcc';ctx.fillRect(w/2-200*sc,h*0.65,400*sc*pct,15*sc);
                 ctx.fillText(`MANTENHA A POSIÇÃO (${Math.ceil(this.timer)}s)`, w/2, h*0.75);
             } else {
                 ctx.fillStyle='#ff0000';
