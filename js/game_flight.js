@@ -422,27 +422,6 @@
                 }
                 
                 this._readPose(pose, w, h, dt); 
-
-                // MIRA AUTOMÁTICA E SUAVE (MAGNETISMO) ATIVADA NO CORE FÍSICO
-                if (this.combat.target && this.combat.locked) {
-                    let dx = this.combat.target.x - this.ship.x;
-                    let dy = this.combat.target.y - this.ship.y;
-                    let dz = this.combat.target.z - this.ship.z;
-                    let targetYaw = Math.atan2(dx, dz);
-                    let targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
-                    
-                    let yawDiff = targetYaw - this.ship.yaw;
-                    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-                    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-                    
-                    let pitchDiff = targetPitch - this.ship.pitch;
-                    while (pitchDiff > Math.PI) pitchDiff -= Math.PI * 2;
-                    while (pitchDiff < -Math.PI) pitchDiff += Math.PI * 2;
-
-                    // Assistência para colar a mira no alvo sem roubar o controle total
-                    this.pilot.targetRoll += (yawDiff * 2.5 - this.pilot.targetRoll) * 4 * dt; 
-                    this.pilot.targetPitch += (pitchDiff * 2.5 - this.pilot.targetPitch) * 4 * dt;
-                }
                 
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
@@ -453,6 +432,7 @@
                     
                     this._drawCalib(ctx, w, h);
                     if (this.timer <= 0 || this.keys[' ']) {
+                        // Aplica Upgrades sem mutar BASE global
                         this.currentStats.thrust = BASE_PLANE_STATS.thrust + ((this.upgrades.engine - 1) * 50000);
                         this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
                         this.ship.hp = this.ship.maxHp;
@@ -669,9 +649,10 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    let rx = (1 - (rightWrist.x / 640)) * w; 
+                    // CORREÇÃO CRÍTICA: Inversão dos eixos X para o efeito de espelho correto da câmera
+                    let rx = (rightWrist.x / 640) * w; 
                     let ry = (rightWrist.y / 480) * h;
-                    let lx = (1 - (leftWrist.x / 640)) * w; 
+                    let lx = (leftWrist.x / 640) * w; 
                     let ly = (leftWrist.y / 480) * h;
                     
                     let rollInput = Math.atan2(ry - ly, rx - lx) / 0.8;
