@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. RENDER 3D CORRIGIDO, DOGFIGHT IA E RADAR DE ALTITUDE.
+// STATUS: FÍSICA ESTREITA, IA DOGFIGHTER, SKYBOX DIRECCIONAL, RADAR TÁTICO
 // =============================================================================
 
 (function() {
@@ -414,7 +414,7 @@
                 }
                 
                 this._readPose(pose, w, h, dt); 
-
+                
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
                     else {
@@ -546,13 +546,11 @@
                 }
 
                 this.ship.vx += ax * dt;
-                this.ship.vy += ay * dt;
                 this.ship.vz += az * dt;
 
-                // CORREÇÃO CRÍTICA DE ALTITUDE E PRECISÃO VERTICAL (FÍSICA 10/10)
-                // Substitui a flutuação aerodinâmica pela precisão do nariz do avião
+                // FÍSICA ARCADE ESTREITA: Velocidade Vertical alinhada ao Pitch
                 let targetVy = fwdY * this.ship.speed;
-                this.ship.vy = targetVy; // O avião vai DESVER se o bico apontar para baixo. Fim da subida falsa.
+                this.ship.vy += (targetVy - this.ship.vy) * 5.0 * dt;
 
                 this.ship.gForce = Math.hypot(ax, ay + GAME_CONFIG.GRAVITY, az) / GAME_CONFIG.GRAVITY;
 
@@ -588,7 +586,7 @@
                 if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
 
                 this._processCombat(dt, w, h);
-                this._spawnEnemies(); 
+                this._spawnEnemies();
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -652,7 +650,7 @@
                         this.pilot.baseY = this.pilot.baseY * 0.95 + avgY * 0.05;
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
-                        // LEVANTAR OS BRAÇOS = SUBIR O AVIÃO.
+                        // Subir os braços na câmera (avgY menor) = Subir o Bico (Pitch positivo)
                         let deltaY = avgY - this.pilot.baseY;
                         let pitchInput = -deltaY / (h * 0.15); 
                         trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput)); 
@@ -771,7 +769,28 @@
             }
         },
 
-        // CORREÇÃO CRÍTICA DE IA CAÇADORA: Os inimigos vão tentar se posicionar 2km atrás da sua cauda
+        _spawnEnemies: function() {
+            if (this.mode === 'PVP' || this.mode === 'FREE') return; 
+            
+            let currentKills = this.session.kills;
+            if (this.mode === 'COOP' && this.net.sharedData) currentKills = this.net.sharedData.teamKills || this.session.kills;
+
+            let maxEnemies = this.session.wave * 3;
+            if (this.entities.filter(e => e.type && e.type.startsWith('jet')).length >= maxEnemies || Math.random() > 0.05) return;
+            
+            let dist = 8000 + Math.random()*10000;
+            let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch);
+            let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
+            let sx = this.ship.x + fX*dist + (Math.random()-0.5)*15000;
+            let sz = this.ship.z + fZ*dist + (Math.random()-0.5)*15000;
+            
+            this.entities.push({ 
+                type: 'jet_fighter', state: 'PATROL', x: sx, y: Math.max(1000, this.ship.y+(Math.random()-0.5)*4000), z: sz, 
+                vx: -fX*250, vy: 0, vz: -fZ*250, hp: 150 * this.session.wave, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0,
+                target: null, stateTimer: 0, active: true, engineHealth: 100, wingHealth: 100, structuralIntegrity: 100
+            });
+        },
+
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -805,7 +824,6 @@
                     else if (minDist < 2000) e.state = 'EVADE'; 
                     else if (minDist > 12000) e.state = 'INTERCEPT';
                     else {
-                        // MODO TAIL: A Inteligência Artificial tenta se colocar nas 6 horas do piloto
                         e.state = Math.random() > 0.4 ? 'TAIL' : 'ENGAGE';
                     }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
@@ -1131,58 +1149,50 @@
             }
         },
 
-        // CORREÇÃO CRÍTICA DE VISUAIS: Renderização Tática (Céu Fixo, Solo Rotacionado, Sol Projetado)
         _drawWorld: function(ctx,w,h) {
-            // 1. Fundo Fixo (Espaço/Atmosfera)
-            let sG = ctx.createLinearGradient(0, 0, 0, h);
-            sG.addColorStop(0, '#020b14'); 
-            sG.addColorStop(0.5, '#0a2342'); 
-            sG.addColorStop(1, '#1d4d76'); 
-            ctx.fillStyle = sG;
-            ctx.fillRect(0, 0, w, h);
-
-            // 2. Chão Sólido Escuro (Apenas abaixo do horizonte, rotacionado com o avião)
             ctx.save();
-            ctx.translate(w/2, h/2);
+            ctx.translate(w/2,h/2);
             ctx.rotate(-this.ship.roll);
             let hy = Math.sin(this.ship.pitch) * h * 1.5;
-            let gG = ctx.createLinearGradient(0, hy, 0, h*2);
-            gG.addColorStop(0, 'rgba(10, 20, 15, 0.98)');
-            gG.addColorStop(1, 'rgba(2, 5, 2, 1.0)');
-            ctx.fillStyle = gG;
-            ctx.fillRect(-w*2, hy, w*4, h*4);
-            ctx.restore();
-
-            // 3. Sol Projetado (Mundo Real 3D)
-            let sunP = Engine3D.project(0, 80000, this.ship.z + 500000, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
+            
+            let sG = ctx.createLinearGradient(0,-h*4,0,hy);
+            sG.addColorStop(0,'#020b14'); sG.addColorStop(0.6,'#0a2342'); sG.addColorStop(1,'#1d4d76');
+            ctx.fillStyle = sG;
+            ctx.fillRect(-w*3,-h*4,w*6,hy+h*4);
+            
+            let sunHdg = 0; 
+            let hdgDiff = sunHdg - this.ship.yaw;
+            while(hdgDiff > Math.PI) hdgDiff -= Math.PI*2;
+            while(hdgDiff < -Math.PI) hdgDiff += Math.PI*2;
+            
+            let sunP = Engine3D.project(0, 50000, 200000, 0, 0, 0, this.ship.pitch, this.ship.yaw, 0, w, h);
+            
             if (sunP.visible) {
-                ctx.fillStyle = "rgba(255, 255, 200, 0.9)";
-                ctx.shadowBlur = 60 * sunP.s; ctx.shadowColor = "#ffaa00";
-                ctx.beginPath(); ctx.arc(sunP.x, sunP.y, 10000 * sunP.s, 0, Math.PI*2); ctx.fill();
-                ctx.shadowBlur = 0;
+                 ctx.fillStyle = "rgba(255, 255, 200, 0.9)";
+                 ctx.shadowBlur = 60; ctx.shadowColor = "#ffaa00";
+                 ctx.beginPath(); ctx.arc(sunP.x - w/2, sunP.y - h/2, 100 * sunP.s, 0, Math.PI*2); ctx.fill();
+                 ctx.shadowBlur = 0;
             }
 
-            // 4. Grade Neon (Projetada em 3D, dá a sensação real de velocidade e profundidade)
-            ctx.strokeStyle = 'rgba(0, 255, 150, 0.2)'; 
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            let st = 4000;
-            let sx = Math.floor(this.ship.x / st) * st - st * 15;
-            let sz = Math.floor(this.ship.z / st) * st - st * 10;
+            let gG = ctx.createLinearGradient(0,hy,0,h*4);
+            gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
+            ctx.fillStyle = gG;
+            ctx.fillRect(-w*3,hy,w*6,h*4);
             
-            for (let x = 0; x <= 30; x++) {
+            ctx.strokeStyle='rgba(40, 150, 40, 0.3)'; ctx.lineWidth=2; ctx.beginPath();
+            let st=4000, sx=Math.floor(this.ship.x/st)*st-st*15, sz=Math.floor(this.ship.z/st)*st-st*15;
+            for(let x=0;x<=30;x++) {
                 let p1 = Engine3D.project(sx + x*st, 0, sz, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 let p2 = Engine3D.project(sx + x*st, 0, sz + 60*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
+                if (p1.visible && p2.visible) { ctx.moveTo(p1.x - w/2, p1.y - h/2); ctx.lineTo(p2.x - w/2, p2.y - h/2); }
             }
             for (let z = 0; z <= 60; z++) {
                 let p1 = Engine3D.project(sx, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 let p2 = Engine3D.project(sx + 30*st, 0, sz + z*st, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
-                if (p1.visible && p2.visible) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
+                if (p1.visible && p2.visible) { ctx.moveTo(p1.x - w/2, p1.y - h/2); ctx.lineTo(p2.x - w/2, p2.y - h/2); }
             }
             ctx.stroke();
 
-            // 5. Prédios e Cenário (Desenhados SEM dupla rotação, perfeitamente alinhados)
             this.scenery.forEach(s => {
                 let baseP = Engine3D.project(s.x, 0, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
                 let topP = Engine3D.project(s.x, s.h, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, h);
@@ -1191,10 +1201,14 @@
                     ctx.strokeStyle = s.color;
                     ctx.lineWidth = s.w * baseP.s;
                     ctx.lineCap = 'butt';
-                    ctx.beginPath(); ctx.moveTo(baseP.x, baseP.y); ctx.lineTo(topP.x, topP.y); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(baseP.x - w/2, baseP.y - h/2); ctx.lineTo(topP.x - w/2, topP.y - h/2); ctx.stroke();
                     ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = (s.w * baseP.s) / 3; ctx.stroke(); 
                 }
             });
+
+            ctx.strokeStyle='rgba(0,255,200,0.6)'; ctx.lineWidth=2;
+            ctx.beginPath(); ctx.moveTo(-w*3,hy); ctx.lineTo(w*3,hy); ctx.stroke();
+            ctx.restore();
         },
 
         _drawEntities: function(ctx,w,h) {
@@ -1235,7 +1249,6 @@
                     ctx.font = '10px "Russo One", Arial';
                     ctx.textAlign = 'center';
                     
-                    // Mostra altitude real abaixo da distância na tela
                     ctx.fillText(Math.floor(dist) + 'm', p.x, p.y - 28);
                     ctx.fillText('ALT:' + Math.floor(o.y), p.x, p.y - 15);
 
@@ -1357,6 +1370,7 @@
             
             const RADAR_RANGE = 40000;
             const plot=(ty, tx, tz, col, isTarget)=>{
+                // INVERTIDO PARA RESPEITAR OS PARÂMETROS
                 let dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
                 let cr = Math.cos(p.yaw), sr = Math.sin(p.yaw);
                 let lx = dx*cr - dz*sr;
@@ -1368,20 +1382,17 @@
                     let py = ry - (lz/RADAR_RANGE)*rr;
                     
                     ctx.fillStyle=col; 
-                    
-                    // CORREÇÃO CRÍTICA DO RADAR: Triângulos apontando para cima ou para baixo
                     ctx.beginPath();
+                    
+                    // CORREÇÃO CRÍTICA DO RADAR: dy > 0 significa INIMIGO ACIMA DE VOCÊ no mundo 3D
                     if (dy > 500) { 
-                        // Inimigo acima: Triângulo pra cima ▲
-                        ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); 
+                        ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); // Triangulo pra cima
                         ctx.fill(); 
                     } else if (dy < -500) { 
-                        // Inimigo abaixo: Triângulo pra baixo ▼
-                        ctx.moveTo(px, py + 6); ctx.lineTo(px - 5, py - 4); ctx.lineTo(px + 5, py - 4); 
+                        ctx.moveTo(px, py + 6); ctx.lineTo(px - 5, py - 4); ctx.lineTo(px + 5, py - 4); // Triangulo pra baixo
                         ctx.fill(); 
                     } else {
-                        // Mesma altitude: Círculo ●
-                        ctx.arc(px, py, 4, 0, Math.PI*2); 
+                        ctx.arc(px, py, 4, 0, Math.PI*2); // Bolinha mesma altura
                         ctx.fill(); 
                     }
                     
@@ -1392,7 +1403,6 @@
                 }
             };
 
-            // Notar a ordem: targetY, targetX, targetZ (para respeitar a função)
             this.entities.forEach(e => plot(e.y, e.x, e.z, e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
             if((this.mode==='PVP' || this.mode==='COOP') && this.net.players) {
                 Object.keys(this.net.players).forEach(uid => {
