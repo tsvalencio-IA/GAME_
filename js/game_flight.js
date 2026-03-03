@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: CORREÇÃO DEFINITIVA DE ESTADOS DE SESSÃO E MULTIPLAYER FIX
+// STATUS: IA DOGFIGHTER, SKYBOX DIRECIONAL, RADAR TÁTICO E FÍSICA CORRIGIDA
 // =============================================================================
 
 (function() {
@@ -130,7 +130,7 @@
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL V10.JS (EVOLUÍDA E INTOCADA NA BASE)
+    // 3. ESTRUTURA PRINCIPAL V10.JS
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
@@ -155,7 +155,6 @@
             this.lastTime = performance.now();
             this.session = { kills: 0, cash: (window.Profile && window.Profile.coins) ? window.Profile.coins : 0, goal: 15, wave: 1, xp: (window.Profile && window.Profile.xp) ? window.Profile.xp : 0 };
             this.upgrades = { engine: 1, missiles: 1, armor: 1 };
-            
             this.currentStats = JSON.parse(JSON.stringify(BASE_PLANE_STATS));
             
             this.ship = { 
@@ -172,13 +171,14 @@
                 this.clouds.push({ x: (Math.random()-0.5)*120000, y: 4000+Math.random()*15000, z: (Math.random()-0.5)*120000, size: 3000+Math.random()*6000 });
             }
 
-            for (let j = 0; j < 150; j++) {
+            // CORREÇÃO: Dobrado a quantidade de cenário para preencher melhor o solo
+            for (let j = 0; j < 300; j++) {
                 this.scenery.push({
-                    x: (Math.random() - 0.5) * 80000,
-                    z: (Math.random() - 0.5) * 80000,
-                    w: 200 + Math.random() * 400,
-                    h: 100 + Math.random() * 1500,
-                    color: `rgba(${30 + Math.random() * 40}, ${30 + Math.random() * 40}, ${30 + Math.random() * 50}, 1)` 
+                    x: (Math.random() - 0.5) * 100000,
+                    z: (Math.random() - 0.5) * 100000,
+                    w: 200 + Math.random() * 500,
+                    h: 100 + Math.random() * 2000,
+                    color: `rgba(${30 + Math.random() * 30}, ${40 + Math.random() * 40}, ${30 + Math.random() * 30}, 1)` 
                 });
             }
             
@@ -202,10 +202,21 @@
                         
                         let touchX = ((cx - rect.left) / rect.width) * window.innerWidth;
                         let touchY = ((cy - rect.top) / rect.height) * window.innerHeight;
+                        let sc = Math.min(1, window.innerWidth / 600); 
 
-                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20 && touchX < 120 && touchY > 20 && touchY < 60) {
+                        if ((self.state === 'LOBBY' || self.state === 'HANGAR') && touchX > 20*sc && touchX < 120*sc && touchY > 20*sc && touchY < 60*sc) {
                             self.cleanup();
                             if(window.System && window.System.home) window.System.home();
+                            return;
+                        }
+
+                        if (self.state === 'LOBBY' && (self.mode === 'PVP' || self.mode === 'COOP') && touchX > window.innerWidth - 180*sc && touchY > 20*sc && touchY < 60*sc) {
+                            if (self.net.sessionRef) {
+                                self.net.sessionRef.child('host').set(self.net.uid);
+                                self.net.sessionRef.child('state').set('LOBBY'); 
+                                self.net.isHost = true;
+                                if(window.System && window.System.msg) window.System.msg("VOCÊ ASSUMIU O CONTROLE (RESET)!", "#00ffcc");
+                            }
                             return;
                         }
 
@@ -222,7 +233,7 @@
                             self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
                         } else if (self.state === 'CALIBRATION') {
                             self.timer = 0; 
-                        }
+                        } 
                     } catch(err) { console.error("Touch Error:", err); }
                 };
                 window.addEventListener('pointerdown', handleTap);
@@ -269,6 +280,27 @@
 
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
+                this.net.sessionRef.child('host').once('value').then(hSnap => {
+                    let currentHost = hSnap.val();
+                    let connectedUIDs = Object.keys(self.net.players);
+                    if (!currentHost || !self.net.players[currentHost]) {
+                        if (connectedUIDs.length > 0) {
+                            let newHost = connectedUIDs[0];
+                            if (newHost === self.net.uid) {
+                                self.net.isHost = true;
+                                self.net.sessionRef.child('host').set(self.net.uid);
+                                if (!currentHost) {
+                                    self.net.sessionRef.child('state').set('LOBBY');
+                                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
+                                }
+                            } else {
+                                self.net.isHost = false;
+                            }
+                        }
+                    } else {
+                        self.net.isHost = (currentHost === self.net.uid);
+                    }
+                });
             });
 
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
@@ -331,6 +363,14 @@
             }
         },
 
+        _startMission: function() {
+            this.state = 'PLAYING';
+            this.session.wave = 1;
+            this.entities = [];
+            this.bullets = [];
+            this.missiles = [];
+        },
+
         update: function(ctx, w, h, pose) {
             try {
                 const now = performance.now();
@@ -375,6 +415,27 @@
                 
                 this._readPose(pose, w, h, dt); 
                 
+                // MIRA AUTOMÁTICA E SUAVE (MAGNETISMO) ATIVADA APENAS PARA AUXILIAR TIRO
+                if (this.combat.target && this.combat.locked) {
+                    let dx = this.combat.target.x - this.ship.x;
+                    let dy = this.combat.target.y - this.ship.y;
+                    let dz = this.combat.target.z - this.ship.z;
+                    let targetYaw = Math.atan2(dx, dz);
+                    let targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
+                    
+                    let yawDiff = targetYaw - this.ship.yaw;
+                    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+                    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+                    
+                    let pitchDiff = targetPitch - this.ship.pitch;
+                    while (pitchDiff > Math.PI) pitchDiff -= Math.PI * 2;
+                    while (pitchDiff < -Math.PI) pitchDiff += Math.PI * 2;
+
+                    // Assistência para colar a mira no alvo sem roubar o controle total (Mais leve que antes)
+                    this.pilot.targetRoll += (yawDiff * 1.5 - this.pilot.targetRoll) * 2 * dt; 
+                    this.pilot.targetPitch += (pitchDiff * 1.5 - this.pilot.targetPitch) * 2 * dt;
+                }
+
                 if (this.state === 'CALIBRATION') {
                     if (this.pilot.active) this.timer -= dt;
                     else {
@@ -390,7 +451,7 @@
                         this.ship.engineHealth = 100;
                         this.ship.wingHealth = 100;
                         this.ship.structuralIntegrity = 100;
-                        this.state = 'PLAYING';
+                        this._startMission(); 
                     }
                     return 0;
                 }
@@ -509,6 +570,11 @@
                 this.ship.vy += ay * dt;
                 this.ship.vz += az * dt;
 
+                // CORREÇÃO CRÍTICA DE ALTITUDE: Força a velocidade vertical a alinhar-se com o bico do avião.
+                // Se apontar para baixo (Pitch Negativo), o avião TEM de descer.
+                let targetVy = fwdY * this.ship.speed;
+                this.ship.vy += (targetVy - this.ship.vy) * 4.0 * dt; 
+
                 this.ship.gForce = Math.hypot(ax, ay + GAME_CONFIG.GRAVITY, az) / GAME_CONFIG.GRAVITY;
 
                 this.ship.x += this.ship.vx * dt;
@@ -543,7 +609,7 @@
                 if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
 
                 this._processCombat(dt, w, h);
-                this._spawnEnemies();
+                this._spawnEnemies(); 
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -594,13 +660,14 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // REVERTIDO PARA OS CÁLCULOS EXATOS E PERFEITOS DA VERSÃO BASE
-                    let rx = (1 - (rightWrist.x / 640)) * w; 
+                    // RESTAURADO OS CÁLCULOS EXATOS DE ESPELHO E SENSIBILIDADE
+                    let rx = (rightWrist.x / 640) * w; 
                     let ry = (rightWrist.y / 480) * h;
-                    let lx = (1 - (leftWrist.x / 640)) * w; 
+                    let lx = (leftWrist.x / 640) * w; 
                     let ly = (leftWrist.y / 480) * h;
                     
-                    trgRoll = Math.max(-1.0, Math.min(1.0, Math.atan2(ry - ly, rx - lx) / 1.5)); // VOLTOU AO 1.5 ORIGINAL
+                    // Rotação exata original (divisor 1.5)
+                    trgRoll = Math.max(-1.0, Math.min(1.0, Math.atan2(ry - ly, rx - lx) / 1.5));
                     
                     let avgY = (ry + ly) / 2;
                     if (this.state === 'CALIBRATION') {
@@ -614,16 +681,22 @@
                         else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY - threshold)/100); 
                     }
 
-                    if (Math.hypot(rx - lx, ry - ly) < 120 && this.state === 'PLAYING') {
+                    // RESTAURADO DISTÂNCIA PARA ATIRAR MÍSSIL À DISTÂNCIA
+                    let handsDist = Math.hypot(rx - lx, ry - ly);
+                    if (handsDist < w * 0.25 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
-                    if (Math.abs(ry - ly) > 150) this.ship.afterburner = true; else this.ship.afterburner = false;
+                    if (handsDist > w * 0.5) {
+                        this.ship.afterburner = true; 
+                    } else {
+                        this.ship.afterburner = false;
+                    }
                 }
             }
 
             if (inputDetected) {
                 this.pilot.active = true;
-                // REVERTIDO PARA O VALOR DE SUAVIZAÇÃO ORIGINAL (12)
+                // RESTAURADO SUAVIZAÇÃO EXATA ORIGINAL (VELOCIDADE 12)
                 this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 12 * dt;
                 this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 12 * dt;
             } else {
@@ -649,6 +722,7 @@
                 let dirX = dx/dist, dirY = dy/dist, dirZ = dz/dist;
                 let dot = vDirX*dirX + vDirY*dirY + vDirZ*dirZ;
 
+                // CAMPO DE VISÃO ALARGADO (dot > 0.5 garante que a mira é muito mais tolerante)
                 if (p.visible && p.z > 200 && p.z < 60000 && dot > 0.5 && p.z < closestZ) { 
                     closestZ = p.z;
                     this.combat.target = isPlayer ? {x:obj.x, y:obj.y, z:obj.z, vx:obj.vx||0, vy:obj.vy||0, vz:obj.vz||0, hp:obj.hp, isPlayer:true, uid:uid} : obj;
@@ -745,6 +819,7 @@
             });
         },
 
+        // CORREÇÃO CRÍTICA IA: Implementada Rotina de Perseguição Real (Dogfight / Tail)
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -764,23 +839,42 @@
                     });
                 }
 
+                let isPursuit = false;
+                let tX = target.x, tY = target.y, tZ = target.z;
+
                 let dx = target.x - e.x, dy = target.y - e.y, dz = target.z - e.z;
-                let targetYaw = Math.atan2(dx, dz);
-                let targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
-                
-                let yawDiff = targetYaw - e.yaw;
-                while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-                while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+                let directYaw = Math.atan2(dx, dz);
+                let yawDiffToPlayer = directYaw - e.yaw;
+                while (yawDiffToPlayer > Math.PI) yawDiffToPlayer -= Math.PI * 2;
+                while (yawDiffToPlayer < -Math.PI) yawDiffToPlayer += Math.PI * 2;
 
                 if (e.stateTimer <= 0) {
                     if (e.hp < 30) e.state = 'RETREAT';
                     else if (e.isBoss && e.hp < 1000 && Math.random() < 0.3) e.state = 'BOSS_PHASE';
-                    else if (minDist < 2500 && Math.abs(yawDiff) > Math.PI/2) e.state = 'EVADE'; 
-                    else if (minDist < 6000 && e.y < 15000 && Math.random() < 0.3) e.state = 'VERTICAL_MANEUVER';
-                    else if (minDist > 12000) e.state = 'INTERCEPT';
-                    else e.state = 'ENGAGE';
+                    else if (minDist < 2000) e.state = 'EVADE'; 
+                    else if (minDist > 8000) e.state = 'INTERCEPT';
+                    else {
+                        // 50% de chance de tentar ir para as 6 horas do jogador (Dogfight)
+                        e.state = Math.random() > 0.5 ? 'TAIL' : 'ENGAGE';
+                    }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
                 }
+
+                if (e.state === 'TAIL') {
+                    // Mira num ponto 2000m atrás da cauda do jogador
+                    tX = target.x - Math.sin(target.yaw) * 2000;
+                    tZ = target.z - Math.cos(target.yaw) * 2000;
+                    tY = target.y + 300;
+                    isPursuit = true;
+                }
+                
+                let movDx = tX - e.x, movDy = tY - e.y, movDz = tZ - e.z;
+                let targetYaw = Math.atan2(movDx, movDz);
+                let targetPitch = Math.atan2(movDy, Math.hypot(movDx, movDz));
+
+                let yawDiff = targetYaw - e.yaw;
+                while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+                while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
                 
                 if (e.state === 'EVADE') {
                     targetYaw += Math.PI/2; 
@@ -813,7 +907,7 @@
                 e.vy = Math.sin(e.pitch) * speed;
                 e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed;
 
-                if (minDist < 10000 && Math.abs(newYawDiff) < 0.3 && (e.state === 'INTERCEPT' || e.state === 'ENGAGE' || e.state === 'BOSS_PHASE')) {
+                if (minDist < 10000 && Math.abs(yawDiffToPlayer) < 0.3 && (e.state === 'INTERCEPT' || e.state === 'ENGAGE' || e.state === 'TAIL')) {
                     if (Math.random() < (e.isBoss ? 0.1 : 0.03)) { 
                         let bSpd = 800; 
                         if (minDist < 1) minDist = 1;
@@ -1094,21 +1188,35 @@
             ctx.rotate(-this.ship.roll);
             let hy = Math.sin(this.ship.pitch) * h * 1.5;
             
+            // CÉU REALISTA
             let sG = ctx.createLinearGradient(0,-h*4,0,hy);
             sG.addColorStop(0,'#0a1a2a'); sG.addColorStop(0.6,'#2a4a6a'); sG.addColorStop(1,'#88aacc');
             ctx.fillStyle = sG;
             ctx.fillRect(-w*3,-h*4,w*6,hy+h*4);
             
-            ctx.fillStyle = "rgba(255, 255, 200, 0.4)";
-            ctx.beginPath(); ctx.arc(0, hy - 100, 60, 0, Math.PI*2); ctx.fill();
+            // CORREÇÃO CRÍTICA DO SOL: Sol Direcional (Fica no Norte Global, desaparece se rodar)
+            let sunHdg = 0; 
+            let hdgDiff = sunHdg - this.ship.yaw;
+            while(hdgDiff > Math.PI) hdgDiff -= Math.PI*2;
+            while(hdgDiff < -Math.PI) hdgDiff += Math.PI*2;
+            
+            let sunX = (hdgDiff / (Math.PI/2)) * (w/2);
+            
+            if (Math.abs(hdgDiff) < Math.PI/1.5) {
+                 ctx.fillStyle = "rgba(255, 255, 200, 0.8)";
+                 ctx.shadowBlur = 50; ctx.shadowColor = "#ffaa00";
+                 ctx.beginPath(); ctx.arc(sunX, hy - 150, 60, 0, Math.PI*2); ctx.fill();
+                 ctx.shadowBlur = 0;
+            }
 
+            // CORREÇÃO CRÍTICA DO TERRENO: Cor Sólida Tática e Grade mais densa
             let gG = ctx.createLinearGradient(0,hy,0,h*4);
-            gG.addColorStop(0,'#111115'); gG.addColorStop(0.3,'#051505'); gG.addColorStop(1,'#000000');
+            gG.addColorStop(0,'#1b2e1b'); gG.addColorStop(0.3,'#0d170d'); gG.addColorStop(1,'#050805');
             ctx.fillStyle = gG;
             ctx.fillRect(-w*3,hy,w*6,h*4);
             
-            ctx.strokeStyle='rgba(0,255,100,0.15)'; ctx.lineWidth=2; ctx.beginPath();
-            let st=10000, sx=Math.floor(this.ship.x/st)*st-st*10, sz=Math.floor(this.ship.z/st)*st-st*10;
+            ctx.strokeStyle='rgba(40, 150, 40, 0.3)'; ctx.lineWidth=2; ctx.beginPath();
+            let st=4000, sx=Math.floor(this.ship.x/st)*st-st*10, sz=Math.floor(this.ship.z/st)*st-st*10;
             for(let x=0;x<=20;x++) for(let z=0;z<=20;z++) {
                 let p=Engine3D.project(sx+x*st,0,sz+z*st,this.ship.x,this.ship.y,this.ship.z,this.ship.pitch,this.ship.yaw,this.ship.roll,w,h);
                 if(p.visible&&p.s>0.01) { ctx.moveTo(p.x-30*p.s,p.y); ctx.lineTo(p.x+30*p.s,p.y); }
@@ -1164,7 +1272,6 @@
                     let dist = Math.hypot(o.x - this.ship.x, o.y - this.ship.y, o.z - this.ship.z);
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
                     
-                    // INDICADOR DE ALTITUDE NOS INIMIGOS DESTRAVADOS E TRAVADOS
                     ctx.strokeStyle = locked ? '#ff0000' : (isNet && this.mode==='COOP' ? '#00ffcc' : '#ff9900');
                     ctx.lineWidth = locked ? 2 : 1;
                     ctx.strokeRect(p.x - 20, p.y - 20, 40, 40);
@@ -1303,17 +1410,24 @@
                     let py = ry - (lz/RADAR_RANGE)*rr;
                     
                     ctx.fillStyle=col; 
-                    if (dy > 500) {
-                        ctx.beginPath(); ctx.moveTo(px, py-4); ctx.lineTo(px-3, py+3); ctx.lineTo(px+3, py+3); ctx.fill(); 
-                    } else if (dy < -500) {
-                        ctx.beginPath(); ctx.moveTo(px, py+4); ctx.lineTo(px-3, py-3); ctx.lineTo(px+3, py-3); ctx.fill(); 
-                    } else {
-                        ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill(); 
+                    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill(); 
+                    
+                    // CORREÇÃO CRÍTICA RADAR: Setas de Elevação Visuais para Cima/Baixo
+                    ctx.strokeStyle = col; ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(px, py);
+                    if (dy > 500) { 
+                        ctx.lineTo(px, py - 8);
+                        ctx.moveTo(px - 3, py - 5); ctx.lineTo(px, py - 8); ctx.lineTo(px + 3, py - 5);
+                    } else if (dy < -500) { 
+                        ctx.lineTo(px, py + 8);
+                        ctx.moveTo(px - 3, py + 5); ctx.lineTo(px, py + 8); ctx.lineTo(px + 3, py + 5);
                     }
+                    ctx.stroke();
                     
                     if (isTarget) {
                         ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1;
-                        ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI*2); ctx.stroke();
                     }
                 }
             };
@@ -1337,7 +1451,7 @@
                 if (this.pilot.targetPitch < -0.2) yokeYOffset = 40; 
                 else if (this.pilot.targetPitch > 0.2) yokeYOffset = -40; 
                 
-                let sc = Math.min(1, w/600); // ESCALA COCKPIT MOBILE
+                let sc = Math.min(1, w/600); 
                 ctx.translate(cx, h + yokeYOffset + 20); 
                 ctx.scale(sc, sc);
                 
@@ -1396,7 +1510,7 @@
         },
         
         _drawLobby: function(ctx,w,h){
-            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE LOBBY
+            let sc = Math.min(1, w / 600); 
             
             ctx.fillStyle='rgba(10,20,10,0.95)';ctx.fillRect(0,0,w,h);
             
@@ -1429,7 +1543,7 @@
         },
 
         _drawCalib: function(ctx,w,h){
-            let sc = Math.min(1, w / 600); // FATOR DE ESCALA MOBILE CALIBRACAO
+            let sc = Math.min(1, w / 600); 
             
             ctx.fillStyle='rgba(0,10,15,0.95)';ctx.fillRect(0,0,w,h);
             ctx.strokeStyle='rgba(0,255,204,0.2)';ctx.lineWidth=2;ctx.strokeRect(50*sc,50*sc,w-100*sc,h-100*sc);
