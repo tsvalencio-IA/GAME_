@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: CONTROLES FIÉIS, IA AGRESSIVA, G-FORCE BALANCEADA, MULTIPLAYER FIX
+// STATUS: CORREÇÃO DEFINITIVA DE ESTADOS DE SESSÃO E MULTIPLAYER FIX
 // =============================================================================
 
 (function() {
@@ -150,6 +150,7 @@
         net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, sharedRef: null, loop: null, sharedData: { wave: 1, teamKills: 0 }, lastSend: 0 },
 
         init: function(faseData) {
+            // FORÇA A LIMPEZA DE REDE IMEDIATA AO INICIAR
             this._cleanupNet();
             
             this.lastTime = performance.now();
@@ -242,6 +243,7 @@
             if ((this.mode === 'PVP' || this.mode === 'COOP') && window.DB) {
                 this._initNet();
             } else {
+                // FALLBACK ABSOLUTO PARA MODO OFFLINE (Ignora Firebase 100%)
                 this.state = 'HANGAR'; 
                 this.net.isHost = true; 
             }
@@ -268,7 +270,7 @@
                     self.net.sharedRef.set({ wave: 1, teamKills: 0 });
                     self.net.playersRef.remove();
                 } else {
-                    self.net.isHost = false;
+                    self.net.isHost = false; 
                 }
                 
                 self.net.playersRef.child(self.net.uid).set({
@@ -278,6 +280,28 @@
 
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
+                // AUTO HOST MIGRATION (Evita ficar preso esperando líder)
+                self.net.sessionRef.child('host').once('value').then(hSnap => {
+                    let currentHost = hSnap.val();
+                    let connectedUIDs = Object.keys(self.net.players);
+                    if (!currentHost || !self.net.players[currentHost]) {
+                        if (connectedUIDs.length > 0) {
+                            let newHost = connectedUIDs[0];
+                            if (newHost === self.net.uid) {
+                                self.net.isHost = true;
+                                self.net.sessionRef.child('host').set(self.net.uid);
+                                if (!currentHost) {
+                                    self.net.sessionRef.child('state').set('LOBBY');
+                                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
+                                }
+                            } else {
+                                self.net.isHost = false;
+                            }
+                        }
+                    } else {
+                        self.net.isHost = (currentHost === self.net.uid);
+                    }
+                });
             });
 
             this.net.sharedRef.on('value', snap => { self.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
@@ -357,6 +381,7 @@
                 if (dt > 0.05) dt = 0.05; 
                 if (dt < 0.001) return this.session.cash || 0;
 
+                // Proteção de Variáveis (Evita propagação de NaN na física)
                 if (isNaN(this.ship.vx)) this.ship.vx = 0;
                 if (isNaN(this.ship.vy)) this.ship.vy = 0;
                 if (isNaN(this.ship.vz)) this.ship.vz = 250;
@@ -417,6 +442,7 @@
                     return this.session.cash;
                 }
 
+                // SISTEMA DE DANO MODULAR
                 if (this.ship.hp < this.ship.maxHp) {
                     let hpRatio = this.ship.hp / this.ship.maxHp;
                     if (hpRatio < 0.4) {
@@ -434,10 +460,13 @@
                 let wingEff = Math.max(0.3, this.ship.wingHealth / 100);
                 let structEff = Math.max(0.3, this.ship.structuralIntegrity / 100);
 
+                // MULTIPLAYER INTERPOLATION PROFESSIONAL
                 if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.players) {
                     Object.keys(this.net.players).forEach(uid => {
                         if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                             let rp = this.net.players[uid];
+                            
+                            // Interpolation smoothing based on dt
                             rp.x += (rp.vx || 0) * dt; 
                             rp.y += (rp.vy || 0) * dt; 
                             rp.z += (rp.vz || 0) * dt;
@@ -456,6 +485,7 @@
                     });
                 }
 
+                // FÍSICA ARCADE-SIM TÁTICA 
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
                 let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -560,6 +590,7 @@
                 if (!Number.isFinite(this.ship.z)) this.ship.z = 0;
 
                 this._processCombat(dt, w, h);
+                this._spawnEnemies(); // <--- CHAMADA RESTAURADA (GERADOR DE IA)
                 this._updateAI(dt);
                 this._updateEntities(dt, now);
                 this._updateBullets(dt);
@@ -572,6 +603,7 @@
                 return this.session.cash + this.session.kills * 10;
 
             } catch (err) {
+                // ESCUDO ANTI-CRASH VISUAL
                 ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
                 ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
                 ctx.fillText("SISTEMA DE VOO EM MODO DE SEGURANÇA (RECUPERANDO)...", 50, 50);
@@ -584,9 +616,6 @@
             }
         },
 
-        // -----------------------------------------------------------------
-        // CORREÇÃO CRÍTICA: MAPEAMENTO DE CONTROLE MUITO MAIS RESPONSIVO
-        // -----------------------------------------------------------------
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false; 
@@ -618,7 +647,6 @@
                     let lx = (1 - (leftWrist.x / 640)) * w; 
                     let ly = (leftWrist.y / 480) * h;
                     
-                    // Rotação (Roll) mais sensível: divide por 0.8 radianos ao invés de 1.5
                     let rollInput = Math.atan2(ry - ly, rx - lx) / 0.8;
                     trgRoll = Math.max(-1.0, Math.min(1.0, rollInput));
                     
@@ -627,19 +655,17 @@
                         this.pilot.baseY = this.pilot.baseY * 0.95 + avgY * 0.05;
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
-                        // Pitch Contínuo e Fiel: 
-                        // Mãos sobem na tela (avgY diminui) -> deltaY negativo -> pitch positivo (Nose UP / Sobe o bico)
                         let deltaY = avgY - this.pilot.baseY;
-                        let pitchInput = -deltaY / (h * 0.15); // Atinge máximo com 15% de desvio na tela
+                        let pitchInput = -deltaY / (h * 0.15); 
                         trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput)); 
                     }
 
                     let handsDist = Math.hypot(rx - lx, ry - ly);
                     if (handsDist < w * 0.15 && this.state === 'PLAYING') {
-                        this.pilot.headTilt = true; // Mãos juntas
+                        this.pilot.headTilt = true; 
                     }
                     if (handsDist > w * 0.5) {
-                        this.ship.afterburner = true; // Mãos super afastadas
+                        this.ship.afterburner = true; 
                     } else {
                         this.ship.afterburner = false;
                     }
@@ -648,7 +674,6 @@
 
             if (inputDetected) {
                 this.pilot.active = true;
-                // Suavização muito mais rápida para resposta imediata
                 this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 15 * dt;
                 this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 15 * dt;
             } else {
@@ -770,9 +795,6 @@
             });
         },
 
-        // -----------------------------------------------------------------
-        // CORREÇÃO CRÍTICA: IA RESTAURADA - MIRA E COMBATE AGRESSIVOS
-        // -----------------------------------------------------------------
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -807,7 +829,7 @@
                     else if (minDist < 6000 && e.y < 15000 && Math.random() < 0.3) e.state = 'VERTICAL_MANEUVER';
                     else if (minDist > 12000) e.state = 'INTERCEPT';
                     else e.state = 'ENGAGE';
-                    e.stateTimer = 1.0 + Math.random() * 1.5; // Tempos curtos para maior agilidade
+                    e.stateTimer = 1.0 + Math.random() * 1.5; 
                 }
                 
                 if (e.state === 'EVADE') {
@@ -821,7 +843,6 @@
                     targetPitch = 0.2;
                     e.roll += (0 - e.roll) * 2 * dt;
                 } else {
-                    // IA MIRA E PERSEGUE DIRETAMENTE
                     e.roll += (yawDiff * 3.0 - e.roll) * 4 * dt;
                 }
                 
@@ -842,10 +863,9 @@
                 e.vy = Math.sin(e.pitch) * speed;
                 e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed;
 
-                // TIRO MAIS PRECISO DA IA
                 if (minDist < 10000 && Math.abs(newYawDiff) < 0.3 && (e.state === 'INTERCEPT' || e.state === 'ENGAGE' || e.state === 'BOSS_PHASE')) {
                     if (Math.random() < (e.isBoss ? 0.1 : 0.03)) { 
-                        let bSpd = 800; // Tiros mais rápidos e difíceis de desviar
+                        let bSpd = 800; 
                         if (minDist < 1) minDist = 1;
                         this.bullets.push({
                             x: e.x, y: e.y, z: e.z,
@@ -1067,7 +1087,6 @@
 
         _draw: function(ctx, w, h) {
             ctx.save();
-            // CORREÇÃO CRÍTICA: Reduzido a tremedeira (Só inicia acima de 6G)
             let gShake = Math.min(10, Math.max(0, (this.ship.gForce - 6.0) * 1.5));
             if (gShake > 0) {
                 ctx.translate((Math.random()-0.5)*gShake, (Math.random()-0.5)*gShake);
@@ -1208,7 +1227,6 @@
         },
 
         _drawPilotFX: function(ctx, w, h) {
-            // CORREÇÃO CRÍTICA: Escurece apenas em G-Forces extremas (acima de 7G)
             if (this.ship.gForce > 7.0) {
                 let intensity = Math.min(1.0, (this.ship.gForce - 7.0) / 5.0); 
                 ctx.fillStyle = `rgba(0, 0, 0, ${intensity * 0.7})`; ctx.fillRect(0,0,w,h);
