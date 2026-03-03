@@ -1,34 +1,37 @@
 // =============================================================================
-// AERO STRIKE: TACTICAL YOKE SIMULATOR (EDICAO BRASIL - MULTIPLAYER FIX)
+// AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (VERSÃO DEFINITIVA BRASIL)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: RADAR LIMPO, CALIBRACAO INTELIGENTE (5S), TEXTOS PT-BR, FIREBASE FIX
+// STATUS: ARCADE-SIM PHYSICS, HANGAR UPGRADES, CO-OP OBJECTIVES, PT-BR
 // =============================================================================
 
 (function() {
     "use strict";
 
     // -----------------------------------------------------------------
-    // 1. CONFIGURAÇÕES FÍSICAS REAIS (AJUSTADAS PARA JOGABILIDADE)
+    // 1. CONFIGURAÇÕES FÍSICAS REAIS (AJUSTADAS PARA DIVERSÃO E FLUIDEZ)
     // -----------------------------------------------------------------
     const GAME_CONFIG = {
-        MONEY_PER_KILL: 150,
-        MONEY_MISSION_BONUS: 800,
-        MONEY_BOSS_BONUS: 2000,
         GRAVITY: 9.80665,     
         R_GAS: 287.05,        
         GAMMA: 1.4,           
         MAX_ALTITUDE: 40000   
     };
 
+    // FÍSICA ARCADE-SIM: Muito mais sustentação e potência. Difícil de dar Stall.
     const PLANE_STATS = {
-        thrust: 200000, mass: 12000, wingArea: 28.0,
-        cd0: 0.022, kInduced: 0.05, 
-        clMax: 2.2, stallAngle: 0.45, 
-        maxPitchRate: 2.0, maxRollRate: 3.5
+        thrust: 350000, // Motor absurdamente potente
+        mass: 12000, 
+        wingArea: 35.0, // Asas maiores para mais Lift
+        cd0: 0.022, 
+        kInduced: 0.05, 
+        clMax: 3.5, // Sustentação massiva
+        stallAngle: 0.8, // Quase 45 graus de tolerância de inclinação
+        maxPitchRate: 2.5, 
+        maxRollRate: 4.0
     };
 
     // -----------------------------------------------------------------
-    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL
+    // 2. MOTOR DE RENDERIZAÇÃO 3D VETORIAL (BLACK PS2 STYLE)
     // -----------------------------------------------------------------
     const Engine3D = {
         fov: 800,
@@ -54,47 +57,29 @@
             
             let jetGrad = ctx.createLinearGradient(0, -30, 0, 30);
             if (isEnemy) {
-                jetGrad.addColorStop(0, "#441111");
-                jetGrad.addColorStop(0.5, "#cc2222");
-                jetGrad.addColorStop(1, "#220000");
+                jetGrad.addColorStop(0, "#441111"); jetGrad.addColorStop(0.5, "#cc2222"); jetGrad.addColorStop(1, "#220000");
                 ctx.strokeStyle = "#ff5555";
             } else {
-                jetGrad.addColorStop(0, "#113333");
-                jetGrad.addColorStop(0.5, "#2288aa");
-                jetGrad.addColorStop(1, "#001111");
+                jetGrad.addColorStop(0, "#113333"); jetGrad.addColorStop(0.5, "#2288aa"); jetGrad.addColorStop(1, "#001111");
                 ctx.strokeStyle = color;
             }
 
-            ctx.lineWidth = 2;
-            ctx.fillStyle = jetGrad;
+            ctx.lineWidth = 2; ctx.fillStyle = jetGrad;
             
             ctx.beginPath();
-            ctx.moveTo(0, -40); // Bico
-            ctx.lineTo(6, -15); // Cockpit dir
-            ctx.lineTo(35, 10); // Asa dir ponta
-            ctx.lineTo(10, 15); // Asa dir base
-            ctx.lineTo(15, 30); // Estabilizador dir
-            ctx.lineTo(0, 25);  // Motor
-            ctx.lineTo(-15, 30); // Estabilizador esq
-            ctx.lineTo(-10, 15); // Asa esq base
-            ctx.lineTo(-35, 10); // Asa esq ponta
-            ctx.lineTo(-6, -15); // Cockpit esq
+            ctx.moveTo(0, -40); ctx.lineTo(6, -15); ctx.lineTo(35, 10); ctx.lineTo(10, 15); ctx.lineTo(15, 30); 
+            ctx.lineTo(0, 25); ctx.lineTo(-15, 30); ctx.lineTo(-10, 15); ctx.lineTo(-35, 10); ctx.lineTo(-6, -15); 
             ctx.closePath();
             
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = isEnemy ? "#ff0000" : "#00ffff";
-            ctx.fill(); 
-            ctx.stroke();
+            ctx.shadowBlur = 10; ctx.shadowColor = isEnemy ? "#ff0000" : "#00ffff";
+            ctx.fill(); ctx.stroke();
             
             ctx.fillStyle = "rgba(255,255,255,0.7)";
             ctx.beginPath(); ctx.moveTo(0,-25); ctx.lineTo(3,-10); ctx.lineTo(-3,-10); ctx.fill();
 
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = "#ff9900";
-            ctx.fillStyle = "#ffffff";
-            ctx.beginPath(); ctx.arc(0, 28, Math.random() * 5 + 4, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = "#ff6600";
-            ctx.beginPath(); ctx.arc(0, 28, Math.random() * 8 + 6, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 20; ctx.shadowColor = "#ff9900";
+            ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(0, 28, Math.random() * 5 + 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#ff6600"; ctx.beginPath(); ctx.arc(0, 28, Math.random() * 8 + 6, 0, Math.PI*2); ctx.fill();
 
             ctx.restore();
         }
@@ -131,28 +116,31 @@
                 }
             }
             else if (type === 'boom' && window.Sfx && window.Sfx.play) window.Sfx.play(80, 'sawtooth', 0.4, 0.2);
+            else if (type === 'buy' && window.Sfx && window.Sfx.play) window.Sfx.play(1200, 'sine', 0.1, 0.1);
         },
         stop: function() { if (this.engineSrc) { try { this.engineSrc.stop(); } catch(e){} this.engineSrc = null; } }
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL (FÍSICA + MULTIPLAYER FIREBASE)
+    // 3. ESTRUTURA PRINCIPAL V10.JS COM MULTIPLAYER E HANGAR
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
-        session: { kills: 0, cash: 0, goal: 30 },
-        ship: { hp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false },
-        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.85 },
+        session: { kills: 0, cash: 0, goal: 15, wave: 1 },
+        upgrades: { engine: 1, missiles: 1, armor: 1 },
+        ship: { hp: 100, maxHp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false },
+        pilot: { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 1.0 },
         timer: 5.0, keys: {}, keysBound: false, touchBound: false,
         entities: [], bullets: [], missiles: [], clouds: [], fx: [], floaters: [],
         combat: { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 },
-        net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, loop: null },
+        net: { isHost: false, uid: null, players: {}, sessionRef: null, playersRef: null, sharedRef: null, loop: null, sharedData: { wave: 1, teamKills: 0 } },
 
         init: function(faseData) {
             this.lastTime = performance.now();
-            this.session = { kills: 0, cash: 0, goal: 30 };
-            this.ship = { hp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false };
-            this.pilot = { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 0.85 };
+            this.session = { kills: 0, cash: (window.Profile && window.Profile.coins) ? window.Profile.coins : 0, goal: 15, wave: 1 };
+            this.upgrades = { engine: 1, missiles: 1, armor: 1 };
+            this.ship = { hp: 100, maxHp: 100, speed: 250, x: 0, y: 3000, z: 0, vx: 0, vy: 0, vz: 250, pitch: 0, yaw: 0, roll: 0, gForce: 1, mach: 0, alpha: 0, isStalling: false };
+            this.pilot = { active: false, baseY: 0, targetRoll: 0, targetPitch: 0, headTilt: false, throttle: 1.0 };
             this.entities = []; this.bullets = []; this.missiles = []; this.clouds = []; this.fx = []; this.floaters = [];
             this.combat = { target: null, locked: false, lockTimer: 0, vulcanCd: 0, missileCd: 0 };
             
@@ -170,38 +158,46 @@
             }
             
             if (!this.touchBound) {
-                const handleTap = () => {
-                    if (this.state === 'LOBBY') {
-                        if (this.net.isHost && Object.keys(this.net.players).length >= 1) {
-                            if (this.net.sessionRef) this.net.sessionRef.child('state').set('PLAYING');
-                        } else if (!this.net.isHost && this.net.uid && this.net.playersRef) {
-                            this.net.playersRef.child(this.net.uid).update({ready: true});
+                const self = this;
+                const handleTap = (e) => {
+                    let cvs = window.System?.canvas || document.getElementById('game-canvas');
+                    let rect = cvs ? cvs.getBoundingClientRect() : {left:0, top:0, width: window.innerWidth, height: window.innerHeight};
+                    let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    let touchX = ((clientX - rect.left) / rect.width) * window.innerWidth;
+                    let touchY = ((clientY - rect.top) / rect.height) * window.innerHeight;
+
+                    if (self.state === 'LOBBY') {
+                        if (self.net.isHost && Object.keys(self.net.players).length >= 1) {
+                            if (self.net.sessionRef) self.net.sessionRef.child('state').set('HANGAR');
+                            else self.state = 'HANGAR';
+                        } else if (!self.net.isHost && self.net.uid && self.net.playersRef) {
+                            self.net.playersRef.child(self.net.uid).update({ready: true});
+                        } else {
+                            self.state = 'HANGAR'; // Fallback offline
                         }
-                    } else if (this.state === 'CALIBRATION') {
-                        this.timer = 0; // Pula direto
+                    } else if (self.state === 'HANGAR') {
+                        self._processHangarClick(touchX, touchY, window.innerWidth, window.innerHeight);
+                    } else if (self.state === 'CALIBRATION') {
+                        self.timer = 0; // Pula calibração com toque
                     }
                 };
-                // Liga o clique direto no Canvas do jogo para evitar falhas de contexto
-                const cvs = window.System?.canvas || document.getElementById('game-canvas');
-                if (cvs) {
-                    cvs.addEventListener('pointerdown', handleTap);
-                    cvs.addEventListener('touchstart', handleTap);
-                } else {
-                    window.addEventListener('pointerdown', handleTap);
-                }
+                window.addEventListener('pointerdown', handleTap);
+                window.addEventListener('touchstart', handleTap);
                 this.touchBound = true;
             }
 
             if (this.mode !== 'SINGLE' && window.DB) this._initNet();
-            else { this.state = 'CALIBRATION'; this.timer = 5.0; } // Aumentado tempo
+            else { this.state = 'LOBBY'; } 
             GameSfx.init();
         },
 
         _initNet: function() {
             this.state = 'LOBBY'; this.net.players = {};
-            // Alinhado com o sistema do jogo de Kart para evitar bugs de permissão
             this.net.sessionRef = window.DB.ref('sessions/flight_' + this.mode);
             this.net.playersRef = this.net.sessionRef.child('players');
+            this.net.sharedRef = this.net.sessionRef.child('shared');
+            
             this.net.playersRef.child(this.net.uid).onDisconnect().remove();
             
             this.net.sessionRef.child('host').once('value').then(snap => {
@@ -209,19 +205,57 @@
                     this.net.isHost = true;
                     this.net.sessionRef.child('host').set(this.net.uid);
                     this.net.sessionRef.child('state').set('LOBBY');
+                    this.net.sharedRef.set({ wave: 1, teamKills: 0 });
                     this.net.playersRef.remove();
                 }
                 this.net.playersRef.child(this.net.uid).set({
-                    name: window.Profile?.username || 'PILOTO DESCONHECIDO', 
+                    name: window.Profile?.username || 'PILOTO', 
                     ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0
                 });
             });
             this.net.playersRef.on('value', snap => { this.net.players = snap.val() || {}; });
+            this.net.sharedRef.on('value', snap => { this.net.sharedData = snap.val() || { wave: 1, teamKills: 0 }; });
             this.net.sessionRef.child('state').on('value', snap => {
-                if (snap.val() === 'PLAYING' && this.state === 'LOBBY') { this.state = 'CALIBRATION'; this.timer = 5.0; }
+                if (snap.val() === 'HANGAR' && this.state === 'LOBBY') { this.state = 'HANGAR'; }
+                if (snap.val() === 'PLAYING' && this.state === 'HANGAR') { this.state = 'CALIBRATION'; this.timer = 5.0; }
             });
         },
 
+        // =====================================================================
+        // O HANGAR DE COMPRAS (UPGRADES)
+        // =====================================================================
+        _processHangarClick: function(x, y, w, h) {
+            let cx = w/2;
+            let buy = (cost, type) => {
+                if (this.session.cash >= cost) {
+                    this.session.cash -= cost;
+                    this.upgrades[type]++;
+                    GameSfx.play('buy');
+                    if (window.DB && window.System?.playerId) {
+                        window.DB.ref('users/' + window.System.playerId + '/coins').set(this.session.cash);
+                    }
+                } else {
+                    GameSfx.play('vulcan'); // Som de erro
+                }
+            };
+
+            // Hitboxes simplificadas baseadas na altura
+            if (y > h*0.3 && y < h*0.45) { buy(500, 'engine'); }
+            else if (y > h*0.48 && y < h*0.63) { buy(800, 'missiles'); }
+            else if (y > h*0.66 && y < h*0.81) { buy(1000, 'armor'); }
+            else if (y > h*0.85) {
+                // Iniciar
+                if (this.mode !== 'SINGLE' && this.net.isHost) {
+                    this.net.sessionRef?.child('state').set('PLAYING');
+                } else if (this.mode === 'SINGLE') {
+                    this.state = 'CALIBRATION'; this.timer = 5.0;
+                }
+            }
+        },
+
+        // =====================================================================
+        // UPDATE PRINCIPAL
+        // =====================================================================
         update: function(ctx, w, h, pose) {
             const now = performance.now();
             let dt = (now - this.lastTime) / 1000;
@@ -232,27 +266,42 @@
 
             if (this.state === 'LOBBY') { 
                 if (this.keys[' ']) {
-                    if (this.net.isHost && Object.keys(this.net.players).length >= 1) { this.net.sessionRef?.child('state').set('PLAYING'); }
+                    if (this.net.isHost && Object.keys(this.net.players).length >= 1) { this.net.sessionRef?.child('state').set('HANGAR'); }
                     else if (!this.net.isHost && this.net.playersRef) { this.net.playersRef.child(this.net.uid).update({ready: true}); }
                 }
                 this._drawLobby(ctx, w, h); 
                 return 0; 
             }
+
+            if (this.state === 'HANGAR') {
+                if (this.keys[' ']) {
+                    if (this.mode === 'SINGLE') { this.state = 'CALIBRATION'; this.timer = 5.0; }
+                    else if (this.net.isHost) { this.net.sessionRef?.child('state').set('PLAYING'); }
+                }
+                this._drawHangar(ctx, w, h);
+                return 0;
+            }
             
             this._readPose(pose, w, h, dt); 
             
             if (this.state === 'CALIBRATION') {
-                // SÓ CONTA O TEMPO SE O JOGADOR ESTIVER POSICIONADO
                 if (this.pilot.active) {
                     this.timer -= dt;
                 } else {
-                    this.timer = 5.0; // Reinicia o tempo se as mãos sumirem
+                    this.timer = 5.0; // Volta a 5 se tirar as mãos
                 }
                 
                 this._drawCalib(ctx, w, h);
-                if (this.timer <= 0 || this.keys[' ']) this._startMission();
+                if (this.timer <= 0 || this.keys[' ']) {
+                    // Aplica os Upgrades Comprados no Hangar
+                    PLANE_STATS.thrust += (this.upgrades.engine - 1) * 50000;
+                    this.ship.maxHp = 100 + ((this.upgrades.armor - 1) * 100);
+                    this.ship.hp = this.ship.maxHp;
+                    this._startMission();
+                }
                 return 0;
             }
+
             if (this.state === 'GAMEOVER' || this.state === 'VICTORY') {
                 this._drawEnd(ctx, w, h);
                 return this.session.cash;
@@ -263,14 +312,14 @@
                 Object.keys(this.net.players).forEach(uid => {
                     if (uid !== this.net.uid && this.net.players[uid] && this.net.players[uid].hp > 0) {
                         let rp = this.net.players[uid];
-                        rp.x += (rp.vx || 0) * dt;
-                        rp.y += (rp.vy || 0) * dt;
-                        rp.z += (rp.vz || 0) * dt;
+                        rp.x += (rp.vx || 0) * dt; rp.y += (rp.vy || 0) * dt; rp.z += (rp.vz || 0) * dt;
                     }
                 });
             }
 
-            // FÍSICA AERODINÂMICA AAA
+            // -----------------------------------------------------------------
+            // FÍSICA AERODINÂMICA ARCADE-SIM (SEM ESTOL CHATO)
+            // -----------------------------------------------------------------
             let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
             let tempK = 288.15 - 0.0065 * altitude; 
             let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -292,9 +341,10 @@
             let cosAlpha = fwdX*vDirX + fwdY*vDirY + fwdZ*vDirZ;
             this.ship.alpha = Math.acos(Math.max(-1, Math.min(1, cosAlpha))) || 0;
 
-            let CL = this.ship.alpha * (PLANE_STATS.clMax / PLANE_STATS.stallAngle); 
-            this.ship.isStalling = this.ship.alpha > PLANE_STATS.stallAngle || V < 80;
-            if (this.ship.isStalling) CL = Math.max(0, CL - (this.ship.alpha - PLANE_STATS.stallAngle) * 5.0); 
+            // LIFT MASSIVO: O avião não cai fácil.
+            let CL = this.ship.alpha * (PLANE_STATS.clMax / PLANE_STATS.stallAngle) + 0.5; 
+            this.ship.isStalling = V < 40; // Estol só se quase parar no ar
+            if (this.ship.isStalling) CL = 0.1; 
 
             let CD = PLANE_STATS.cd0 + PLANE_STATS.kInduced * (CL * CL);
 
@@ -322,9 +372,7 @@
             let maxAccel = 15.0 * GAME_CONFIG.GRAVITY; 
             let accMag = Math.hypot(ax, ay, az);
             if (accMag > maxAccel) {
-                ax = (ax / accMag) * maxAccel;
-                ay = (ay / accMag) * maxAccel;
-                az = (az / accMag) * maxAccel;
+                ax = (ax / accMag) * maxAccel; ay = (ay / accMag) * maxAccel; az = (az / accMag) * maxAccel;
             }
 
             this.ship.vx += ax * dt;
@@ -352,8 +400,7 @@
             this.ship.pitch += (this.pilot.targetPitch - this.ship.pitch) * PLANE_STATS.maxPitchRate * dt;
             
             if (this.ship.isStalling) {
-                this.ship.pitch += (-0.5 - this.ship.pitch) * 2 * dt;
-                this.ship.roll += (Math.random() - 0.5) * 4 * dt;
+                this.ship.pitch += (-0.2 - this.ship.pitch) * dt; // Nariz desce suavemente, não violentamente
             }
             this.ship.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.ship.pitch));
             
@@ -369,24 +416,15 @@
             this._updateMissiles(dt); 
             this._cleanupFx();
 
-            if (this.mode !== 'SINGLE' && this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
+            if (this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
 
             this._draw(ctx, w, h);
             return this.session.cash + this.session.kills * 10;
         },
 
-        cleanup: function() {
-            GameSfx.stop();
-            if (this.net.loop) clearInterval(this.net.loop);
-            if (this.mode !== 'SINGLE' && this.net.playersRef) {
-                this.net.playersRef.off();
-                this.net.sessionRef?.child('state')?.off();
-                this.net.playersRef.child(this.net.uid)?.remove();
-                if (this.net.isHost) this.net.sessionRef?.remove();
-            }
-        },
-
-        // YOKE DE DUAS MÃOS
+        // =====================================================================
+        // O VERDADEIRO VOLANTE (YOKE) DE DUAS MÃOS - SUPER RESPONSIVO
+        // =====================================================================
         _readPose: function(pose, w, h, dt) {
             let trgRoll = 0, trgPitch = 0, inputDetected = false;
             this.pilot.headTilt = false; 
@@ -412,17 +450,13 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    let rwX = typeof rightWrist.x === 'number' ? rightWrist.x : 320;
-                    let rwY = typeof rightWrist.y === 'number' ? rightWrist.y : 240;
-                    let lwX = typeof leftWrist.x === 'number' ? leftWrist.x : 320;
-                    let lwY = typeof leftWrist.y === 'number' ? leftWrist.y : 240;
-
-                    let rx = (1 - (rwX / 640)) * w; 
-                    let ry = (rwY / 480) * h;
-                    let lx = (1 - (lwX / 640)) * w; 
-                    let ly = (lwY / 480) * h;
+                    let rx = (1 - (rightWrist.x / 640)) * w; 
+                    let ry = (rightWrist.y / 480) * h;
+                    let lx = (1 - (leftWrist.x / 640)) * w; 
+                    let ly = (leftWrist.y / 480) * h;
                     
                     trgRoll = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, Math.atan2(ry - ly, rx - lx)));
+                    
                     let avgY = (ry + ly) / 2;
                     
                     if (this.state === 'CALIBRATION') {
@@ -430,12 +464,15 @@
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
                         let deltaY = avgY - this.pilot.baseY;
-                        let threshold = h * 0.10; 
-                        if (deltaY < -threshold) trgPitch = 1.0 * Math.min(1, Math.abs(deltaY)/200);      
-                        else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY)/200); 
+                        let threshold = h * 0.05; // DEADZONE PEQUENA: Responde instantaneamente!
+                        
+                        // Mãos SOBEM (Menos Y) -> Puxando Manche -> Nariz SOBE
+                        if (deltaY < -threshold) trgPitch = 1.0 * Math.min(1, Math.abs(deltaY + threshold)/150);      
+                        // Mãos DESCEM (Mais Y) -> Empurrando Manche -> Nariz DESCE
+                        else if (deltaY > threshold) trgPitch = -1.0 * Math.min(1, Math.abs(deltaY - threshold)/150); 
                     }
 
-                    // Bater palmas atira
+                    // Bater palmas (Aproximar as mãos atira o míssil)
                     if (Math.hypot(rx - lx, ry - ly) < 120 && this.state === 'PLAYING') {
                         this.pilot.headTilt = true; 
                     }
@@ -444,8 +481,8 @@
 
             if (inputDetected) {
                 this.pilot.active = true;
-                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 8 * dt;
-                this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 5 * dt;
+                this.pilot.targetRoll += (trgRoll - this.pilot.targetRoll) * 12 * dt;
+                this.pilot.targetPitch += (trgPitch - this.pilot.targetPitch) * 12 * dt;
             } else {
                 this.pilot.active = false;
                 this.pilot.targetRoll *= 0.9;
@@ -486,7 +523,7 @@
 
             if (this.combat.locked && this.combat.target && performance.now() - this.combat.vulcanCd > 80) {
                 this.combat.vulcanCd = performance.now();
-                let spd = this.ship.speed + 800;
+                let spd = this.ship.speed + 1200;
                 let dx = this.combat.target.x - this.ship.x, dy = this.combat.target.y - this.ship.y, dz = this.combat.target.z - this.ship.z;
                 let dist = Math.hypot(dx,dy,dz);
                 this.bullets.push({
@@ -495,25 +532,27 @@
                     isEnemy: false, life: 2
                 });
                 GameSfx.play('vulcan');
-                window.Gfx?.shakeScreen?.(4);
+                window.Gfx?.shakeScreen?.(2);
             }
 
             if (this.combat.missileCd > 0) this.combat.missileCd -= dt;
 
             if (this.combat.locked && this.pilot.headTilt && this.combat.missileCd <= 0) {
-                this.combat.missileCd = 1.2;
+                this.combat.missileCd = Math.max(0.5, 1.5 - (this.upgrades.missiles * 0.2)); // Upgrade afeta recarga
                 this.missiles.push({
                     x: this.ship.x, y: this.ship.y-50, z: this.ship.z,
                     vx: this.ship.vx, vy: this.ship.vy, vz: this.ship.vz,
-                    target: this.combat.target, life: 6, maxG: 40
+                    target: this.combat.target, life: 6, maxG: 40 + (this.upgrades.missiles * 5)
                 });
                 GameSfx.play('missile');
-                window.Gfx?.shakeScreen?.(12);
+                window.Gfx?.shakeScreen?.(10);
             }
         },
 
         _spawnEnemies: function() {
-            if (this.entities.length >= 6 || Math.random() > 0.02) return;
+            if (this.mode === 'PVP') return; 
+            if (this.entities.length >= 8 || Math.random() > 0.02) return;
+            
             let dist = 8000 + Math.random()*10000;
             let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch);
             let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
@@ -522,8 +561,37 @@
             
             this.entities.push({ 
                 type: 'jet', x: sx, y: Math.max(1000, this.ship.y+(Math.random()-0.5)*4000), z: sz, 
-                vx: -fX*250, vy: 0, vz: -fZ*250, hp: 150, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0 
+                vx: -fX*250, vy: 0, vz: -fZ*250, hp: 150 * this.session.wave, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0 
             });
+        },
+
+        _updateMissionSystem: function() {
+            if (this.mode === 'PVP') return;
+            
+            let currentKills = this.session.kills;
+            if (this.mode === 'COOP' && this.net.sharedData) {
+                currentKills = this.net.sharedData.teamKills || this.session.kills;
+            }
+
+            if (currentKills >= 15 && this.session.wave === 1) {
+                this.session.wave = 2;
+                if(window.System?.msg) window.System.msg("WAVE 2: INIMIGOS REFORÇADOS", "#ffcc00");
+                if (this.net.isHost && this.net.sharedRef) this.net.sharedRef.update({wave: 2});
+            } else if (currentKills >= 30 && this.session.wave === 2) {
+                this.session.wave = 3;
+                if(window.System?.msg) window.System.msg("WAVE 3: O CHEFÃO CHEGOU!", "#ff3300");
+                if (this.net.isHost && this.net.sharedRef) this.net.sharedRef.update({wave: 3});
+                
+                // Spawn Boss
+                let fX = Math.sin(this.ship.yaw) * Math.cos(this.ship.pitch);
+                let fZ = Math.cos(this.ship.yaw) * Math.cos(this.ship.pitch);
+                this.entities.push({ 
+                    type: 'boss', x: this.ship.x + fX*12000, y: this.ship.y+2000, z: this.ship.z + fZ*12000, 
+                    vx: -fX*350, vy: 0, vz: -fZ*350, hp: 2000, yaw: this.ship.yaw + Math.PI, roll: 0, pitch: 0, isBoss: true 
+                });
+            } else if (currentKills >= 31 && this.session.wave === 3) {
+                this._endGame('VICTORY');
+            }
         },
 
         _updateEntities: function(dt, now) {
@@ -538,11 +606,11 @@
                 while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
                 while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
                 
-                e.yaw += yawDiff * 0.8 * dt;
-                e.pitch += (targetPitch - e.pitch) * 0.8 * dt;
+                e.yaw += yawDiff * 1.2 * dt;
+                e.pitch += (targetPitch - e.pitch) * 1.2 * dt;
                 e.roll = yawDiff * 2.0;
 
-                let speed = 280;
+                let speed = e.isBoss ? 400 : 280;
                 e.vx = Math.sin(e.yaw) * Math.cos(e.pitch) * speed;
                 e.vy = Math.sin(e.pitch) * speed;
                 e.vz = Math.cos(e.yaw) * Math.cos(e.pitch) * speed;
@@ -563,6 +631,7 @@
                 }
             }
             this.entities = this.entities.filter(e => e.hp > 0);
+            this._updateMissionSystem();
         },
 
         _updateBullets: function(dt) {
@@ -571,17 +640,17 @@
                 b.x += b.vx*dt; b.y += b.vy*dt; b.z += b.vz*dt; b.life -= dt;
                 if (b.isEnemy) {
                     if (Math.hypot(b.x-this.ship.x, b.y-this.ship.y, b.z-this.ship.z) < 80) {
-                        this.ship.hp -= 8;
+                        this.ship.hp -= 10;
                         window.Gfx?.shakeScreen?.(15);
                         if (this.ship.hp <= 0) this._endGame('GAMEOVER');
                         b.life = 0;
                     }
                 } else {
                     for (let e of this.entities) {
-                        if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < 150) {
-                            e.hp -= 40; b.life = 0;
+                        if (Math.hypot(b.x-e.x, b.y-e.y, b.z-e.z) < (e.isBoss? 300 : 150)) {
+                            e.hp -= 50; b.life = 0;
                             this._fx(e.x,e.y,e.z,'#f90',4,40);
-                            if (e.hp <= 0) this._kill(e, 150);
+                            if (e.hp <= 0) this._kill(e, e.isBoss?2000:150);
                             break;
                         }
                     }
@@ -610,14 +679,14 @@
                     let dist2 = rx*rx + ry*ry + rz*rz;
                     let dist = Math.sqrt(dist2);
                     
-                    if (dist < 80) { 
+                    if (dist < 100) { 
                         if (m.target.isPlayer && this.mode==='PVP') {
                             window.DB?.ref(`sessions/flight_${this.mode}/players/${m.target.uid}/hp`).set(m.target.hp-50);
                             this._fx(m.target.x,m.target.y,m.target.z,'#f33',40,300);
                             this.session.cash += 500;
                         } else if (!m.target.isPlayer) {
-                            m.target.hp -= 400;
-                            if (m.target.hp <= 0) this._kill(m.target, 300);
+                            m.target.hp -= 400 + (this.upgrades.missiles * 100);
+                            if (m.target.hp <= 0) this._kill(m.target, m.target.isBoss?2000:300);
                         }
                         m.life = 0;
                     } else {
@@ -672,7 +741,16 @@
             this.floaters.push({x:t.x,y:t.y,z:t.z,text:`+ R$ ${rew}`,life:2});
             this.session.kills++;
             this.session.cash += rew;
-            if (this.session.kills >= this.session.goal && this.mode==='SINGLE') this._endGame('VICTORY');
+            
+            // Sync Co-Op Kills
+            if (this.mode === 'COOP' && this.net.sharedRef) {
+                let teamKills = (this.net.sharedData.teamKills || 0) + 1;
+                this.net.sharedRef.update({ teamKills: teamKills });
+            }
+
+            if (window.DB && window.System?.playerId) {
+                window.DB.ref('users/' + window.System.playerId + '/coins').set(this.session.cash);
+            }
         },
 
         _endGame: function(res) {
@@ -682,10 +760,6 @@
                 if (window.System?.gameOver) window.System.gameOver(this.session.kills*100, res==='VICTORY', this.session.cash);
                 else if (window.System?.home) window.System.home();
             }, 2000);
-        },
-
-        _fx: function(x,y,z,c,n,s) {
-            for(let i=0;i<n;i++) this.fx.push({x,y,z,vx:(Math.random()-0.5)*12000,vy:(Math.random()-0.5)*12000,vz:(Math.random()-0.5)*12000,life:1+Math.random(),c,size:s+Math.random()*200});
         },
 
         _startMission: function() {
@@ -706,6 +780,9 @@
             }
         },
 
+        // =====================================================================
+        // VISUAIS COMPLETOS E INTERFACES EM PT-BR
+        // =====================================================================
         _draw: function(ctx, w, h) {
             ctx.save();
             let gShake = Math.min(20, Math.max(0, (this.ship.gForce - 3.0) * 2));
@@ -724,6 +801,31 @@
             
             ctx.fillStyle='rgba(0,0,0,0.1)';
             for(let i=0;i<h;i+=4) ctx.fillRect(0,i,w,1);
+        },
+
+        _drawHangar: function(ctx, w, h) {
+            ctx.fillStyle='rgba(10,15,20,0.95)'; ctx.fillRect(0,0,w,h);
+            ctx.fillStyle='#00ffcc'; ctx.textAlign='center'; ctx.font='bold 40px "Russo One"'; 
+            ctx.fillText('HANGAR MILITAR', w/2, h*0.15);
+            ctx.fillStyle='#f1c40f'; ctx.font='bold 24px Arial'; 
+            ctx.fillText(`SEU SALDO: R$ ${this.session.cash}`, w/2, h*0.25);
+
+            // Opções
+            let drawCard = (cx, cy, title, desc, cost, level, color) => {
+                ctx.fillStyle = this.session.cash >= cost ? color : '#333';
+                ctx.fillRect(cx - 150, cy - 30, 300, 60);
+                ctx.fillStyle = '#fff'; ctx.font='bold 16px Arial';
+                ctx.fillText(`${title} (LVL ${level})`, cx, cy - 5);
+                ctx.font='12px Arial'; ctx.fillText(`${desc} - R$ ${cost}`, cx, cy + 15);
+            };
+
+            drawCard(w/2, h*0.37, "MOTOR TURBINADO", "Aumenta Potência do Jato", 500, this.upgrades.engine, '#2980b9');
+            drawCard(w/2, h*0.55, "MÍSSEIS AVANÇADOS", "Dano + Recarga Rápida", 800, this.upgrades.missiles, '#c0392b');
+            drawCard(w/2, h*0.73, "BLINDAGEM PESADA", "Aumenta Vida Máxima", 1000, this.upgrades.armor, '#27ae60');
+
+            ctx.fillStyle='#2c3e50'; ctx.fillRect(w/2-200, h*0.85, 400, 60);
+            ctx.fillStyle='#fff'; ctx.font='bold 22px "Russo One"'; 
+            ctx.fillText('PULAR / IR PARA MISSÃO', w/2, h*0.85+38);
         },
 
         _drawWorld: function(ctx,w,h) {
@@ -779,7 +881,7 @@
                 else if(d.t==='x'){ctx.fillStyle='#2ecc71';ctx.font=`bold ${Math.max(16,1500*s)}px 'Russo One'`;ctx.textAlign='center';ctx.fillText(o.text,p.x,p.y);}
                 else if(d.t==='e'||d.t==='p'){
                     let isNet=d.t==='p';
-                    Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#0ff':'#f33'):'#00ffcc');
+                    Engine3D.drawJetModel(ctx, p.x, p.y, Math.max(0.1, s*2), o.roll||0, !isNet, isNet?(this.mode==='COOP'?'#0ff':'#f33'):(o.isBoss?'#f39c12':'#00ffcc'));
                     if(isNet){ctx.fillStyle=this.mode==='COOP'?'#0ff':'#f33';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText(o.name||'ALIADO',p.x,p.y-300*s-10);}
                     
                     let locked=this.combat.target&&(isNet?this.combat.target.uid===d.id:this.combat.target===o);
@@ -809,12 +911,12 @@
             }
         },
         
-        // NOVO RADAR 2D LIMPO
+        // NOVO RADAR AWACS LIMPO (2D TOP-DOWN)
         _drawHUD: function(ctx,w,h){
             let p = this.ship;
             ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,w,50);
-            ctx.fillStyle='#00ffcc';ctx.font='bold 20px Arial';ctx.textAlign='left';ctx.fillText(`SPD: ${Math.floor(p.speed * 3.6)} KM/H`,20,30);
-            ctx.textAlign='right';ctx.fillText(`ALT: ${Math.floor(p.y)} M`,w-20,30);
+            ctx.fillStyle='#00ffcc';ctx.font='bold 20px Arial';ctx.textAlign='left';ctx.fillText(`VELOCIDADE: ${Math.floor(p.speed * 3.6)} KM/H`,20,30);
+            ctx.textAlign='right';ctx.fillText(`ALTITUDE: ${Math.floor(p.y)} M`,w-20,30);
             let hdg=(p.yaw*180/Math.PI)%360;if(hdg<0)hdg+=360;
             ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(Math.floor(hdg)+'°',w/2,35);
             
@@ -831,38 +933,33 @@
 
             if (p.isStalling) {
                 ctx.fillStyle = (Math.floor(performance.now() / 150) % 2 === 0) ? "#e74c3c" : "#fff"; 
-                ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One'"; ctx.fillText("ESTOL! DESÇA O NARIZ!", w/2, h/2 - 100); 
+                ctx.textAlign = "center"; ctx.font = "bold 32px 'Russo One'"; ctx.fillText("ALERTA DE ESTOL! BAIXE O BICO!", w/2, h/2 - 100); 
             }
 
-            const rx=w-80,ry=130,rr=60;
-            ctx.fillStyle='rgba(0,30,10,0.7)';ctx.beginPath();ctx.arc(rx,ry,rr,0,Math.PI*2);ctx.fill();
-            ctx.strokeStyle='#00ffcc';ctx.lineWidth=2;ctx.stroke();
-            ctx.beginPath();ctx.moveTo(rx,ry-rr);ctx.lineTo(rx,ry+rr);ctx.moveTo(rx-rr,ry);ctx.lineTo(rx+rr,ry);ctx.stroke();
+            // Radar Tático Limpo
+            const rx=w-90,ry=140,rr=75;
+            ctx.fillStyle='rgba(0,30,10,0.85)';ctx.beginPath();ctx.arc(rx,ry,rr,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle='rgba(0,255,204,0.3)';ctx.lineWidth=1;
+            ctx.beginPath();ctx.arc(rx,ry,rr*0.5,0,Math.PI*2);ctx.stroke();
+            ctx.beginPath();ctx.arc(rx,ry,rr,0,Math.PI*2);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(rx,ry-rr);ctx.lineTo(rx,ry+rr);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(rx-rr,ry);ctx.lineTo(rx+rr,ry);ctx.stroke();
+            
+            ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx-rr*0.6, ry-rr*0.8); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx+rr*0.6, ry-rr*0.8); ctx.stroke();
+            
             ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(rx,ry-6);ctx.lineTo(rx-5,ry+4);ctx.lineTo(rx+5,ry+4);ctx.fill();
             
             const RADAR_RANGE = 40000;
-            const plot = (tx, tz, col, isTarget) => {
-                let dx = tx - p.x, dz = tz - p.z;
-                let cr = Math.cos(p.yaw), sr = Math.sin(p.yaw);
-                let lx = dx*cr - dz*sr;
-                let lz = dx*sr + dz*cr;
-                let d = Math.hypot(lx, lz);
-                
-                if (d < RADAR_RANGE) {
-                    let px = rx + (lx/RADAR_RANGE)*rr;
-                    let py = ry - (lz/RADAR_RANGE)*rr;
-                    
-                    ctx.fillStyle = col;
-                    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
-                    
-                    if (isTarget) {
-                        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1;
-                        ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.stroke();
-                    }
+            const plot=(tx,tz,col,isTarget)=>{
+                let dx=tx-p.x, dz=tz-p.z, cr=Math.cos(p.yaw), sr=Math.sin(p.yaw), lx=dx*cr-dz*sr, lz=dx*sr+dz*cr, d=Math.hypot(lx,lz);
+                if(d<RADAR_RANGE){
+                    let px=rx+(lx/RADAR_RANGE)*rr, py=ry-(lz/RADAR_RANGE)*rr;
+                    ctx.fillStyle=col;ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();
+                    if(isTarget) { ctx.strokeStyle='#ff0000'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(px,py,6,0,Math.PI*2); ctx.stroke(); }
                 }
             };
-
-            this.entities.forEach(e => plot(e.x, e.z, '#ff0000', this.combat.target === e));
+            this.entities.forEach(e=>plot(e.x,e.z,e.isBoss?'#ff9900':'#ff0000', this.combat.target === e));
             if(this.mode!=='SINGLE'&&this.net.players)Object.keys(this.net.players).forEach(uid=>{if(uid!==this.net.uid&&this.net.players[uid]?.hp>0)plot(this.net.players[uid].x,this.net.players[uid].z,this.mode==='COOP'?'#00ffff':'#ff0000', false);});
         },
 
@@ -871,7 +968,6 @@
             
             if(this.pilot.active){
                 ctx.save();
-                
                 let yokeYOffset = 0;
                 if (this.pilot.targetPitch < -0.2) yokeYOffset = 40; 
                 else if (this.pilot.targetPitch > 0.2) yokeYOffset = -40; 
@@ -885,17 +981,9 @@
                 ctx.fillStyle='#1a202c'; ctx.strokeStyle='#00ffcc'; ctx.lineWidth=3; ctx.lineJoin='round';
                 
                 ctx.beginPath();
-                ctx.moveTo(-130, -20);
-                ctx.lineTo(-150, 60);
-                ctx.lineTo(-80, 80);
-                ctx.lineTo(80, 80);
-                ctx.lineTo(150, 60);
-                ctx.lineTo(130, -20);
-                ctx.lineTo(70, -20);
-                ctx.lineTo(70, 30);
-                ctx.lineTo(-70, 30);
-                ctx.lineTo(-70, -20);
-                ctx.closePath();
+                ctx.moveTo(-130, -20); ctx.lineTo(-150, 60); ctx.lineTo(-80, 80); ctx.lineTo(80, 80);
+                ctx.lineTo(150, 60); ctx.lineTo(130, -20); ctx.lineTo(70, -20); ctx.lineTo(70, 30);
+                ctx.lineTo(-70, 30); ctx.lineTo(-70, -20); ctx.closePath();
                 ctx.fill(); ctx.stroke();
                 
                 ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(-110, 0, 20, 0, Math.PI*2); ctx.fill();
@@ -909,7 +997,7 @@
                 if (this.combat.target) {
                     if (this.combat.lockTimer >= 0.5) {
                         ctx.fillStyle = "#ff0000"; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
-                        ctx.fillText("JUNTE AS MÃOS E ATIRE!", 0, -50);
+                        ctx.fillText("JUNTE AS MÃOS PARA ATIRAR!", 0, -50);
                     } else {
                         ctx.fillStyle = "#ffcc00"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
                         ctx.fillText("TRAVANDO MIRA...", 0, -50);
@@ -924,14 +1012,17 @@
             ctx.fillStyle='rgba(0,15,10,0.8)';ctx.fillRect(0,h-50,w,50);
             ctx.fillStyle='#222';ctx.fillRect(20,h-30,w/2 - 40,12);
             ctx.fillStyle=this.ship.hp>30?'#00ffcc':'#ff3300';
-            ctx.fillRect(20,h-30,(w/2 - 40)*(Math.max(0,this.ship.hp)/100),12);
-            ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='left';ctx.fillText(`INTEGRIDADE: ${Math.floor(this.ship.hp)}%`,20,h-35);
-            ctx.fillStyle='#f1c40f';ctx.font='bold 22px "Russo One"';ctx.textAlign='right';ctx.fillText(`R$ ${this.session.cash}`,w-20,h-20);
+            ctx.fillRect(20,h-30,(w/2 - 40)*(Math.max(0,this.ship.hp)/this.ship.maxHp),12);
+            ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='left';ctx.fillText(`INTEGRIDADE: ${Math.floor(this.ship.hp)} / ${this.ship.maxHp}`,20,h-35);
+            ctx.fillStyle='#f1c40f';ctx.font='bold 22px "Russo One"';ctx.textAlign='right';
+            
+            let coOpText = (this.mode === 'COOP') ? ` | ABATES TIME: ${this.net.sharedData?.teamKills||this.session.kills}` : '';
+            ctx.fillText(`R$ ${this.session.cash}${coOpText}`,w-20,h-20);
         },
         
         _drawLobby: function(ctx,w,h){
             ctx.fillStyle='rgba(10,20,10,0.95)';ctx.fillRect(0,0,w,h);
-            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 40px "Russo One"';ctx.fillText('SALA DE ESPERA',w/2,h*0.15);
+            ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 40px "Russo One"';ctx.fillText('BASE AÉREA - MULTIJOGADOR',w/2,h*0.15);
             const ps=Object.keys(this.net.players);
             ctx.font='bold 24px Arial';ctx.fillStyle='#fff';ctx.fillText(`PILOTOS CONECTADOS: ${ps.length}`,w/2,h*0.25);
             let py=h*0.35;
@@ -943,11 +1034,11 @@
             if(this.net.isHost){
                 const r=ps.length>=1;
                 ctx.fillStyle=r?'#c00':'#333';ctx.fillRect(w/2-200,h*0.85,400,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(r?'TOQUE PARA INICIAR A MISSÃO':'AGUARDANDO...',w/2,h*0.85+38);
+                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(r?'TOQUE PARA INICIAR MISSÃO':'AGUARDANDO...',w/2,h*0.85+38);
             }else{
                 let isR = this.net.players[this.net.uid]?.ready;
                 ctx.fillStyle=isR?'#e83':'#27a';ctx.fillRect(w/2-200,h*0.85,400,60);
-                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(isR?'AGUARDANDO LÍDER':'TOQUE PARA CONFIRMAR',w/2,h*0.85+38);
+                ctx.fillStyle='#fff';ctx.font='bold 22px "Russo One"';ctx.fillText(isR?'AGUARDANDO LÍDER...':'TOQUE PARA CONFIRMAR',w/2,h*0.85+38);
             }
         },
 
@@ -955,19 +1046,18 @@
             ctx.fillStyle='rgba(0,10,15,0.95)';ctx.fillRect(0,0,w,h);
             ctx.strokeStyle='rgba(0,255,204,0.2)';ctx.lineWidth=2;ctx.strokeRect(50,50,w-100,h-100);
             ctx.fillStyle='#00ffcc';ctx.textAlign='center';ctx.font='bold 30px "Russo One"';ctx.fillText('CALIBRAÇÃO DO PILOTO',w/2,h*0.3);
-            ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('Posicione as DUAS MÃOS na frente da câmera.',w/2,h*0.4);
-            ctx.fillStyle='#f1c40f';ctx.font='bold 16px Arial';ctx.fillText('Gire como um volante para curvar. Suba/Desça para controlar o nariz.',w/2,h*0.48);
-            ctx.fillStyle='#ff5555';ctx.fillText('Junte as mãos (Palma) para disparar Mísseis.',w/2,h*0.53);
+            ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('Coloque as DUAS MÃOS no ecrã como um volante.',w/2,h*0.4);
+            ctx.fillStyle='#f1c40f';ctx.font='bold 16px Arial';ctx.fillText('Gire para curvar. Suba/Desça as mãos para controlar o nariz.',w/2,h*0.48);
+            ctx.fillStyle='#ff5555';ctx.fillText('Junte as mãos (Bater palmas) para disparar Mísseis.',w/2,h*0.53);
             
-            let pct = 1 - (this.timer / 5.0);
+            let pct=1-(this.timer/5.0);
             ctx.fillStyle='#111';ctx.fillRect(w/2-200,h*0.65,400,15);
             
             if (this.pilot.active) {
                 ctx.fillStyle='#00ffcc';ctx.fillRect(w/2-200,h*0.65,400*pct,15);
-                ctx.fillText('MÃOS DETECTADAS - MANTENHA A POSIÇÃO (' + Math.ceil(this.timer) + 's)', w/2, h*0.75);
+                ctx.fillStyle='#00ffcc';ctx.fillText(`MANTENHA A POSIÇÃO (${Math.ceil(this.timer)}s)`, w/2, h*0.75);
             } else {
-                ctx.fillStyle='#f33';
-                ctx.fillText('AGUARDANDO MÃOS NA CÂMERA', w/2, h*0.75);
+                ctx.fillStyle='#f33';ctx.fillText('AGUARDANDO MÃOS NA CÂMERA...', w/2, h*0.75);
             }
         },
 
@@ -976,20 +1066,19 @@
             ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,w,h);
             ctx.textAlign='center';ctx.font='bold 40px "Russo One"';
             ctx.fillStyle=this.state==='VICTORY'?'#2ecc71':'#e74c3c';
-            ctx.fillText(this.state==='VICTORY'?'MISSÃO CUMPRIDA':'CAÇA ABATIDO',w/2,h/2);
+            ctx.fillText(this.state==='VICTORY'?'MISSÃO CUMPRIDA!':'CAÇA ABATIDO',w/2,h/2);
             ctx.fillStyle='#f1c40f';ctx.font='bold 30px Arial';
-            ctx.fillText(`RECOMPENSA: R$ ${this.session.cash}`,w/2,h/2+60);
+            ctx.fillText(`RECOMPENSA DE COMBATE: R$ ${this.session.cash}`,w/2,h/2+60);
         }
     };
 
-    // Registro Automático
     const register = () => {
         if (window.System?.registerGame) {
             window.System.registerGame('usarmy_flight_sim', 'Aero Strike: Combate', '✈️', Game, {
                 camera: 'user', camOpacity: 0.2,
                 phases: [
-                    { id: 'training', name: 'TREINAMENTO BÁSICO', desc: 'Calibre os controles e abata os drones.', mode: 'SINGLE', reqLvl: 1 },
-                    { id: 'coop', name: 'CO-OP ESQUADRÃO', desc: 'Junte-se a aliados contra a IA.', mode: 'COOP', reqLvl: 1 },
+                    { id: 'training', name: 'CAMPANHA SOLO', desc: 'Destrua as hordas e evolua o seu caça.', mode: 'SINGLE', reqLvl: 1 },
+                    { id: 'coop', name: 'CO-OP ESQUADRÃO', desc: 'Junte-se a aliados para abater o ACE.', mode: 'COOP', reqLvl: 1 },
                     { id: 'pvp', name: 'COMBATE PVP', desc: 'Batalha aérea multijogador.', mode: 'PVP', reqLvl: 1 }
                 ]
             });
