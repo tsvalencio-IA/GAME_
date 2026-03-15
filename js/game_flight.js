@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. FÍSICA CORRIGIDA, DOGFIGHT AI, SKYBOX 360, RADAR DE ALTITUDE.
+// STATUS: 100% COMPLETO. FÍSICA CORRIGIDA, MULTIPLAYER SYNC TOTAL. (SEM BLACKOUT)
 // =============================================================================
 
 (function() {
@@ -48,19 +48,16 @@
         project: function(objX, objY, objZ, camX, camY, camZ, pitch, yaw, roll, w, h) {
             let dx = objX - camX, dy = objY - camY, dz = objZ - camZ;
             
-            // CORREÇÃO CRÍTICA: Rotação Yaw (Direção) correta
             let cy = Math.cos(yaw), sy = Math.sin(yaw);
             let x1 = dx * cy - dz * sy;
             let z1 = dx * sy + dz * cy;
             
-            // CORREÇÃO CRÍTICA: Rotação Pitch (Bico) correta
             let cp = Math.cos(pitch), sp = Math.sin(pitch);
             let y2 = dy * cp - z1 * sp;
             let z2 = dy * sp + z1 * cp;
             
             if (z2 < 10) return { visible: false };
             
-            // Rotação Roll (Inclinação lateral)
             let cr = Math.cos(roll), sr = Math.sin(roll);
             let finalX = x1 * cr - y2 * sr;
             let finalY = x1 * sr + y2 * cr;
@@ -68,7 +65,7 @@
             let scale = Engine3D.fov / z2;
             return { 
                 x: (w/2) + (finalX * scale), 
-                y: (h/2) - (finalY * scale), // Canvas Y cresce para baixo, então subtraímos
+                y: (h/2) - (finalY * scale), 
                 s: scale, 
                 z: z2, 
                 visible: true 
@@ -147,7 +144,7 @@
     };
 
     // -----------------------------------------------------------------
-    // 3. ESTRUTURA PRINCIPAL V10.JS
+    // 3. ESTRUTURA PRINCIPAL
     // -----------------------------------------------------------------
     const Game = {
         state: 'INIT', lastTime: 0, mode: 'SINGLE',
@@ -198,7 +195,11 @@
                 });
             }
             
-            this.net.uid = (window.System && window.System.playerId) ? window.System.playerId : "p_" + Math.floor(Math.random()*9999);
+            // CORREÇÃO CRÍTICA DE IDENTIDADE (Prevenção de Clones no Firebase)
+            let baseUid = (window.System && window.System.playerId) ? window.System.playerId : "anon";
+            let sessionSuffix = Math.floor(Math.random() * 100000);
+            this.net.uid = baseUid + "_" + sessionSuffix;
+
             this.mode = (faseData && faseData.mode) ? faseData.mode : 'SINGLE';
             
             if (!this.keysBound) {
@@ -231,7 +232,7 @@
                                 self.net.sessionRef.child('host').set(self.net.uid);
                                 self.net.sessionRef.child('state').set('LOBBY'); 
                                 self.net.isHost = true;
-                                if(window.System && window.System.msg) window.System.msg("VOCÊ ASSUMIU O CONTROLE (RESET)!", "#00ffcc");
+                                if(window.System && window.System.msg) window.System.msg("VOCÊ ASSUMIU O CONTROLE!", "#00ffcc");
                             }
                             return;
                         }
@@ -275,40 +276,44 @@
             this.net.playersRef = this.net.sessionRef.child('players');
             this.net.sharedRef = this.net.sessionRef.child('shared');
             
+            // Garante que saio da sala quando fechar a aba
             this.net.playersRef.child(this.net.uid).onDisconnect().remove();
             
             let self = this;
             let uname = (window.Profile && window.Profile.username) ? window.Profile.username : 'PILOTO';
             
-            this.net.sessionRef.child('host').once('value').then(snap => {
-                let currentHost = snap.val();
-                if (!currentHost) {
-                    self.net.isHost = true;
-                    self.net.sessionRef.child('host').set(self.net.uid);
-                    self.net.sessionRef.child('state').set('LOBBY');
-                    self.net.sharedRef.set({ wave: 1, teamKills: 0 });
-                    self.net.playersRef.remove();
-                } else {
-                    self.net.isHost = false; 
-                }
-                
-                self.net.playersRef.child(self.net.uid).set({
-                    name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
-                });
+            // 1. Entra na sala IMEDIATAMENTE (Sem apagar ninguém)
+            self.net.playersRef.child(self.net.uid).set({
+                name: uname, ready: false, hp: 100, x: 0, y: 3000, z: 0, pitch: 0, yaw: 0, roll: 0, timestamp: Date.now(), firing: false, missilesFired: 0
             });
 
+            // 2. Ouve todos os jogadores (Sincronização e Gestão Segura de Host)
             this.net.playersRef.on('value', snap => { 
                 self.net.players = snap.val() || {}; 
+                
+                // SISTEMA DE DANO PVP (Eu apanho se outro me acertou no DB)
+                if (self.state === 'PLAYING' && self.net.players[self.net.uid]) {
+                    let remoteHp = self.net.players[self.net.uid].hp;
+                    if (remoteHp !== undefined && remoteHp < self.ship.hp) {
+                        self.ship.hp = remoteHp;
+                        if (window.Gfx && window.Gfx.shakeScreen) window.Gfx.shakeScreen(15);
+                    }
+                }
+
+                // GESTÃO SEGURA DE HOST (Não destroi a sala ao entrar)
                 this.net.sessionRef.child('host').once('value').then(hSnap => {
                     let currentHost = hSnap.val();
                     let connectedUIDs = Object.keys(self.net.players);
+                    
                     if (!currentHost || !self.net.players[currentHost]) {
                         if (connectedUIDs.length > 0) {
                             let newHost = connectedUIDs[0];
                             if (newHost === self.net.uid) {
                                 self.net.isHost = true;
                                 self.net.sessionRef.child('host').set(self.net.uid);
-                                if (!currentHost) {
+                                
+                                // APENAS SE EU FOR O ÚNICO NA SALA, eu limpo os dados antigos
+                                if (connectedUIDs.length === 1) {
                                     self.net.sessionRef.child('state').set('LOBBY');
                                     self.net.sharedRef.set({ wave: 1, teamKills: 0 });
                                 }
@@ -364,8 +369,10 @@
                     this.session.cash -= cost;
                     this.upgrades[type]++;
                     GameSfx.play('buy');
-                    if (window.DB && window.System && window.System.playerId) {
-                        window.DB.ref('users/' + window.System.playerId + '/coins').set(this.session.cash);
+                    // Apenas para atualizar visualmente, usa o Player ID Real
+                    let realId = window.System && window.System.playerId;
+                    if (window.DB && realId) {
+                        window.DB.ref('users/' + realId + '/coins').set(this.session.cash);
                     }
                 } else GameSfx.play('vulcan');
             };
@@ -377,6 +384,7 @@
             else if (y > h*0.85) {
                 if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.isHost && this.net.sessionRef) {
                     this.net.sessionRef.child('state').set('PLAYING');
+                    if (this.net.sharedRef) this.net.sharedRef.set({ wave: 1, teamKills: 0 }); // Zera o placar cooperativo ao começar
                 } else if (this.mode === 'SINGLE' || this.mode === 'FREE') { 
                     this.state = 'CALIBRATION'; this.timer = 5.0; 
                 }
@@ -400,7 +408,6 @@
                 if (dt > 0.05) dt = 0.05; 
                 if (dt < 0.001) return this.session.cash || 0;
 
-                // PROTEÇÃO ABSOLUTA ANTI-CRASH (Evita Tela de Recuperação)
                 if (!Number.isFinite(this.ship.vx)) this.ship.vx = 0;
                 if (!Number.isFinite(this.ship.vy)) this.ship.vy = 0;
                 if (!Number.isFinite(this.ship.vz)) this.ship.vz = 250;
@@ -503,7 +510,6 @@
                     });
                 }
 
-                // FÍSICA ARCADE-SIM TÁTICA 
                 let altitude = Math.max(0, Math.min(GAME_CONFIG.MAX_ALTITUDE, this.ship.y));
                 let tempK = 288.15 - 0.0065 * altitude; 
                 let airDensity = 1.225 * Math.pow(Math.max(0, 1 - 0.0000225577 * altitude), 4.2561); 
@@ -573,7 +579,6 @@
                 this.ship.vx += ax * dt;
                 this.ship.vz += az * dt;
 
-                // CORREÇÃO CRÍTICA FÍSICA E ALTITUDE (Física atrelada ao bico)
                 let targetVy = fwdY * this.ship.speed;
                 this.ship.vy += (targetVy - this.ship.vy) * 5.0 * dt;
 
@@ -614,7 +619,25 @@
                 this._updateMissiles(dt); 
                 this._cleanupFx();
 
+                // SYNC CONTINUO E SEGURO DO JOGADOR NO FIREBASE
+                if ((this.mode === 'PVP' || this.mode === 'COOP') && this.net.playersRef && this.net.uid) {
+                    if (performance.now() - this.net.lastSend > 100) {
+                        this.net.playersRef.child(this.net.uid).update({
+                            x: this.ship.x, y: this.ship.y, z: this.ship.z,
+                            pitch: this.ship.pitch, yaw: this.ship.yaw, roll: this.ship.roll,
+                            vx: this.ship.vx, vy: this.ship.vy, vz: this.ship.vz,
+                            timestamp: Date.now()
+                        });
+                        this.net.lastSend = performance.now();
+                    }
+                }
+
                 if (this.ship.hp <= 0 && this.state !== 'GAMEOVER') this._endGame('GAMEOVER');
+
+                // CORREÇÃO PVP: Se fez 1 kill, ganha.
+                if (this.mode === 'PVP' && this.session.kills >= 1 && this.state === 'PLAYING') {
+                    this._endGame('VICTORY');
+                }
 
                 this._draw(ctx, w, h);
                 return this.session.cash + this.session.kills * 10;
@@ -659,7 +682,6 @@
                 
                 if (rightWrist && leftWrist) {
                     inputDetected = true;
-                    // CÁLCULO E INVERSÃO DE ESPELHO CORRETA (Direita/Esquerda)
                     let rx = (1 - ((rightWrist.x || 0) / 640)) * w; 
                     let ry = ((rightWrist.y || 0) / 480) * h;
                     let lx = (1 - ((leftWrist.x || 0) / 640)) * w; 
@@ -673,7 +695,6 @@
                         this.pilot.baseY = this.pilot.baseY * 0.95 + avgY * 0.05;
                         if (!this.pilot.baseY) this.pilot.baseY = avgY;
                     } else {
-                        // LEVANTAR OS BRAÇOS = SUBIR O BICO DO AVIÃO E A ALTITUDE
                         let deltaY = avgY - this.pilot.baseY;
                         let safeH = h > 0 ? h : 100; 
                         let pitchInput = -deltaY / (safeH * 0.15); 
@@ -815,7 +836,6 @@
             });
         },
 
-        // CORREÇÃO CRÍTICA DE IA: Modo "Dogfight / TAIL" e perseguição ativa
         _updateAI: function(dt) {
             this.entities.forEach(e => {
                 if (!e.active || !(e.type && (e.type.startsWith('jet') || e.type === 'boss'))) return;
@@ -849,7 +869,6 @@
                     else if (minDist < 2000) e.state = 'EVADE'; 
                     else if (minDist > 12000) e.state = 'INTERCEPT';
                     else {
-                        // IA Tenta ir para trás do jogador (as "6 horas") em 40% das vezes
                         e.state = Math.random() > 0.4 ? 'TAIL' : 'ENGAGE';
                     }
                     e.stateTimer = 1.0 + Math.random() * 1.5; 
@@ -986,13 +1005,21 @@
                             break;
                         }
                     }
+                    
+                    // PVP UPDATE: O outro jogador leva dano real!
                     if (this.mode==='PVP' && b.life>0 && this.net.players) {
                         Object.keys(this.net.players).forEach(uid => {
                             if (uid!==this.net.uid && this.net.players[uid]?.hp>0 && Math.hypot(b.x-this.net.players[uid].x, b.y-this.net.players[uid].y, b.z-this.net.players[uid].z)<150) {
                                 b.life=0;
                                 this._fx(this.net.players[uid].x,this.net.players[uid].y,this.net.players[uid].z,'#f90',4,50);
-                                if (window.DB && window.DB.ref && this.net.isHost) {
-                                    window.DB.ref(`sessions/flight_${this.mode}/players/${uid}/hp`).set(this.net.players[uid].hp-10);
+                                if (window.DB && window.DB.ref) {
+                                    let newHp = this.net.players[uid].hp - 10;
+                                    window.DB.ref(`sessions/flight_${this.mode}/players/${uid}/hp`).set(newHp);
+                                    if (newHp <= 0 && this.state === 'PLAYING') {
+                                        this.session.kills++;
+                                        this.session.cash += 500;
+                                        this.session.xp += 100;
+                                    }
                                 }
                             }
                         });
@@ -1019,10 +1046,16 @@
                     
                     if (dist < 100) { 
                         if (m.target.isPlayer && this.mode==='PVP') {
-                            if (window.DB && window.DB.ref) window.DB.ref(`sessions/flight_${this.mode}/players/${m.target.uid}/hp`).set(m.target.hp-50);
+                            if (window.DB && window.DB.ref) {
+                                let newHp = m.target.hp - 50;
+                                window.DB.ref(`sessions/flight_${this.mode}/players/${m.target.uid}/hp`).set(newHp);
+                                if (newHp <= 0 && this.state === 'PLAYING') {
+                                    this.session.kills++;
+                                    this.session.cash += 500;
+                                    this.session.xp += 100;
+                                }
+                            }
                             this._fx(m.target.x,m.target.y,m.target.z,'#f33',40,300);
-                            this.session.cash += 500;
-                            this.session.xp += 100;
                         } else if (!m.target.isPlayer) {
                             if (this.mode === 'SINGLE' || this.mode === 'FREE' || this.net.isHost) {
                                 m.target.hp -= 400 + (this.upgrades.missiles * 100);
@@ -1107,9 +1140,11 @@
                 this.net.sharedRef.update({ teamKills: teamKills });
             }
 
-            if (window.DB && window.System && window.System.playerId) {
-                window.DB.ref('users/' + window.System.playerId + '/coins').set(this.session.cash);
-                window.DB.ref('users/' + window.System.playerId + '/xp').transaction(current => (current || 0) + this.session.xp);
+            // Garante uso do ID Real do Banco de Dados para gravar os ganhos
+            let realId = window.System && window.System.playerId;
+            if (window.DB && realId) {
+                window.DB.ref('users/' + realId + '/coins').set(this.session.cash);
+                window.DB.ref('users/' + realId + '/xp').transaction(current => (current || 0) + this.session.xp);
             }
         },
 
@@ -1131,7 +1166,6 @@
             
             this._drawWorld(ctx,w,h);
             this._drawEntities(ctx,w,h);
-            this._drawPilotFX(ctx, w, h); 
             this._drawHUD(ctx,w,h);
             this._drawCockpit(ctx,w,h);
             ctx.restore();
@@ -1175,16 +1209,14 @@
             }
         },
 
-        // CORREÇÃO CRÍTICA DO VISUAL (Céu Seguro e Mundo em 360 Graus sem Fundo Preto)
         _drawWorld: function(ctx,w,h) {
-            let safeH = h > 0 ? h : 100; // Escudo final contra divisões e gradientes por 0
+            let safeH = h > 0 ? h : 100;
             let hy = Math.sin(this.ship.pitch || 0) * safeH * 1.5;
             
             ctx.save();
             ctx.translate(w/2, safeH/2);
             ctx.rotate(-(this.ship.roll || 0));
             
-            // CÉU REALISTA E SEGURO (Impede IndexSizeError no Gradient)
             let skyY0 = -safeH * 4;
             let skyY1 = hy;
             if (Math.abs(skyY0 - skyY1) < 1) skyY1 = skyY0 + 1; 
@@ -1194,7 +1226,6 @@
             ctx.fillStyle = sG;
             ctx.fillRect(-w*3, -safeH*4, w*6, hy + safeH*4);
             
-            // CHÃO VERDE TÁTICO E SEGURO
             let groundY0 = hy;
             let groundY1 = safeH * 4;
             if (Math.abs(groundY0 - groundY1) < 1) groundY1 = groundY0 + 1;
@@ -1205,7 +1236,6 @@
             ctx.fillRect(-w*3, hy, w*6, safeH*4);
             ctx.restore();
 
-            // SOL DIRECIONAL ABSOLUTO 3D
             let sunP = Engine3D.project(
                 this.ship.x, this.ship.y + 50000, this.ship.z + 200000, 
                 this.ship.x, this.ship.y, this.ship.z, 
@@ -1219,7 +1249,6 @@
                  ctx.shadowBlur = 0;
             }
 
-            // GRID TÁTICO: Renderização de Profundidade Expandida
             ctx.strokeStyle='rgba(40, 150, 40, 0.3)'; ctx.lineWidth=2; ctx.beginPath();
             let st=4000;
             let sx=Math.floor((this.ship.x||0)/st)*st - st*15;
@@ -1241,7 +1270,6 @@
             }
             ctx.stroke();
 
-            // PRÉDIOS E CENÁRIO 3D CORRETO
             this.scenery.forEach(s => {
                 let baseP = Engine3D.project(s.x, 0, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
                 let topP = Engine3D.project(s.x, s.h, s.z, this.ship.x, this.ship.y, this.ship.z, this.ship.pitch, this.ship.yaw, this.ship.roll, w, safeH);
@@ -1311,16 +1339,6 @@
                 else if(d.t==='m'){ctx.fillStyle=o.isEnemy?'#ff3300':'#ffffff';ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2,6*s),0,Math.PI*2);ctx.fill();}
                 else if(d.t==='f'){ctx.globalCompositeOperation='lighter';ctx.globalAlpha=Math.max(0,o.life);ctx.fillStyle=o.c;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2,o.size*s),0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';}
             });
-        },
-
-        _drawPilotFX: function(ctx, w, h) {
-            if (this.ship.gForce > 7.0) {
-                let intensity = Math.min(1.0, (this.ship.gForce - 7.0) / 5.0); 
-                ctx.fillStyle = `rgba(0, 0, 0, ${intensity * 0.7})`; ctx.fillRect(0,0,w,h);
-            } else if (this.ship.gForce < -2.5) {
-                let intensityN = Math.min(1.0, (Math.abs(this.ship.gForce) - 2.5) / 3.0);
-                ctx.fillStyle = `rgba(231, 76, 60, ${intensityN * 0.5})`; ctx.fillRect(0,0,w,h);
-            }
         },
         
         _drawHUD: function(ctx,w,h){
@@ -1428,7 +1446,6 @@
                     ctx.fillStyle=col; 
                     ctx.beginPath();
                     
-                    // CORREÇÃO RADAR: Sistema de Coordenadas Invertido Corrigido (Inimigo ACIMA = Seta para CIMA)
                     if (dy > 500) { 
                         ctx.moveTo(px, py - 6); ctx.lineTo(px - 5, py + 4); ctx.lineTo(px + 5, py + 4); 
                         ctx.fill(); 
