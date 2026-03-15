@@ -1,7 +1,7 @@
 // =============================================================================
 // AERO STRIKE WAR: TACTICAL YOKE SIMULATOR (AAA PROFESSIONAL EVOLUTION)
 // ARQUITETO: SENIOR GAME ENGINE ARCHITECT
-// STATUS: 100% COMPLETO. FÍSICA CORRIGIDA, MULTIPLAYER SYNC TOTAL. (SEM BLACKOUT, YOKE PRECISO)
+// STATUS: 100% COMPLETO. FÍSICA CORRIGIDA, MULTIPLAYER SYNC, YOKE BALANCEADO (0.09).
 // =============================================================================
 
 (function() {
@@ -688,10 +688,8 @@
                         let deltaY = avgY - this.pilot.baseY;
                         let safeH = h > 0 ? h : 100; 
                         
-                        // CORREÇÃO CRÍTICA DE SENSIBILIDADE DO YOKE
-                        // Reduzido de 0.15 para 0.05. Agora, mover a mão 5% da altura da tela 
-                        // para cima ou para baixo garante 100% da força de subida/descida.
-                        let pitchInput = -deltaY / (safeH * 0.05); 
+                        // FIX V35: PONTO DOCE DO YOKE. 0.09 é o balanço exato entre cansaço (0.15) e jitter (0.05)
+                        let pitchInput = -deltaY / (safeH * 0.09); 
                         
                         trgPitch = Math.max(-1.0, Math.min(1.0, pitchInput || 0)); 
                     }
